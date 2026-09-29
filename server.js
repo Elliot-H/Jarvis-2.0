@@ -206,13 +206,15 @@ function readText(file, fallback = '') {
 const CHAT_MODEL = process.env.JARVIS_MODEL || 'haiku';
 const WORK_MODEL = process.env.JARVIS_CODE_MODEL || 'sonnet';
 const WORK_WORDS = /\b(fix|repair|debug|redo|rewrite|deploy|roll(ed)?\b.*\bback|rollback|revert|undo|yourself|reactor|hud|telemetry|wake ?word|your (own )?(code|screen|voice|mic|microphone|settings?|personality|briefing|display|look|colou?rs?|font|layout|greeting))\b/i;
+const SURE_WORK = /\b(roll ?back|revert|undo (that|your last|the last) (change|update)|deploy (it|that|the change)|(fix|repair|debug) (yourself|your (own )?(code|screen|mic|microphone|voice|display))|change your (own )?code)\b/i;
 let escalate = false;
 handlers.use_workshop = async () => { escalate = true; return 'Switching to workshop mode. End your turn now without replying.'; };
 const modeServer = createSdkMcpServer({ alwaysLoad: true, name: 'mode', version: '1.0.0', tools: sdkTools(MODE_TOOLS) });
 function pickMode(text, origin) {
   if (process.env.JARVIS_ALWAYS_WORK === '1') return 'work';
   if (selfRepair.active()) return 'work';          // mid-change, or "yes, deploy"
-  if (origin === 'user' && WORK_WORDS.test(text)) return 'work';
+  // On OpenRouter the talk model decides (use_workshop); only unmistakable self-repair phrases skip straight to the workshop.
+  if (origin === 'user' && (BRAIN === 'openrouter' ? SURE_WORK.test(text) : WORK_WORDS.test(text))) return 'work';
   return 'chat';
 }
 
@@ -359,7 +361,9 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   if (origin === 'user') { remember('user', text); remember('jarvis', finalText); }
 
   // Plain-English versions of common failures
-  if (/credit balance is too low/i.test(finalText)) finalText = 'I am out of Anthropic credit, sir. Top it up at console dot anthropic dot com, billing.';
+  if (/credit balance is too low/i.test(finalText)) finalText = mode === 'work' && BRAIN === 'openrouter'
+    ? 'That needed my workshop, sir, the part that changes my own code. It runs on Anthropic, and that account is out of credit. Everyday questions still work.'
+    : 'I am out of Anthropic credit, sir. Top it up at console dot anthropic dot com, billing.';
 
   broadcast({ type: 'say', text: finalText, speak: spoken });
   return finalText;
