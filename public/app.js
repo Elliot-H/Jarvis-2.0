@@ -262,7 +262,7 @@
     rec = new SR();
     rec.continuous = true; rec.interimResults = true; rec.lang = params.get('lang') || 'en-US';
     rec.onstart = () => { recOn = true; };
-    rec.onend = () => { recOn = false; if (recWanted) setTimeout(() => { try { rec.start(); } catch {} }, 250); };
+    rec.onend = () => { recOn = false; if (pending) flush(); uttStart = 0; lastLen = 0; if (recWanted) setTimeout(() => { try { rec.start(); } catch {} }, 250); };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
       const why = {
@@ -289,43 +289,79 @@
     stopSpeaking(false);
     mode = 'active'; setState('listening'); chime(true);
     caption('', {});
+    clearTimeout(uttTimer); pending = null; uttStart = lastLen;
     recWanted = true; if (!recOn) try { rec.start(); } catch {}
     clearTimeout(activeTimer);
-    activeTimer = setTimeout(() => { if (mode === 'active') { mode = 'passive'; setState('idle'); chime(false); } }, 8000);
+    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); chime(false); } }, 8000);
   }
 
-  function onSpeech(e) {
-    let interim = '', finals = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const r = e.results[i];
-      if (r.isFinal) finals += r[0].transcript; else interim += r[0].transcript;
+  // ---- utterance assembly ----
+  // Phones send many small "final" chunks per sentence (sometimes repeating earlier words),
+  // so we stitch them together and only act once you've been quiet for SILENCE_MS.
+  const SILENCE_MS = MOBILE ? 1600 : 1200;
+  let uttStart = 0, lastLen = 0, uttTimer = null, pending = null;
+  function joinResults(results, from) {
+    const parts = [];
+    for (let i = from; i < results.length; i++) {
+      const t = (results[i][0]?.transcript || '').trim();
+      if (!t) continue;
+      const last = parts[parts.length - 1];
+      const tl = t.toLowerCase(), ll = last?.toLowerCase();
+      if (last && tl.startsWith(ll)) parts[parts.length - 1] = t;      // phone repeated + extended
+      else if (last && ll.startsWith(tl)) continue;                    // phone repeated a shorter copy
+      else parts.push(t);
     }
-    const heard = (finals || interim).trim();
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  function findWake(text) {
+    const lower = text.toLowerCase();
+    for (const w of WAKE_VARIANTS()) {
+      const m = lower.match(new RegExp('\\b' + w + '\\b'));
+      if (m) return { i: m.index, len: w.length };
+    }
+    return null;
+  }
+  function flush() {
+    clearTimeout(uttTimer); uttTimer = null;
+    const p = pending; pending = null;
+    uttStart = lastLen;
+    if (!p) return;
+    if (p.wakeOnly) return goActive();
+    const text = p.text.replace(/^[\s,.!?]+/, '').trim();
+    if (!text || text.length < 2) return goActive();
+    if (p.fromWake && WAKE_UP.test(text)) { chime(true); addLog('user', 'Jarvis, ' + text); send({ type: 'wake' }); setState('thinking'); return; }
+    submit(text);
+  }
+  function onSpeech(e) {
+    lastLen = e.results.length;
+    if (uttStart > lastLen) uttStart = 0;
+    const heard = joinResults(e.results, uttStart);
     if (!heard) return;
 
     if (mode === 'active') {
       clearTimeout(activeTimer);
       caption(heard, { typed: false, pre: 'YOU' });
-      if (finals.trim()) { mode = 'passive'; submit(finals.trim()); }
-      else activeTimer = setTimeout(() => { if (mode === 'active') { mode = 'passive'; setState('idle'); } }, 6000);
-      return;
+      pending = { text: heard };
+    } else {
+      const hit = findWake(heard);
+      if (!hit) {
+        // background chatter: forget finished chunks so they don't pile up
+        let lastFinal = -1;
+        for (let i = uttStart; i < e.results.length; i++) if (e.results[i].isFinal) lastFinal = i;
+        if (lastFinal >= 0 && !pending) uttStart = lastFinal + 1;
+        return;
+      }
+      if (state !== 'listening') setState('listening');
+      const after = heard.slice(hit.i + hit.len);
+      caption(after.trim() || '…', { typed: false, pre: 'YOU' });
+      pending = after.trim() ? { text: after, fromWake: true } : { wakeOnly: true };
     }
-
-    // passive: look for the wake word
-    const lower = heard.toLowerCase();
-    const hit = WAKE_VARIANTS().map(w => ({ w, i: lower.search(new RegExp('\\b' + w + '\\b')) })).find(x => x.i >= 0);
-    if (!hit) return;
-    if (state !== 'listening') { setState('listening'); }
-    const after = heard.slice(hit.i + hit.w.length).replace(/^[\s,.!?]+/, '');
-    caption(after || '…', { typed: false, pre: 'YOU' });
-    if (!finals.trim()) return; // wait for the full sentence
-    if (!after || after.length < 2) return goActive();
-    if (WAKE_UP.test(after)) { chime(true); send({ type: 'wake' }); addLog('user', heard); return; }
-    submit(after);
+    clearTimeout(uttTimer);
+    uttTimer = setTimeout(flush, pending?.wakeOnly ? 900 : SILENCE_MS);
   }
 
   function submit(text) {
-    clearTimeout(activeTimer);
+    clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); send({ type: 'interrupt' }); setState('idle'); return; }
     stopSpeaking(false);
