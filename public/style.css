@@ -133,7 +133,7 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
 
 /* ---------- panels ---------- */
 .panels{position:fixed;z-index:6;top:96px;left:50%;transform:translateX(-50%);width:min(560px,44vw);display:flex;flex-direction:column;gap:12px;pointer-events:none}
-.panel{pointer-events:auto;border:1px solid var(--c);background:rgba(3,16,28,.92);box-shadow:var(--glow);animation:pop .4s;
+.panel{pointer-events:auto;border:1px solid var(--c);background:#03101c;box-shadow:var(--glow);animation:pop .4s;
   clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
 .panel h3{font-family:Orbitron;font-size:12px;letter-spacing:.25em;color:var(--c);padding:10px 16px;border-bottom:1px solid var(--cdim);display:flex;justify-content:space-between}
 .panel h3 button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:14px}
@@ -167,6 +167,9 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
   .core{order:-1;height:62vw;min-height:300px;max-height:460px}
   .left .frame:first-child{flex:none}
   .col.right .frame.grow{height:280px;flex:none}
-  .panels{width:calc(100% - 32px);top:76px}
-  .bottom{background:linear-gradient(0deg,rgba(1,4,9,.95) 60%,transparent);padding:24px 16px 14px}
+  .panels{width:calc(100% - 32px);top:76px;max-height:calc(100dvh - 76px - 190px);overflow-y:auto;overscroll-behavior:contain;pointer-events:auto}
+  .panel .pb{max-height:none}
+  .bottom{background:#01040a;box-shadow:0 -28px 28px #01040a;padding:10px 16px 14px}
+  .caption{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .grid{padding-bottom:220px}
 }
