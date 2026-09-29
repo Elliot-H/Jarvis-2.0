@@ -40,6 +40,9 @@ The wake word works while the Jarvis tab is open and the screen is on. Phones st
 
 ## Speed and cost
 
+Measured costs: a normal question ≈ $0.005, a web-search question ≈ $0.03, a self-change (edit + test + deploy) ≈ $0.20. Opening the app and the greeting cost nothing.
+There is a hard daily cap (`DAILY_BUDGET_USD`, default $2). When it's reached Jarvis says so and stops making AI requests until tomorrow. Today's spend shows on the HUD after each answer.
+
 Everyday talk uses the fastest, cheapest model (Haiku) with a short prompt, so answers take about 2–3 seconds. When you ask Jarvis to change or fix itself, it hands off to a stronger model (Sonnet) for that job only. Override either with `JARVIS_MODEL` / `JARVIS_CODE_MODEL` in Railway → Variables.
 
 ## Self-repair

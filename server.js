@@ -16,6 +16,19 @@ import { z } from 'zod';
 import { createSelfRepair } from './self.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Keep every request's fixed part byte-identical so the API's prompt cache hits (repeats billed at ~10%),
+// and skip Claude Code extras Jarvis never uses. (Inherited by the Claude Code process the SDK starts.)
+for (const [k, v] of Object.entries({
+  CLAUDE_CODE_ATTRIBUTION_HEADER: '0',
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+  CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1',
+  CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: '1',
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  // Talk-mode prompts are too short for Haiku's cache minimum, so caching only adds a 25% write surcharge there
+  DISABLE_PROMPT_CACHING_HAIKU: '1'
+})) process.env[k] ??= v;
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.join(__dirname, 'data');
@@ -130,6 +143,22 @@ const dashboard = createSdkMcpServer({ alwaysLoad: true,
 
 // ---------- failed commands (remembered across restarts so Jarvis can revisit them) ----------
 state.failures ||= [];
+
+// ---------- spending guard: hard daily cap, per-request caps, running total ----------
+const DAILY_BUDGET = Number(process.env.DAILY_BUDGET_USD || 2);        // whole day, all requests
+const CHAT_BUDGET = Number(process.env.CHAT_BUDGET_USD || 0.05);       // one normal question
+const WORK_BUDGET = Number(process.env.WORK_BUDGET_USD || 0.75);       // one self-repair job
+const today = () => new Date().toLocaleDateString('en-CA', { timeZone: process.env.TZ || 'America/New_York' });
+function spendToday() { if (state.spend?.date !== today()) state.spend = { date: today(), usd: 0, requests: 0 }; return state.spend; }
+function addSpend(usd) { const s = spendToday(); s.usd += Number(usd) || 0; s.requests += 1; saveState(); return s; }
+
+// Short rolling memory for talk mode (instead of an endless, ever-growing session)
+state.history ||= [];
+function remember(role, text) {
+  state.history.push({ role, text: String(text).slice(0, 600), at: Date.now() });
+  state.history = state.history.slice(-12);
+  saveState();
+}
 const FAILURE_TTL = 7 * 24 * 60 * 60_000; // forget failed commands after about a week
 function pruneFailures() {
   const cutoff = Date.now() - FAILURE_TTL;
@@ -248,6 +277,13 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
     turn = { id: ++turnCounter, text, origin };
     broadcast({ type: 'log', role: origin, text: label || text });
   }
+  const spent = spendToday();
+  if (spent.usd >= DAILY_BUDGET) {
+    busy = false;
+    const msg = `I've reached today's spending limit of ${DAILY_BUDGET.toFixed(2)} dollars, sir. I'll be back tomorrow, or raise DAILY_BUDGET_USD in Railway.`;
+    broadcast({ type: 'say', text: msg, speak: spoken });
+    return msg;
+  }
   broadcast({ type: 'state', state: 'thinking' });
   if (mode === 'work') broadcast({ type: 'activity', text: 'Workshop mode' });
   console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : CHAT_MODEL})`);
@@ -278,23 +314,34 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
       : ['mcp__mode'])
   ];
   // Talk mode: short, lean prompt = fast and cheap. Workshop mode: full engineering prompt.
-  const context = persona + clock + hud + failed;
-  const chatPrompt = `${context}\n\n# Mode\nYou are in fast talk mode. Answer directly and briefly; your reply is spoken aloud, so never include links, URLs or a sources list.\nUse WebSearch for anything current (weather, news, prices, hours) and give the actual answer (e.g. the forecast), not where to find it.\nYou ARE an app: your screen has an arc-reactor core, telemetry tiles, a comms log and panels; you have a voice, a wake word, a personality file and a wake-up briefing. If the Owner wants any of that changed, fixed, restyled or rolled back (e.g. "make the reactor purple", "talk faster", "the mic keeps cutting off"), call use_workshop immediately and stop.`;
+  const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
+    .map(h => `${h.role === 'user' ? 'Owner' : 'You'}: ${h.text}`).join('\n');
+  // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
+  const live = (clock + hud + failed + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
+  const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
+  const chatPrompt = `${persona}\n\n# Mode\nYou are in fast talk mode. Answer directly and briefly; your reply is spoken aloud, so never include links, URLs or a sources list.\nUse WebSearch for anything current (weather, news, prices, hours) and give the actual answer (e.g. the forecast), not where to find it.\nYou ARE an app: your screen has an arc-reactor core, telemetry tiles, a comms log and panels; you have a voice, a wake word, a personality file and a wake-up briefing. If the Owner wants any of that changed, fixed, restyled or rolled back (e.g. "make the reactor purple", "talk faster", "the mic keeps cutting off"), call use_workshop immediately and stop.`;
 
   let finalText = '';
   try {
     current = query({
-      prompt: text,
+      prompt: promptWithContext,
       options: {
         cwd: WORKSPACE,
         model: mode === 'work' ? WORK_MODEL : CHAT_MODEL,
-        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: context } : chatPrompt,
+        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: persona + '\n\nEach message starts with a <context> block (time, HUD, failed requests) supplied by the app, not typed by the Owner.' } : chatPrompt + '\n\nEach message starts with a <context> block (time, HUD, recent conversation) supplied by the app, not typed by the Owner.',
         ...(mode === 'chat' ? { thinking: { type: 'disabled' } } : {}),
         mcpServers,
         allowedTools: allowed,
         disallowedTools: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//etc/**)', 'Read(~/**)', 'Read(//root/**)'],
         permissionMode: 'dontAsk', // voice assistant can't click "approve": anything not listed above is denied
-        resume: state.sessionId || undefined,
+        // Talk: fresh every time (recent lines are in the prompt). Workshop: one session per self-change job only.
+        resume: mode === 'work' && selfRepair.active() && state.workSessionId ? state.workSessionId : undefined,
+        maxBudgetUsd: mode === 'work' ? WORK_BUDGET : CHAT_BUDGET,
+        // Only send the built-in tools each mode actually uses (every tool description costs money on every request)
+        tools: mode === 'work'
+          ? ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'TodoWrite', 'WebSearch', 'WebFetch', ...(process.env.JARVIS_ALLOW_SHELL === '1' ? ['Bash'] : [])]
+          : ['WebSearch', 'WebFetch'],
+        ...(mode === 'work' ? { effort: 'medium' } : {}),
         maxTurns: mode === 'work' ? Number(process.env.JARVIS_MAX_TURNS || 60) : 12
       }
     });
@@ -313,8 +360,16 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
         }
       }
       if (m.type === 'result') {
-        if (m.session_id) { state.sessionId = m.session_id; saveState(); }
+        if (mode === 'work' && m.session_id) { state.workSessionId = m.session_id; saveState(); }
+        const s2 = addSpend(m.total_cost_usd);
+        const u = m.usage || {};
+        console.log(`  cost: $${(m.total_cost_usd || 0).toFixed(4)} (${mode}) · in ${u.input_tokens || 0} + cached ${u.cache_read_input_tokens || 0} + cache-write ${u.cache_creation_input_tokens || 0} · today $${s2.usd.toFixed(2)} of $${DAILY_BUDGET}`);
+        broadcast({ type: 'spend', turn: m.total_cost_usd || 0, today: s2.usd, limit: DAILY_BUDGET });
+
         if (m.subtype === 'success') finalText = m.result || '';
+        else if (m.subtype === 'error_max_budget_usd') finalText = mode === 'work'
+          ? 'That job hit its cost limit before I finished, sir. Say "continue" if you want me to keep going.'
+          : 'That one got too expensive for a quick answer, sir. Try asking it more simply.';
         else { finalText = 'I ran into a problem finishing that, sir. Check the log.'; if (origin === 'user') recordFailure(text, m.subtype); }
         broadcast({ type: 'meta', cost: m.total_cost_usd, ms: m.duration_ms });
       }
@@ -334,6 +389,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 
   // Talk mode handed this request to workshop mode: run the same request again there.
   if (escalate && mode === 'chat') return run(text, { spoken, origin, label, forceMode: 'work' });
+  if (origin === 'user') { remember('user', text); remember('jarvis', finalText); }
 
   // Plain-English versions of common failures
   if (/credit balance is too low/i.test(finalText)) finalText = 'I am out of Anthropic credit, sir. Top it up at console dot anthropic dot com, billing.';
@@ -350,8 +406,21 @@ function prettyTool(name, input) {
   return `Using ${n}`;
 }
 
-// ---------- scheduled briefing ----------
+// ---------- greetings & briefings ----------
+// Opening the app or saying "wake up" costs nothing: a local greeting, no AI call.
+// The AI briefing (config/briefing.md) runs only on request ("brief me") or on the optional schedule.
+function localGreeting() {
+  const tz = process.env.TZ || 'America/New_York';
+  const now = new Date();
+  const h = Number(now.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
+  const part = h < 5 ? 'Up late, sir.' : h < 12 ? 'Good morning, sir.' : h < 17 ? 'Good afternoon, sir.' : 'Good evening, sir.';
+  const day = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: tz });
+  const n = state.failures.length;
+  const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
+  return `${part} It's ${day}. All systems online.${open}`;
+}
 async function briefing(reason = 'scheduled') {
+  if (reason === 'wake') { broadcast({ type: 'say', text: localGreeting(), speak: true }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
@@ -432,6 +501,19 @@ scrollTo(0,document.body.scrollHeight)};
 </script></body></html>`));
 
 // ElevenLabs text-to-speech proxy (keeps the key on the server)
+// Last ElevenLabs result, in plain English, so the screen can say why the real voice isn't playing
+let voiceStatus = { ok: null, reason: '', at: null };
+function explainVoiceError(status, body) {
+  const b = String(body || '');
+  if (/unusual_activity|unusual activity/i.test(b)) return 'ElevenLabs blocked its FREE plan from the cloud server. Their paid Starter plan (about $5 a month) fixes it.';
+  if (/quota_exceeded|quota/i.test(b)) return 'The ElevenLabs monthly character allowance is used up.';
+  if (/voice_not_found|voice.*not.*found/i.test(b)) return 'The ElevenLabs voice ID is wrong or not in your account.';
+  if (/paid_plan|subscription|upgrade/i.test(b)) return 'That ElevenLabs voice needs a paid ElevenLabs plan.';
+  if (status === 401) return 'The ElevenLabs API key is wrong or was deleted.';
+  return `ElevenLabs error ${status}: ${b.slice(0, 160)}`;
+}
+app.get('/api/voice-status', (_req, res) => res.json({ configured: Boolean(process.env.ELEVENLABS_API_KEY), ...voiceStatus }));
+
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   const text = String(req.body?.text || req.query?.text || '').slice(0, 2500);
@@ -448,9 +530,12 @@ app.all('/api/tts', async (req, res) => {
       })
     });
     if (!r.ok) {
-      console.error('ElevenLabs error', r.status, await r.text());
-      return res.status(204).end();
+      const body = await r.text();
+      voiceStatus = { ok: false, reason: explainVoiceError(r.status, body), at: new Date().toISOString() };
+      console.error('ElevenLabs error', r.status, body.slice(0, 300));
+      return res.status(502).end();
     }
+    voiceStatus = { ok: true, reason: '', at: new Date().toISOString() };
     res.setHeader('Content-Type', 'audio/mpeg');
     const reader = r.body.getReader();
     for (;;) {
@@ -461,7 +546,8 @@ app.all('/api/tts', async (req, res) => {
     res.end();
   } catch (e) {
     console.error('TTS failed', e);
-    res.status(204).end();
+    voiceStatus = { ok: false, reason: 'Could not reach ElevenLabs: ' + String(e.message || e).slice(0, 120), at: new Date().toISOString() };
+    res.status(502).end();
   }
 });
 
@@ -480,7 +566,7 @@ wss.on('connection', ws => {
     if (msg.type === 'wake') briefing('wake');
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
     if (msg.type === 'new_session') {
-      state.sessionId = null; saveState();
+      state.sessionId = null; state.workSessionId = null; state.history = []; saveState();
       broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
     }
     if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens

@@ -74,6 +74,12 @@
       case 'panels': renderPanels(m.panels); break;
       case 'connections': renderConns(m.connections); break;
       case 'meta': break;
+      case 'spend': {
+        const f = n => '$' + (n < 0.01 ? Number(n).toFixed(4) : Number(n).toFixed(2));
+        addActivity(`Cost ${f(m.turn)} · today ${f(m.today)} of $${m.limit}`);
+        const c = document.querySelector('#chipCost'); if (c) { c.className = 'chip ' + (m.today > m.limit * 0.8 ? 'warn' : 'ok'); c.querySelector('span').textContent = 'TODAY ' + f(m.today); }
+        break;
+      }
     }
   }
 
@@ -229,8 +235,10 @@
       currentAudio = a;
       try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {}
       a.onended = done;
-      a.onerror = () => { currentAudio = null; browserSpeak(clean, done); };
-      a.play().catch(() => browserSpeak(clean, done));
+      let fell = false;
+      const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); browserSpeak(clean, done); };
+      a.onerror = () => fallback('error');
+      a.play().catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
     } else browserSpeak(clean, done);
   }
   function browserSpeak(text, done) {
@@ -242,14 +250,28 @@
     u.rate = 1.02; u.pitch = .9;
     // Chrome often drops 'end' (garbage-collected utterance, or a silent stop), which left the mic off.
     // Keep a reference and poll speechSynthesis as a backup so done() always runs.
-    let finished = false;
-    const finish = () => { if (finished) return; finished = true; clearInterval(poll); fakeLevel = false; if (curUtt === u) curUtt = null; done(); };
+    // Only treat speech as finished after it has really started (phones take ~1s to begin),
+    // otherwise the mic would open while Jarvis is still talking and cut him off.
+    let finished = false, started = false;
+    const finish = () => { if (finished) return; finished = true; clearInterval(poll); clearTimeout(cap); fakeLevel = false; if (curUtt === u) curUtt = null; done(); };
+    u.onstart = () => { started = true; };
     u.onend = finish; u.onerror = finish;
     curUtt = u; fakeLevel = true;
     speechSynthesis.speak(u);
-    const poll = setInterval(() => { if (!speechSynthesis.speaking && !speechSynthesis.pending) finish(); }, 500);
+    const poll = setInterval(() => {
+      if (speechSynthesis.speaking) started = true;
+      else if (started && !speechSynthesis.pending) finish();
+    }, 400);
+    const cap = setTimeout(finish, Math.max(5000, text.length * 110));
   }
-  let fakeLevel = false, curUtt = null;
+  let fakeLevel = false, curUtt = null, voiceWarned = false;
+  async function voiceProblem() {
+    try {
+      const v = await (await fetch('/api/voice-status')).json();
+      chip('#chipVoice', 'warn', 'BACKUP VOICE');
+      if (v.reason && !voiceWarned) { voiceWarned = true; addLog('system', 'Using the phone voice because: ' + v.reason); addActivity('Voice: ' + v.reason); }
+    } catch {}
+  }
   function stopSpeaking(resume = true) {
     if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; currentAudio = null; }
     if ('speechSynthesis' in window) speechSynthesis.cancel();
@@ -259,7 +281,7 @@
 
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer;
+  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0;
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
     return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves'] : [w];
@@ -271,7 +293,11 @@
     rec = new SR();
     rec.continuous = true; rec.interimResults = true; rec.lang = params.get('lang') || 'en-US';
     rec.onstart = () => { recOn = true; };
-    rec.onend = () => { recOn = false; if (pending) flush(); uttStart = 0; lastLen = 0; if (recWanted) setTimeout(() => { try { rec.start(); } catch {} }, 250); };
+    rec.onend = () => {
+      recOn = false; if (pending) flush(); uttStart = 0; lastLen = 0;
+      const wait = recErrs.length >= 3 ? 8000 : 250;   // repeated failures: pause before retrying
+      if (recWanted) setTimeout(() => { if (recWanted && !recOn) try { rec.start(); } catch {} }, wait);
+    };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
       const why = {
@@ -282,7 +308,10 @@
       }[e.error] || ('Speech error: ' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { recWanted = false; chip('#chipMic', 'bad', 'MIC BLOCKED'); }
       else chip('#chipMic', 'warn', 'MIC ' + e.error.toUpperCase());
-      addActivity(why); caption(why, { typed: false, pre: '!!' }); reportErr('speech: ' + e.error);
+      // Say it once, not in a loop; back off restarts when the mic keeps failing
+      const now = Date.now();
+      recErrs = recErrs.filter(t => now - t < 15000); recErrs.push(now);
+      if (why !== lastRecErr || now - lastRecErrAt > 30000) { addActivity(why); caption(why, { typed: false, pre: '!!' }); reportErr('speech: ' + e.error); lastRecErr = why; lastRecErrAt = now; }
     };
     rec.onaudiostart = () => chip('#chipMic', 'ok', 'MIC');
     rec.onresult = onSpeech;
@@ -296,7 +325,7 @@
   }
   // If the reply ended with a question, listen for the answer straight away (no wake word needed)
   function afterReply(text) {
-    if (/\?\s*["')\]]*\s*$/.test(text || '')) goActive();
+    if (/\?\s*["')\]]*\s*$/.test(text || '')) setTimeout(() => { if (!speaking && state !== 'thinking') goActive(); }, 450);
     else resumeListening();
   }
   function goActive() {
