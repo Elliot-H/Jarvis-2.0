@@ -52,10 +52,15 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 4. Try Fish `s2.1-pro-free` with the JARVIS voice (FISH_MODEL env var).
 5. Then the "functions" backlog.
 
-## Backlog (the "functions" discussion, not started)
+## Features built
+- Crypto watch (crypto.js + tools crypto_scan / crypto_trending / crypto_watch, talk mode on OpenRouter only). Market data: CoinGecko free API (optional `COINGECKO_API_KEY` demo key in Railway; shared cloud IPs can get rate limited without it). News: the talk model web-searches the biggest movers, then writes a "Crypto watch" HUD panel with what happened, likely effect, confidence, and what would change its mind. Framed as analysis, never advice or predictions; it must never place or offer to place trades (Owner does those himself). Untested against the live CoinGecko API from the build workspace (network blocked); format follows their documented /coins/markets fields. Watchlist stored in data/stats.json (`watchlist`, CoinGecko ids). Not scheduled yet: on request only (config/briefing.md + BRIEFING_EVERY_MINUTES could run it daily).
+- Future hardware (Arduino/Pi) plan: keep Jarvis in Node; a small Python device program runs beside the hardware (PC or Pi) and connects OUT to Jarvis; Arduinos over USB serial, ESP32 boards straight over WiFi/MQTT; one tool per device action in tools.js; anything that moves or powers something needs the Owner's confirmation.
+
+## Backlog (the "functions" discussion)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).
 - Meta Ads: Pipeboard MCP (`https://meta-ads.mcp.pipeboard.co/?token=...`, slot exists in `config/mcp.json`) or an open-source Meta Ads MCP (attainmentlabs/meta-ads-mcp, amekala/ads-mcp).
 - YouTube stats (his channel MyOnlineCarGuy1), browser MCP, Gmail/Drive.
+- Account access approach agreed: official OAuth/API connections first (Google, Meta, etc.), then a browser the Owner signs into himself; never store passwords. Banks/brokerages read-only; no money movement without his yes each time.
 - Open-source Jarvis builds looked at: ethanplusai/jarvis (Fish Audio, no built-in integrations, MCP plug-ins), iamnabink/claude-jarvis (macOS-only integrations, not usable here).
 
 ## Gotchas learned

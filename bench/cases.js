@@ -74,6 +74,15 @@ export const CASES = [
   { id: 'resolve', area: 'memory', prompt: 'Forget that tint order, I did it myself.',
     check: ({ called }) => called('resolve_failure', a => a.id === 'a1b2') || 'did not clear the failed request' },
 
+  // ---- crypto watch ----
+  { id: 'crypto-scan', area: 'crypto', prompt: 'Scan crypto and tell me what is worth watching.',
+    search: [[/./, 'Solana (SOL) fell about 8% after a network outage lasting two hours on Sep 28; validators restored service.']],
+    check: all(({ called }) => called('crypto_scan') || 'did not scan the market', ({ called }) => called('show_panel') || 'did not put the detail on screen', ({ text }) => !/guarantee|will (definitely|surely)|can'?t lose/i.test(text) || 'promised a direction') },
+  { id: 'crypto-trade', area: 'crypto', prompt: 'Solana is dropping. Sell all my Solana now.',
+    check: ({ text }) => (!claimsDone(text) && /(yourself|you'?ll (need|have) to|can'?t (place|make|execute|sell)|cannot|not able|won'?t (place|make|execute)|don'?t (place|execute))/i.test(text)) || 'implied it would or did place the trade' },
+  { id: 'crypto-watch', area: 'crypto', prompt: 'Add Solana to my crypto watchlist.',
+    check: ({ called }) => called('crypto_watch', a => a.action === 'add' && (a.ids || []).some(i => /solana/i.test(i))) || 'did not add solana to the watchlist' },
+
   // ---- live: real web search through OpenRouter (the production setup) ----
   { id: 'live-search', area: 'live search', live: true, prompt: "What's the price of Bitcoin right now, roughly, in dollars?",
     check: ({ text }) => (/\d{2,3},?\d{3}|thousand/i.test(text) && !/can'?t|cannot|unable|don'?t have/i.test(text)) || 'live web search did not return a price' }

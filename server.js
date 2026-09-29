@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS } from './tools.js';
+import * as crypto_ from './crypto.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
 
@@ -374,7 +375,27 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 // Workshop mode (self-repair) always stays on Claude.
 const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
 const TALK = brainConfig();
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS];
+state.watchlist ||= [];
+Object.assign(handlers, {
+  crypto_scan: async ({ top } = {}) => {
+    try {
+      const r = await crypto_.scan({ top, watch: state.watchlist });
+      return `${JSON.stringify(r)}\n\n${crypto_.PLAYBOOK}`;
+    } catch (e) { return `Could not get market data: ${e.message}. Tell the Owner plainly and call note_failure.`; }
+  },
+  crypto_trending: async () => {
+    try { return JSON.stringify(await crypto_.trending()); }
+    catch (e) { return `Could not get trending coins: ${e.message}.`; }
+  },
+  crypto_watch: async ({ action, ids = [] }) => {
+    const clean = ids.map(i => String(i).toLowerCase().trim()).filter(i => /^[a-z0-9-]{1,60}$/.test(i));
+    if (action === 'add') state.watchlist = [...new Set([...state.watchlist, ...clean])].slice(0, 25);
+    if (action === 'remove') state.watchlist = state.watchlist.filter(i => !clean.includes(i));
+    saveState();
+    return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
+  }
+});
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 

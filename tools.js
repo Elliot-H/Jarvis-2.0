@@ -58,6 +58,24 @@ export const MODE_TOOLS = [
   }
 ];
 
+export const CRYPTO_TOOLS = [
+  {
+    name: 'crypto_scan',
+    description: 'Scan the crypto market: price, 24h and 7-day change, size and volume for the top coins by market cap plus the Owner\'s watchlist, and which coins moved most. Use this for any "how is crypto", "scan the market", "what should I watch" request, then follow the instructions in the result to research news on the movers.',
+    shape: { top: z.number().int().min(5).max(100).optional().describe('how many top coins, default 25') }
+  },
+  {
+    name: 'crypto_trending',
+    description: 'Coins getting the most attention right now on CoinGecko (searches). A rough signal of hype, not a recommendation.',
+    shape: {}
+  },
+  {
+    name: 'crypto_watch',
+    description: 'Manage the Owner\'s crypto watchlist. Ids are CoinGecko ids in lowercase, e.g. bitcoin, ethereum, solana, dogecoin. action: add, remove, or list.',
+    shape: { action: z.enum(['add', 'remove', 'list']), ids: z.array(z.string()).optional() }
+  }
+];
+
 // Spec + handler → OpenAI-style function tool
 export function toFunctionTool({ name, description, shape }) {
   const schema = z.toJSONSchema(z.object(shape));
