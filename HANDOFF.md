@@ -21,25 +21,35 @@ Read this first. It lets a fresh Claude session (for example one opened from the
 - Self-repair: uses the GitHub REST API (no git binary needed). Flow: checkout → edit `./self` copy → `self_check` (syntax, secret scan, boot test on a random port) → Jarvis asks "Shall I deploy, sir?" → `self_deploy` only after the Owner says yes in a LATER turn → commit to GitHub → Railway rebuilds. `self_rollback` makes a revert commit. Needs `GITHUB_TOKEN` (fine-grained, repo Contents: Read and write).
 
 ## Environment variables (names only)
-ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN (optional), FISH_API_KEY, FISH_VOICE_ID (optional), ELEVENLABS_API_KEY (restricted key, Text to Speech access), ELEVENLABS_VOICE_ID, JARVIS_PIN, GITHUB_TOKEN, GITHUB_REPO (default Elliot-H/Jarvis-2.0), WAKE_WORD, USER_TITLE, JARVIS_MODEL, JARVIS_CODE_MODEL, DAILY_BUDGET_USD (default 2), CHAT_BUDGET_USD (0.05), WORK_BUDGET_USD (0.75), TZ. See `.env.example`.
+OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTHLY_BUDGET_USD, WORK_MONTHLY_BUDGET_USD, BENCH_BUDGET_USD, ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN (optional), FISH_API_KEY, FISH_VOICE_ID (optional), ELEVENLABS_API_KEY (restricted key, Text to Speech access), ELEVENLABS_VOICE_ID, JARVIS_PIN, GITHUB_TOKEN, GITHUB_REPO (default Elliot-H/Jarvis-2.0), WAKE_WORD, USER_TITLE, JARVIS_MODEL, JARVIS_CODE_MODEL, DAILY_BUDGET_USD (default 2), CHAT_BUDGET_USD (0.05), WORK_BUDGET_USD (0.75), TZ. See `.env.example`.
 
 ## Money: the story so far
 - The first version burned about $84 (Anthropic balance went to −$84.52) because of huge prompts, one endless resumed conversation and the stronger model on every question. The Owner is angry about it and will not accept surprise bills.
 - Fixes already shipped (commit a272bb9 and after): free local greeting (no AI call), no endless session, trimmed tools, stable prompt, Haiku for talk, hard daily cap `DAILY_BUDGET_USD`, per-turn budget caps, cost chip in the HUD. Measured about $0.0047 per chat question.
-- CURRENT STATE: Anthropic credit is exhausted / balance negative, so the Claude brain currently answers "I am out of Anthropic credit". Fish Audio also reported "out of credit" until the Owner tops it up. The Owner has NOT confirmed he paid either.
-- The Owner decided he does not want to keep paying per question. He chose "option two": run a free open model on his own gaming PC.
+- STATE ON 2026-09-29: Anthropic credit is exhausted / balance negative, so the Claude brain currently answers "I am out of Anthropic credit". Fish Audio also reported "out of credit" until the Owner tops it up. The Owner has NOT confirmed he paid either.
+- He first chose a free local model on his PC; that was checked and dropped (see Brain decision).
 
-## The plan he chose: local brain on his PC
-Goal: Jarvis brain = an open model on his own hardware (via Ollama), nothing billed per question. Claude stays only for rare, explicitly requested self-repair, capped.
-Steps to do first, in this order:
-1. Check the PC: graphics card model and VRAM (`nvidia-smi`), RAM, OS, whether Node 18+ and git are installed. The card decides the model size (12 GB+ VRAM is comfortable for a good mid-size model; less means slower and weaker).
-2. Install Ollama, pull a tool-calling-capable model that fits (Qwen, Llama, Gemma families; test tool calling, it is the weak point).
-3. Rewrite the brain layer. `server.js` currently uses the Claude Agent SDK `query()` and only talks to Anthropic. Add a provider switch (`BRAIN=claude|local`) that talks to Ollama's OpenAI-compatible endpoint (`http://localhost:11434/v1`) with a simple tool loop for the existing tools (update_stats, get_hud, show_panel, hide_panel, failures, use_workshop). Keep the HUD, voice, PIN, panels, PWA unchanged.
-4. Run Jarvis on the PC and make it reachable from the phone with a free tunnel (Tailscale or Cloudflare Tunnel), keeping the PIN lock. Decide whether to keep Railway as a fallback or retire it.
-5. Voice: Fish Audio is the voice the Owner picked ("perfect"). It costs a little; Kokoro (free, local) was rejected as "not the proper voice". Keep Fish.
-6. Self-repair with a local model is unreliable; keep the Claude-backed work mode for it, behind its cap, and only on request.
-Cheaper alternative he was offered but did not pick: Gemini free tier for talk mode.
-Also offered: Claude subscription via Claude Code on the PC instead of API credits. Unclear whether Anthropic's terms allow it for something like Jarvis; ask Anthropic support before relying on it.
+## Brain decision (2026-09-29): cloud, via OpenRouter
+- Local brain was checked and dropped. The PC ("desktop-fmfb9nv") is Windows 11 Home, 32 GB RAM, but the GPU is an NVIDIA GeForce GTX 560 Ti (~1.2 GB VRAM, 2011). Ollama can't use it; CPU-only models are too slow and weak for tool use. Node LTS, Git and Ollama were being installed via winget (Ollama now unneeded).
+- Overnight self-repair on the PC was also rejected: too slow on CPU, unreliable code, and electricity costs more than cloud repairs.
+- The Owner wants speed and answers that are right the first time, total running cost about $15-20/month (Railway $5 + Fish voice + AI). He was burned before by a recommendation that wasn't checked against his real needs, so model choice is being made by TESTING, not by picking one.
+- Long-term scope he described (drives model choice later): car part price hunting, marketing leads, business finances, calendar, business efficiency, building dropshipping sites, ordering parts, stock analysis and trades. Orders and trades must always be shown to him and confirmed before execution.
+
+### What was built (this session)
+- `brain.js`: talk mode runs on any OpenAI-compatible model through OpenRouter (`OPENROUTER_API_KEY`, `TALK_MODEL`). Own tool loop; web search is OpenRouter's server tool `openrouter:web_search` (engine `TALK_SEARCH_ENGINE`, default `parallel`, the cheapest). Cost comes from OpenRouter's `usage.cost`. External MCP servers (config/mcp.json) are NOT available in OpenRouter talk mode; future features should be native tools in tools.js.
+- `tools.js`: one list of tool specs (HUD, failures, use_workshop) feeding both the Claude SDK and the OpenRouter brain.
+- `BRAIN` defaults to `openrouter` once `OPENROUTER_API_KEY` is set; `BRAIN=claude` restores the old Haiku talk path. Workshop mode (self-repair) stays on Claude Sonnet and needs Anthropic credit (balance was negative).
+- Caps: `MONTHLY_BUDGET_USD` (default 10, all AI), `WORK_MONTHLY_BUDGET_USD` (default 5, repairs), plus the existing daily and per-request caps. Tracked in data/stats.json under `month`.
+- Model test: `/bench` page (PIN protected) runs 20 scripted Jarvis requests + 1 live web search on each candidate (bench/cases.js, bench/run.js), shows pass rate, median speed, cost per question and a monthly estimate at 100 questions/day. "USE THIS MODEL" sets `state.talkModel` (lost on redeploy if data/ is wiped, so also set `TALK_MODEL` in Railway). CLI: `OPENROUTER_API_KEY=... node bench/run.js [model ids]`. Cost capped by `BENCH_BUDGET_USD` (default 1).
+- Candidates: Gemini Flash-Lite, Gemini Flash, GPT Luna, GPT-OSS 120B/20B (Groq preferred), DeepSeek Flash, Mistral Small, Claude Haiku (baseline). Slugs are resolved against OpenRouter's live model list.
+- Prices checked 2026-09-29 (per 1M tokens in/out): GPT-OSS 20B $0.075/$0.30, GPT-OSS 120B $0.15/$0.60 (Groq), DeepSeek Flash $0.15-0.30/$0.60-1.20, GPT-5.6 Luna $0.20/$1.20, Gemini 3.1 Flash-Lite $0.25/$1.50, 3.5 Flash-Lite $0.30/$2.50, Gemini 3.8 Flash $0.75/$3.75 (doubles after Dec 31 2026), Claude Haiku 4.5 $1/$5. Fish TTS $15 per 1M bytes (lists a free s2.1-pro-free model, untested with the JARVIS voice). Railway Hobby $5/month with $5 usage included.
+
+### Next steps
+1. Owner: create OpenRouter account, add ~$5 credit, create a key with a credit limit, put it in Railway as `OPENROUTER_API_KEY`. (In progress when this was written.)
+2. Open /bench, run the test, read the misses, pick the model; set `TALK_MODEL` in Railway.
+3. Top up Anthropic a little for self-repair, with a monthly spend limit set in the Anthropic console.
+4. Try Fish `s2.1-pro-free` with the JARVIS voice (FISH_MODEL env var).
+5. Then the "functions" backlog.
 
 ## Backlog (the "functions" discussion, not started)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).

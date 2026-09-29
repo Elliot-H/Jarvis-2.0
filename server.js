@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS } from './tools.js';
+import { talk, brainConfig, chatSystemPrompt } from './brain.js';
+import { runBench, renderText } from './bench/run.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,79 +70,39 @@ function broadcast(msg) {
   for (const c of clients) if (c.readyState === 1) c.send(s);
 }
 
-// ---------- the HUD's own MCP tools (Claude uses these to drive the screen) ----------
-const dashboard = createSdkMcpServer({ alwaysLoad: true,
-  name: 'dashboard',
-  version: '1.0.0',
-  tools: [
-    tool(
-      'update_stats',
-      'Put numbers on the Jarvis HUD. Each stat is a tile. Reuse the same id to update a tile. Call this whenever you pull real numbers (downloads, revenue, ad spend, ROAS, subscribers, jobs booked, etc).',
-      {
-        stats: z.array(z.object({
-          id: z.string().describe('stable slug, e.g. myguru_downloads_7d'),
-          label: z.string().describe('short label, e.g. "Downloads · 7d"'),
-          value: z.string().describe('display value, e.g. "2,459" or "$4,289"'),
-          delta: z.string().optional().describe('change vs prior period, e.g. "+12%" or "-3%"'),
-          trend: z.array(z.number()).optional().describe('optional sparkline points, oldest first'),
-          group: z.string().optional().describe('tile group, e.g. "MyGuru", "Ads", "YouTube", "Shop"'),
-          source: z.string().optional().describe('where the number came from')
-        }))
-      },
-      async ({ stats }) => {
-        const now = new Date().toISOString();
-        for (const s of stats) state.stats[s.id] = { ...s, updatedAt: now };
-        saveState();
-        broadcast({ type: 'stats', stats: state.stats });
-        return { content: [{ type: 'text', text: `HUD updated: ${stats.map(s => s.label).join(', ')}` }] };
-      }
-    ),
-    tool(
-      'get_hud',
-      'Read what is currently on the HUD (all stat tiles and panels).',
-      {},
-      async () => ({ content: [{ type: 'text', text: JSON.stringify({ stats: state.stats, panels: state.panels }, null, 2) }] })
-    ),
-    tool(
-      'remove_stats',
-      'Remove tiles from the HUD by id. Pass ["*"] to clear everything.',
-      { ids: z.array(z.string()) },
-      async ({ ids }) => {
-        if (ids.includes('*')) state.stats = {};
-        else for (const id of ids) delete state.stats[id];
-        saveState();
-        broadcast({ type: 'stats', stats: state.stats });
-        return { content: [{ type: 'text', text: 'Removed.' }] };
-      }
-    ),
-    tool(
-      'show_panel',
-      'Show a text panel on the HUD (a recommendation, a to-do list, a short report). Markdown-lite: lines starting with "- " become bullets. Reuse the id to replace it.',
-      {
-        id: z.string(),
-        title: z.string(),
-        body: z.string()
-      },
-      async ({ id, title, body }) => {
-        state.panels[id] = { id, title, body, updatedAt: new Date().toISOString() };
-        saveState();
-        broadcast({ type: 'panels', panels: state.panels });
-        return { content: [{ type: 'text', text: `Panel "${title}" shown.` }] };
-      }
-    ),
-    tool(
-      'hide_panel',
-      'Remove a panel from the HUD by id, or "*" for all.',
-      { id: z.string() },
-      async ({ id }) => {
-        if (id === '*') state.panels = {}; else delete state.panels[id];
-        saveState();
-        broadcast({ type: 'panels', panels: state.panels });
-        return { content: [{ type: 'text', text: 'Hidden.' }] };
-      }
-    )
-  ]
-});
+// ---------- the HUD's own tools (specs in tools.js; the brain uses these to drive the screen) ----------
+const txt = t => ({ content: [{ type: 'text', text: t }] });
+const handlers = {
+  update_stats: async ({ stats = [] }) => {
+    const now = new Date().toISOString();
+    for (const s of stats) state.stats[s.id] = { ...s, updatedAt: now };
+    saveState();
+    broadcast({ type: 'stats', stats: state.stats });
+    return `HUD updated: ${stats.map(s => s.label).join(', ')}`;
+  },
+  get_hud: async () => JSON.stringify({ stats: state.stats, panels: state.panels }, null, 2),
+  remove_stats: async ({ ids = [] }) => {
+    if (ids.includes('*')) state.stats = {};
+    else for (const id of ids) delete state.stats[id];
+    saveState();
+    broadcast({ type: 'stats', stats: state.stats });
+    return 'Removed.';
+  },
+  show_panel: async ({ id, title, body }) => {
+    state.panels[id] = { id, title, body, updatedAt: new Date().toISOString() };
+    saveState();
+    broadcast({ type: 'panels', panels: state.panels });
+    return `Panel "${title}" shown.`;
+  },
+  hide_panel: async ({ id }) => {
+    if (id === '*') state.panels = {}; else delete state.panels[id];
+    saveState();
+    broadcast({ type: 'panels', panels: state.panels });
+    return 'Hidden.';
+  }
+};
+const sdkTools = specs => specs.map(s => tool(s.name, s.description, s.shape, async a => txt(await handlers[s.name](a))));
+const dashboard = createSdkMcpServer({ alwaysLoad: true, name: 'dashboard', version: '1.0.0', tools: sdkTools(HUD_TOOLS) });
 
 // ---------- failed commands (remembered across restarts so Jarvis can revisit them) ----------
 state.failures ||= [];
@@ -149,8 +112,30 @@ const DAILY_BUDGET = Number(process.env.DAILY_BUDGET_USD || 2);        // whole 
 const CHAT_BUDGET = Number(process.env.CHAT_BUDGET_USD || 0.05);       // one normal question
 const WORK_BUDGET = Number(process.env.WORK_BUDGET_USD || 0.75);       // one self-repair job
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: process.env.TZ || 'America/New_York' });
+// Monthly caps: all AI spend (talk + workshop + tests), and self-repair on its own
+const MONTHLY_BUDGET = Number(process.env.MONTHLY_BUDGET_USD || 10);
+const WORK_MONTHLY_BUDGET = Number(process.env.WORK_MONTHLY_BUDGET_USD || 5);
+const thisMonth = () => today().slice(0, 7);
 function spendToday() { if (state.spend?.date !== today()) state.spend = { date: today(), usd: 0, requests: 0 }; return state.spend; }
-function addSpend(usd) { const s = spendToday(); s.usd += Number(usd) || 0; s.requests += 1; saveState(); return s; }
+function spendMonth() {
+  if (state.month?.month !== thisMonth()) state.month = { month: thisMonth(), usd: 0, work: 0, talk: 0, tests: 0, requests: 0 };
+  return state.month;
+}
+function addSpend(usd, kind = 'talk') {
+  const s = spendToday(), m = spendMonth(), v = Number(usd) || 0;
+  s.usd += v; s.requests += 1;
+  m.usd += v; m.requests += 1; m[kind] = (m[kind] || 0) + v;
+  saveState();
+  return s;
+}
+// Why a request can't run right now (or null if it can)
+function overBudget(mode) {
+  const m = spendMonth();
+  if (m.usd >= MONTHLY_BUDGET) return `I've reached this month's AI spending limit of ${MONTHLY_BUDGET.toFixed(2)} dollars, sir. Raise MONTHLY_BUDGET_USD in Railway if you want me to carry on.`;
+  if (mode === 'work' && m.work >= WORK_MONTHLY_BUDGET) return `Self-repair has used this month's ${WORK_MONTHLY_BUDGET.toFixed(2)} dollar allowance, sir. Raise WORK_MONTHLY_BUDGET_USD in Railway, or I can carry on next month.`;
+  if (spendToday().usd >= DAILY_BUDGET) return `I've reached today's spending limit of ${DAILY_BUDGET.toFixed(2)} dollars, sir. I'll be back tomorrow, or raise DAILY_BUDGET_USD in Railway.`;
+  return null;
+}
 
 // Short rolling memory for talk mode (instead of an endless, ever-growing session)
 state.history ||= [];
@@ -173,34 +158,16 @@ function recordFailure(command, reason) {
   saveState();
   return f;
 }
-const failuresServer = createSdkMcpServer({ alwaysLoad: true,
-  name: 'failures',
-  version: '1.0.0',
-  tools: [
-    tool(
-      'note_failure',
-      'Remember a command you could not carry out: cut off mid-sentence, unclear, blocked, missing a connection, or it errored. Call this before replying whenever a request did not succeed.',
-      { command: z.string().describe('what the Owner asked, as heard'), reason: z.string().describe('why it failed, in a few words') },
-      async ({ command, reason }) => ({ content: [{ type: 'text', text: `Remembered as failure ${recordFailure(command, reason).id}.` }] })
-    ),
-    tool(
-      'list_failures',
-      'List the commands that failed earlier and have not been resolved yet.',
-      {},
-      async () => (pruneFailures(), { content: [{ type: 'text', text: state.failures.length ? state.failures.map(f => `${f.id} · ${f.at.slice(0, 16).replace('T', ' ')} · "${f.command}" · ${f.reason}`).join('\n') : 'No failed commands on record.' }] })
-    ),
-    tool(
-      'resolve_failure',
-      'Forget a failed command once it has been done or the Owner no longer wants it. Pass "*" to clear all.',
-      { id: z.string() },
-      async ({ id }) => {
-        state.failures = id === '*' ? [] : state.failures.filter(f => f.id !== id);
-        saveState();
-        return { content: [{ type: 'text', text: 'Resolved.' }] };
-      }
-    )
-  ]
+Object.assign(handlers, {
+  note_failure: async ({ command, reason }) => `Remembered as failure ${recordFailure(command, reason).id}.`,
+  list_failures: async () => (pruneFailures(), state.failures.length ? state.failures.map(f => `${f.id} · ${f.at.slice(0, 16).replace('T', ' ')} · "${f.command}" · ${f.reason}`).join('\n') : 'No failed commands on record.'),
+  resolve_failure: async ({ id }) => {
+    state.failures = id === '*' ? [] : state.failures.filter(f => f.id !== id);
+    saveState();
+    return 'Resolved.';
+  }
 });
+const failuresServer = createSdkMcpServer({ alwaysLoad: true, name: 'failures', version: '1.0.0', tools: sdkTools(FAILURE_TOOLS) });
 
 function setPanel(id, panel) {
   if (panel) state.panels[id] = { id, ...panel, updatedAt: new Date().toISOString() };
@@ -240,11 +207,8 @@ const CHAT_MODEL = process.env.JARVIS_MODEL || 'haiku';
 const WORK_MODEL = process.env.JARVIS_CODE_MODEL || 'sonnet';
 const WORK_WORDS = /\b(fix|repair|debug|redo|rewrite|deploy|roll(ed)?\b.*\bback|rollback|revert|undo|yourself|reactor|hud|telemetry|wake ?word|your (own )?(code|screen|voice|mic|microphone|settings?|personality|briefing|display|look|colou?rs?|font|layout|greeting))\b/i;
 let escalate = false;
-const modeServer = createSdkMcpServer({ alwaysLoad: true, name: 'mode', version: '1.0.0', tools: [
-  tool('use_workshop',
-    'Call this (and nothing else) when the Owner wants you to change, fix, repair, add to or roll back your OWN code, screen, voice, settings or personality. A stronger engineering mode then takes over the same request.',
-    {}, async () => { escalate = true; return { content: [{ type: 'text', text: 'Switching to workshop mode. End your turn now without replying.' }] }; })
-] });
+handlers.use_workshop = async () => { escalate = true; return 'Switching to workshop mode. End your turn now without replying.'; };
+const modeServer = createSdkMcpServer({ alwaysLoad: true, name: 'mode', version: '1.0.0', tools: sdkTools(MODE_TOOLS) });
 function pickMode(text, origin) {
   if (process.env.JARVIS_ALWAYS_WORK === '1') return 'work';
   if (selfRepair.active()) return 'work';          // mid-change, or "yes, deploy"
@@ -277,16 +241,16 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
     turn = { id: ++turnCounter, text, origin };
     broadcast({ type: 'log', role: origin, text: label || text });
   }
-  const spent = spendToday();
-  if (spent.usd >= DAILY_BUDGET) {
+  const blocked = overBudget(mode);
+  if (blocked) {
     busy = false;
-    const msg = `I've reached today's spending limit of ${DAILY_BUDGET.toFixed(2)} dollars, sir. I'll be back tomorrow, or raise DAILY_BUDGET_USD in Railway.`;
-    broadcast({ type: 'say', text: msg, speak: spoken });
-    return msg;
+    broadcast({ type: 'say', text: blocked, speak: spoken });
+    return blocked;
   }
   broadcast({ type: 'state', state: 'thinking' });
   if (mode === 'work') broadcast({ type: 'activity', text: 'Workshop mode' });
-  console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : CHAT_MODEL})`);
+  const talkLocal = mode === 'chat' && BRAIN === 'openrouter';
+  console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : talkLocal ? talkModel() : CHAT_MODEL})`);
   escalate = false;
   const now = new Date();
   const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}.`;
@@ -319,7 +283,10 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
   const live = (clock + hud + failed + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
-  const chatPrompt = `${persona}\n\n# Mode\nYou are in fast talk mode. Answer directly and briefly; your reply is spoken aloud, so never include links, URLs or a sources list.\nUse WebSearch for anything current (weather, news, prices, hours) and give the actual answer (e.g. the forecast), not where to find it.\nYou ARE an app: your screen has an arc-reactor core, telemetry tiles, a comms log and panels; you have a voice, a wake word, a personality file and a wake-up briefing. If the Owner wants any of that changed, fixed, restyled or rolled back (e.g. "make the reactor purple", "talk faster", "the mic keeps cutting off"), call use_workshop immediately and stop.`;
+  const chatPrompt = chatSystemPrompt(persona);
+
+  // Talk mode on OpenRouter (any model): our own tool loop, no Claude involved.
+  if (talkLocal) return runTalk({ text, promptWithContext, chatPrompt, spoken, origin, label });
 
   let finalText = '';
   try {
@@ -328,7 +295,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
       options: {
         cwd: WORKSPACE,
         model: mode === 'work' ? WORK_MODEL : CHAT_MODEL,
-        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: persona + '\n\nEach message starts with a <context> block (time, HUD, failed requests) supplied by the app, not typed by the Owner.' } : chatPrompt + '\n\nEach message starts with a <context> block (time, HUD, recent conversation) supplied by the app, not typed by the Owner.',
+        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: persona + '\n\nEach message starts with a <context> block (time, HUD, failed requests) supplied by the app, not typed by the Owner.' } : chatPrompt,
         ...(mode === 'chat' ? { thinking: { type: 'disabled' } } : {}),
         mcpServers,
         allowedTools: allowed,
@@ -361,7 +328,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
       }
       if (m.type === 'result') {
         if (mode === 'work' && m.session_id) { state.workSessionId = m.session_id; saveState(); }
-        const s2 = addSpend(m.total_cost_usd);
+        const s2 = addSpend(m.total_cost_usd, mode === 'work' ? 'work' : 'talk');
         const u = m.usage || {};
         console.log(`  cost: $${(m.total_cost_usd || 0).toFixed(4)} (${mode}) · in ${u.input_tokens || 0} + cached ${u.cache_read_input_tokens || 0} + cache-write ${u.cache_creation_input_tokens || 0} · today $${s2.usd.toFixed(2)} of $${DAILY_BUDGET}`);
         broadcast({ type: 'spend', turn: m.total_cost_usd || 0, today: s2.usd, limit: DAILY_BUDGET });
@@ -398,9 +365,55 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   return finalText;
 }
 
+// ---------- talk brain on OpenRouter ----------
+// BRAIN=openrouter (default once OPENROUTER_API_KEY is set) or BRAIN=claude (the old Haiku path).
+// Workshop mode (self-repair) always stays on Claude.
+const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
+const TALK = brainConfig();
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS];
+// A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
+const talkModel = () => state.talkModel || TALK.model;
+
+async function runTalk({ text, promptWithContext, chatPrompt, spoken, origin, label }) {
+  const ac = new AbortController();
+  current = { interrupt: async () => ac.abort() };
+  let r;
+  try {
+    r = await talk({
+      cfg: { ...TALK, model: talkModel() },
+      system: chatPrompt,
+      prompt: promptWithContext,
+      tools: TALK_TOOLS,
+      budgetUsd: CHAT_BUDGET,
+      signal: ac.signal,
+      onTool: (name, args) => { console.log(`  tool: ${name}`); if (!name.startsWith('openrouter')) broadcast({ type: 'activity', text: prettyTool(name, args) }); },
+      run: async (name, args) => {
+        if (name === 'use_workshop') { await handlers.use_workshop(); return { text: 'Switching to workshop mode.', stop: true }; }
+        if (!handlers[name]) return `Unknown tool ${name}.`;
+        return handlers[name](args);
+      }
+    });
+  } finally {
+    current = null;
+    busy = false;
+  }
+  const s2 = addSpend(r.cost, 'talk');
+  console.log(`  cost: $${r.cost.toFixed(5)} (talk · ${r.model}) · in ${r.usage.in} (cached ${r.usage.cached}) + out ${r.usage.out} · ${r.ms} ms · ${r.rounds} round(s) · today $${s2.usd.toFixed(3)} of $${DAILY_BUDGET} · month $${spendMonth().usd.toFixed(2)} of $${MONTHLY_BUDGET}`);
+  broadcast({ type: 'spend', turn: r.cost, today: s2.usd, limit: DAILY_BUDGET });
+  broadcast({ type: 'meta', cost: r.cost, ms: r.ms });
+
+  if (escalate) return run(text, { spoken, origin, label, forceMode: 'work' });
+  let finalText = r.text || (r.error ? 'I ran into a problem finishing that, sir. Check the log.' : 'Done, sir.');
+  if (r.error && r.error !== 'aborted') { console.warn(`  talk error: ${r.error}`); if (origin === 'user') recordFailure(text, r.error); }
+  if (origin === 'user') { remember('user', text); remember('jarvis', finalText); }
+  broadcast({ type: 'say', text: finalText, speak: spoken });
+  return finalText;
+}
+
 function prettyTool(name, input) {
   const n = name.replace(/^mcp__/, '').replace(/__/g, ' › ');
   if (name === 'WebSearch') return `Searching the web: ${input?.query ?? ''}`;
+  if (name === 'use_workshop') return 'Workshop mode';
   if (name === 'WebFetch') return `Reading ${input?.url ?? 'a page'}`;
   if (name.startsWith('mcp__dashboard')) return `Updating HUD`;
   return `Using ${n}`;
@@ -500,6 +513,45 @@ log.insertAdjacentHTML('beforeend','<div class="u"></div><div class="j">…</div
 try{const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});const d=await r.json();j.textContent='Jarvis: '+(d.reply||d.error)}catch(err){j.textContent='Error: '+err}
 scrollTo(0,document.body.scrollHeight)};
 </script></body></html>`));
+
+// ---------- model test bench (/bench) ----------
+const BENCH_BUDGET = Number(process.env.BENCH_BUDGET_USD || 1);
+let bench = { running: false, progress: null, report: null, error: null };
+try { bench.report = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'bench-latest.json'), 'utf8')); } catch {}
+app.get('/api/bench', (_req, res) => res.json({
+  running: bench.running, progress: bench.progress && { done: bench.progress.done, total: bench.progress.total, spent: bench.progress.spent },
+  error: bench.error, report: bench.report, text: bench.report ? renderText(bench.report) : '',
+  current: BRAIN === 'openrouter' ? talkModel() : `claude ${CHAT_MODEL}`, budget: BENCH_BUDGET
+}));
+app.post('/api/bench', (req, res) => {
+  if (bench.running) return res.status(409).json({ error: 'already running' });
+  if (!TALK.apiKey) return res.status(400).json({ error: 'Add OPENROUTER_API_KEY in Railway first.' });
+  const blocked = overBudget('chat');
+  if (blocked) return res.status(402).json({ error: blocked });
+  const left = Math.max(0, MONTHLY_BUDGET - spendMonth().usd);
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(x => typeof x === 'string').slice(0, 12) : undefined;
+  bench = { running: true, progress: { done: 0, total: 0, spent: 0 }, report: bench.report, error: null };
+  let counted = 0;
+  console.log(`model test started (cap $${Math.min(BENCH_BUDGET, left).toFixed(2)})`);
+  runBench({ cfg: TALK, persona: readText('persona.md'), ids, budgetUsd: Math.min(BENCH_BUDGET, left),
+    onProgress: p => { bench.progress = p; if (p.spent > counted) { addSpend(p.spent - counted, 'tests'); counted = p.spent; } } })
+    .then(report => {
+      bench.report = report;
+      fs.writeFileSync(path.join(DATA_DIR, 'bench-latest.json'), JSON.stringify(report, null, 2));
+      console.log(renderText(report));
+    })
+    .catch(e => { bench.error = String(e.message || e); console.error('model test failed', e); })
+    .finally(() => { bench.running = false; });
+  res.json({ started: true });
+});
+app.post('/api/talk-model', (req, res) => {
+  const id = String(req.body?.id || '').trim();
+  if (!/^[\w.-]+\/[\w.:-]+$/.test(id) && id !== '') return res.status(400).json({ error: 'bad model id' });
+  state.talkModel = id || null; saveState();
+  console.log(`talk model set to ${talkModel()}`);
+  res.json({ model: talkModel() });
+});
+app.get('/bench', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'bench.html')));
 
 // ElevenLabs text-to-speech proxy (keeps the key on the server)
 // Last ElevenLabs result, in plain English, so the screen can say why the real voice isn't playing
@@ -619,6 +671,8 @@ server.listen(PORT, HOST, () => {
   const mcp = Object.keys(loadMcp());
   console.log(`\n  JARVIS online → http://localhost:${PORT}`);
   console.log(`  Connections: dashboard${mcp.length ? ', ' + mcp.join(', ') : ''}`);
+  console.log(`  Talk brain: ${BRAIN === 'openrouter' ? `OpenRouter · ${talkModel()}` : `Claude · ${CHAT_MODEL}`} · repairs: Claude · ${WORK_MODEL}`);
+  console.log(`  Caps: $${DAILY_BUDGET}/day · $${MONTHLY_BUDGET}/month all AI · $${WORK_MONTHLY_BUDGET}/month repairs`);
   console.log(`  PIN lock: ${PIN ? 'on' : 'OFF (set JARVIS_PIN before putting this online)'}`);
   console.log(`  Voice: ${process.env.FISH_API_KEY ? 'Fish Audio' : process.env.ELEVENLABS_API_KEY ? 'ElevenLabs' : 'browser fallback (add ELEVENLABS_API_KEY for the real voice)'}\n`);
 });

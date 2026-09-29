@@ -188,7 +188,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
           const r = await checkout(!!force);
           if (r.skipped) return text(`Kept existing working copy with my unsent edits: ${r.ch.all.join(', ')}. Pass force=true to start over.`);
           broadcast({ type: 'activity', text: `Loaded my source code (${r.files.length} files)` });
-          return text(`Checked out ${REPO}@${base.sha.slice(0, 7)} ("${base.message}") into ./self.\nFiles:\n${r.files.join('\n')}\n\nKey files: server.js (brain, tools, voice, PIN lock), self.js (this self-repair system), public/app.js (screen, wake word, speech), public/style.css, public/index.html, config/persona.md (my personality), config/briefing.md (wake-up briefing), config/mcp.json (connections). Edit with Read/Edit/Write on paths under ./self, then call self_check.`);
+          return text(`Checked out ${REPO}@${base.sha.slice(0, 7)} ("${base.message}") into ./self.\nFiles:\n${r.files.join('\n')}\n\nKey files: server.js (routing, tool handlers, voice, PIN lock, caps), brain.js (talk brain on OpenRouter), tools.js (tool definitions), bench/ (model test), self.js (this self-repair system), public/app.js (screen, wake word, speech), public/style.css, public/index.html, config/persona.md (my personality), config/briefing.md (wake-up briefing), config/mcp.json (connections). Edit with Read/Edit/Write on paths under ./self, then call self_check.`);
         } catch (e) { return fail(e.message); }
       }),
 
