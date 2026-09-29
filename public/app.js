@@ -328,19 +328,34 @@
     mode = 'passive'; recWanted = true;
     if (!recOn) try { rec.start(); } catch {}
   }
-  // If the reply ended with a question, listen for the answer straight away (no wake word needed)
+  // When Jarvis asks something, open the mic for the answer straight away (no wake word).
+  // Any question counts: a "?" anywhere in his last couple of sentences, or a phrase like "shall I" / "would you like".
+  // After a normal reply the mic also stays open briefly, so you can just keep talking (?follow=0 turns that off).
+  const ASKING = /(\?|\b(shall i|should i|would you like|do you want|want me to|which (one|would|do)|let me know|your call|say yes|say the word|confirm)\b)/i;
+  const FOLLOW_UP = params.get('follow') !== '0';
+  function isQuestion(text) {
+    const t = String(text || '').trim();
+    return ASKING.test(t.slice(-220));
+  }
   function afterReply(text) {
-    if (/\?\s*["')\]]*\s*$/.test(text || '')) setTimeout(() => { if (!speaking && state !== 'thinking') goActive(); }, 450);
+    if (isQuestion(text)) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 20000 }); }, 250);
+    else if (FOLLOW_UP) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 6000, quiet: true }); }, 250);
     else resumeListening();
   }
-  function goActive() {
+  // Phones sometimes refuse to restart the mic right after audio playback; keep trying until it is really on.
+  function ensureMic(tries = 8) {
+    if (!rec || !recWanted || recOn) return;
+    try { rec.start(); } catch {}
+    if (tries > 0) setTimeout(() => ensureMic(tries - 1), 350);
+  }
+  function goActive(o = {}) {
     stopSpeaking(false);
-    mode = 'active'; setState('listening'); chime(true);
+    mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
     caption('', {});
-    clearTimeout(uttTimer); pending = null; uttStart = lastLen;
-    recWanted = true; if (!recOn) try { rec.start(); } catch {}
+    clearTimeout(uttTimer); pending = null; carry = ''; lastHeard = ''; uttStart = lastLen;
+    recWanted = true; ensureMic();
     clearTimeout(activeTimer);
-    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); chime(false); } }, 15000);
+    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); if (!o.quiet) chime(false); } }, o.ms || 20000);
   }
 
   // ---- utterance assembly ----
