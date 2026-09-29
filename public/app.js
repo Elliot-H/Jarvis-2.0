@@ -240,11 +240,16 @@
     u.voice = vs.find(v => /en-GB/i.test(v.lang) && /male|daniel|george|arthur|ryan/i.test(v.name))
       || vs.find(v => /en-GB/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang)) || null;
     u.rate = 1.02; u.pitch = .9;
-    u.onend = done; u.onerror = done;
-    fakeLevel = true; u.addEventListener('end', () => fakeLevel = false);
+    // Chrome often drops 'end' (garbage-collected utterance, or a silent stop), which left the mic off.
+    // Keep a reference and poll speechSynthesis as a backup so done() always runs.
+    let finished = false;
+    const finish = () => { if (finished) return; finished = true; clearInterval(poll); fakeLevel = false; if (curUtt === u) curUtt = null; done(); };
+    u.onend = finish; u.onerror = finish;
+    curUtt = u; fakeLevel = true;
     speechSynthesis.speak(u);
+    const poll = setInterval(() => { if (!speechSynthesis.speaking && !speechSynthesis.pending) finish(); }, 500);
   }
-  let fakeLevel = false;
+  let fakeLevel = false, curUtt = null;
   function stopSpeaking(resume = true) {
     if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; currentAudio = null; }
     if ('speechSynthesis' in window) speechSynthesis.cancel();
@@ -301,7 +306,7 @@
     clearTimeout(uttTimer); pending = null; uttStart = lastLen;
     recWanted = true; if (!recOn) try { rec.start(); } catch {}
     clearTimeout(activeTimer);
-    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); chime(false); } }, 8000);
+    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); chime(false); } }, 15000);
   }
 
   // ---- utterance assembly ----
