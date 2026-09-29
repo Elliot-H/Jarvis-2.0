@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "browser": {
+      "enabled": false,
+      "note": "Lets Jarvis drive a real Chrome window (log into dashboards once, it remembers). Set enabled:true to use.",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--browser", "chrome", "--user-data-dir", "./data/browser-profile"]
+    },
+    "meta_ads": {
+      "enabled": false,
+      "note": "Facebook/Instagram ads via Pipeboard. Get a token at pipeboard.co/api-tokens, put PIPEBOARD_TOKEN in .env.",
+      "type": "http",
+      "url": "https://meta-ads.mcp.pipeboard.co/?token=${PIPEBOARD_TOKEN}"
+    }
+  }
+}
