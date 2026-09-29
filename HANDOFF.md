@@ -6,6 +6,7 @@ Read this first. It lets a fresh Claude session (for example one opened from the
 - The Owner (GitHub: Elliot-H) wants a personal Jarvis: Claude as the brain, an Iron-Man-style HUD, hands-free voice ("Jarvis" wake word), and the real Jarvis-sounding voice.
 - Style: terse, direct, no preamble. Never over-explain. He is often on his phone, not at a PC.
 - In any work document or deliverable, call him "Owner" or "MyGuru Admin". Never "Captn".
+- Whenever you send him to Railway (or any site), the very last line of your message must be "Here is the link:" with the direct link.
 - He gets frustrated when he is told to do things Claude could do. Do everything possible yourself; say plainly what only he can do (signing into accounts, creating keys, paying).
 - Feature #1 he asked for: Jarvis modifies and repairs himself so the Owner does not have to come back to Claude Code for changes.
 - After voice and icon, next topic is "functions" (see Backlog).
