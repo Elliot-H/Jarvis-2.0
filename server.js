@@ -248,7 +248,7 @@ const TOKEN = crypto.createHmac('sha256', SECRET).update('ok:' + PIN).digest('he
 const readCookie = req => Object.fromEntries(String(req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p.length === 2))['jarvis_auth'];
 const authed = req => !PIN || readCookie(req) === TOKEN;
 const tries = new Map();
-const loginPage = (err = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J.A.R.V.I.S.</title>
+const loginPage = (err = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J.A.R.V.I.S.</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="theme-color" content="#02060c">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle,#06223a,#01050a 70%);color:#cfefff;font-family:system-ui,sans-serif}
 form{display:flex;flex-direction:column;gap:14px;align-items:center;padding:16px}h1{font-weight:800;letter-spacing:.3em;color:#3fe0ff;text-shadow:0 0 14px rgba(63,224,255,.6);margin:0 0 10px}
 input{font-size:28px;letter-spacing:.4em;text-align:center;width:220px;padding:12px;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff;outline:0}
@@ -265,8 +265,9 @@ app.post('/login', (req, res) => {
   res.redirect(303, '/');
 });
 app.get('/health', (_req, res) => res.send('ok'));
+const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png)$/;
 app.use((req, res, next) => {
-  if (authed(req)) return next();
+  if (authed(req) || PUBLIC_FILES.test(req.path)) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'locked' });
   res.status(401).send(loginPage());
 });
