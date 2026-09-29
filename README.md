@@ -38,6 +38,10 @@ The reactor changes with its state: **cyan** = standby, **white** = listening, *
 
 The wake word works while the Jarvis tab is open and the screen is on. Phones stop the mic when the screen locks.
 
+## Speed and cost
+
+Everyday talk uses the fastest, cheapest model (Haiku) with a short prompt, so answers take about 2–3 seconds. When you ask Jarvis to change or fix itself, it hands off to a stronger model (Sonnet) for that job only. Override either with `JARVIS_MODEL` / `JARVIS_CODE_MODEL` in Railway → Variables.
+
 ## Self-repair
 
 Jarvis can change and fix its own code: "Jarvis, make the reactor purple", "Jarvis, check your logs and fix the mic", "Jarvis, roll back your last change".

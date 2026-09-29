@@ -249,7 +249,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
     tool('self_cancel',
       'Throw away my proposed change (when the Owner says no).',
       {},
-      async () => { pending = null; setPanel('self_change', null); return text('Proposed change cancelled. Edits remain in ./self; call self_checkout with force=true to reset.'); }),
+      async () => { pending = null; base = null; fs.rmSync(SELF_DIR, { recursive: true, force: true }); setPanel('self_change', null); return text('Proposed change cancelled and my working copy discarded.'); }),
 
     tool('self_rollback',
       'Undo the most recent change to my code on GitHub (creates a new commit restoring the previous version), so Railway redeploys the older version. Only when the Owner asks to roll back / revert / undo.',
@@ -295,5 +295,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
       async ({ lines }) => text(logs.tail(Math.min(Number(lines) || 120, 400)) || '(log is empty)'))
   ];
 
-  return { tools, SELF_DIR };
+  // True while a self-change is in progress (edited files or a change awaiting approval)
+  const active = () => Boolean(pending || (base && changes()?.all.length));
+  return { tools, SELF_DIR, active };
 }

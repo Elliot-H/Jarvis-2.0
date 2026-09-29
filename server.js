@@ -55,7 +55,7 @@ function broadcast(msg) {
 }
 
 // ---------- the HUD's own MCP tools (Claude uses these to drive the screen) ----------
-const dashboard = createSdkMcpServer({
+const dashboard = createSdkMcpServer({ alwaysLoad: true,
   name: 'dashboard',
   version: '1.0.0',
   tools: [
@@ -144,7 +144,7 @@ function recordFailure(command, reason) {
   saveState();
   return f;
 }
-const failuresServer = createSdkMcpServer({
+const failuresServer = createSdkMcpServer({ alwaysLoad: true,
   name: 'failures',
   version: '1.0.0',
   tools: [
@@ -184,7 +184,7 @@ function setPanel(id, panel) {
 let turnCounter = 0;
 let turn = { id: 0, text: '', origin: '' };
 const selfRepair = createSelfRepair({ tool, z, appDir: __dirname, workspace: WORKSPACE, getTurn: () => turn, broadcast, setPanel, logs });
-const selfServer = createSdkMcpServer({ name: 'self', version: '1.0.0', tools: selfRepair.tools });
+const selfServer = createSdkMcpServer({ alwaysLoad: true, name: 'self', version: '1.0.0', tools: selfRepair.tools });
 
 // ---------- external MCP connections from config/mcp.json ----------
 function loadMcp() {
@@ -206,6 +206,23 @@ function readText(file, fallback = '') {
   try { return fs.readFileSync(path.join(CONFIG_DIR, file), 'utf8'); } catch { return fallback; }
 }
 
+// ---------- model routing: fast + cheap for talk, stronger only for self-repair ----------
+const CHAT_MODEL = process.env.JARVIS_MODEL || 'haiku';
+const WORK_MODEL = process.env.JARVIS_CODE_MODEL || 'sonnet';
+const WORK_WORDS = /\b(fix|repair|debug|redo|rewrite|deploy|roll(ed)?\b.*\bback|rollback|revert|undo|yourself|reactor|hud|telemetry|wake ?word|your (own )?(code|screen|voice|mic|microphone|settings?|personality|briefing|display|look|colou?rs?|font|layout|greeting))\b/i;
+let escalate = false;
+const modeServer = createSdkMcpServer({ alwaysLoad: true, name: 'mode', version: '1.0.0', tools: [
+  tool('use_workshop',
+    'Call this (and nothing else) when the Owner wants you to change, fix, repair, add to or roll back your OWN code, screen, voice, settings or personality. A stronger engineering mode then takes over the same request.',
+    {}, async () => { escalate = true; return { content: [{ type: 'text', text: 'Switching to workshop mode. End your turn now without replying.' }] }; })
+] });
+function pickMode(text, origin) {
+  if (process.env.JARVIS_ALWAYS_WORK === '1') return 'work';
+  if (selfRepair.active()) return 'work';          // mid-change, or "yes, deploy"
+  if (origin === 'user' && WORK_WORDS.test(text)) return 'work';
+  return 'chat';
+}
+
 // ---------- the brain ----------
 let busy = false;
 let current = null; // running Query, for interrupt
@@ -224,11 +241,17 @@ async function drain() {
   }
 }
 
-async function run(text, { spoken = true, origin = 'user', label } = {}) {
+async function run(text, { spoken = true, origin = 'user', label, forceMode } = {}) {
   busy = true;
-  turn = { id: ++turnCounter, text, origin };
+  const mode = forceMode || pickMode(text, origin);
+  if (!forceMode) {
+    turn = { id: ++turnCounter, text, origin };
+    broadcast({ type: 'log', role: origin, text: label || text });
+  }
   broadcast({ type: 'state', state: 'thinking' });
-  broadcast({ type: 'log', role: origin, text: label || text });
+  if (mode === 'work') broadcast({ type: 'activity', text: 'Workshop mode' });
+  console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : CHAT_MODEL})`);
+  escalate = false;
   const now = new Date();
   const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}.`;
   const hud = `\nOn the HUD: ${Object.values(state.stats).map(s => `${s.label}=${s.value}${s.delta ? ` (${s.delta})` : ''}`).join('; ') || 'nothing yet'}.`;
@@ -238,17 +261,25 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
     : '';
 
   const external = loadMcp();
-  const mcpServers = { dashboard, self: selfServer, failures: failuresServer, ...external };
+  const mcpServers = mode === 'work'
+    ? { dashboard, self: selfServer, failures: failuresServer, ...external }
+    : { dashboard, failures: failuresServer, mode: modeServer, ...external };
   const persona = readText('persona.md');
   const allowed = [
-    'mcp__dashboard', 'mcp__self', 'mcp__failures',
+    'mcp__dashboard', 'mcp__failures',
     ...Object.keys(external).map(n => `mcp__${n}`),
-    'WebSearch', 'WebFetch', 'TodoWrite',
-    // file access stays inside Jarvis's workspace; code edits only inside ./self
-    'Read(./**)', 'Glob(./**)', 'Grep(./**)',
-    'Edit(./self/**)', 'Write(./self/**)', 'MultiEdit(./self/**)',
-    ...(process.env.JARVIS_ALLOW_SHELL === '1' ? ['Bash'] : [])
+    'WebSearch', 'WebFetch',
+    ...(mode === 'work'
+      ? ['mcp__self', 'TodoWrite',
+         // file access stays inside Jarvis's workspace; code edits only inside ./self
+         'Read(./**)', 'Glob(./**)', 'Grep(./**)',
+         'Edit(./self/**)', 'Write(./self/**)', 'MultiEdit(./self/**)',
+         ...(process.env.JARVIS_ALLOW_SHELL === '1' ? ['Bash'] : [])]
+      : ['mcp__mode'])
   ];
+  // Talk mode: short, lean prompt = fast and cheap. Workshop mode: full engineering prompt.
+  const context = persona + clock + hud + failed;
+  const chatPrompt = `${context}\n\n# Mode\nYou are in fast talk mode. Answer directly and briefly; your reply is spoken aloud, so never include links, URLs or a sources list.\nUse WebSearch for anything current (weather, news, prices, hours) and give the actual answer (e.g. the forecast), not where to find it.\nYou ARE an app: your screen has an arc-reactor core, telemetry tiles, a comms log and panels; you have a voice, a wake word, a personality file and a wake-up briefing. If the Owner wants any of that changed, fixed, restyled or rolled back (e.g. "make the reactor purple", "talk faster", "the mic keeps cutting off"), call use_workshop immediately and stop.`;
 
   let finalText = '';
   try {
@@ -256,14 +287,15 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
       prompt: text,
       options: {
         cwd: WORKSPACE,
-        model: process.env.JARVIS_MODEL || undefined,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: persona + clock + hud + failed },
+        model: mode === 'work' ? WORK_MODEL : CHAT_MODEL,
+        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: context } : chatPrompt,
+        ...(mode === 'chat' ? { thinking: { type: 'disabled' } } : {}),
         mcpServers,
         allowedTools: allowed,
         disallowedTools: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//etc/**)', 'Read(~/**)', 'Read(//root/**)'],
         permissionMode: 'dontAsk', // voice assistant can't click "approve": anything not listed above is denied
         resume: state.sessionId || undefined,
-        maxTurns: Number(process.env.JARVIS_MAX_TURNS || 60)
+        maxTurns: mode === 'work' ? Number(process.env.JARVIS_MAX_TURNS || 60) : 12
       }
     });
 
@@ -274,6 +306,7 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
       }
       if (m.type === 'assistant' && !m.parent_tool_use_id) {
         for (const b of m.message?.content || []) {
+          if (b.type === 'tool_use') console.log(`  tool: ${b.name}`);
           if (b.type === 'tool_use' && !['ToolSearch', 'TodoWrite'].includes(b.name)) {
             broadcast({ type: 'activity', text: prettyTool(b.name, b.input) });
           }
@@ -298,6 +331,12 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
     current = null;
     busy = false;
   }
+
+  // Talk mode handed this request to workshop mode: run the same request again there.
+  if (escalate && mode === 'chat') return run(text, { spoken, origin, label, forceMode: 'work' });
+
+  // Plain-English versions of common failures
+  if (/credit balance is too low/i.test(finalText)) finalText = 'I am out of Anthropic credit, sir. Top it up at console dot anthropic dot com, billing.';
 
   broadcast({ type: 'say', text: finalText, speak: spoken });
   return finalText;
