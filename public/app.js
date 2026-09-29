@@ -294,7 +294,12 @@
     rec.continuous = true; rec.interimResults = true; rec.lang = params.get('lang') || 'en-US';
     rec.onstart = () => { recOn = true; };
     rec.onend = () => {
-      recOn = false; if (pending) flush(); uttStart = 0; lastLen = 0;
+      recOn = false;
+      // The browser ends a listening session by itself after a short silence. If we still want the mic,
+      // do NOT send the command yet: keep the words so far and let the pause timer decide.
+      if (pending && recWanted && !pending.wakeOnly) carry = lastHeard;
+      else if (pending) flush();
+      uttStart = 0; lastLen = 0;
       const wait = recErrs.length >= 3 ? 8000 : 250;   // repeated failures: pause before retrying
       if (recWanted) setTimeout(() => { if (recWanted && !recOn) try { rec.start(); } catch {} }, wait);
     };
@@ -341,8 +346,19 @@
   // ---- utterance assembly ----
   // Phones send many small "final" chunks per sentence (sometimes repeating earlier words),
   // so we stitch them together and only act once you've been quiet for SILENCE_MS.
-  const SILENCE_MS = MOBILE ? 1600 : 1200;
-  let uttStart = 0, lastLen = 0, uttTimer = null, pending = null;
+  // How long Jarvis waits after you stop talking before he acts. Natural pauses between sentences
+  // are longer than this used to allow, so it is now about 2 seconds (like the Claude app).
+  // Trailing words like "and", "then", "to" mean you are mid-thought, so he waits a bit longer.
+  // Change it any time with ?pause=2500 on the address (milliseconds); it is remembered on this phone.
+  const PAUSE_MS = (() => {
+    const v = Number(params.get('pause'));
+    if (v >= 600 && v <= 8000) { try { localStorage.setItem('jarvisPause', String(v)); } catch {} return v; }
+    try { const k = Number(localStorage.getItem('jarvisPause')); if (k >= 600 && k <= 8000) return k; } catch {}
+    return 2100;
+  })();
+  const MID_THOUGHT = /(,|\b(and|but|so|then|also|or|to|the|a|an|for|with|of|in|on|that|which|because|if|when|my|your|is|are|i|it)|\.\.\.?)\s*$/i;
+  const silenceFor = text => PAUSE_MS + (MID_THOUGHT.test(text || '') ? 1300 : 0);
+  let uttStart = 0, lastLen = 0, uttTimer = null, pending = null, carry = '', lastHeard = '';
   function joinResults(results, from) {
     const parts = [];
     for (let i = from; i < results.length; i++) {
@@ -367,6 +383,7 @@
   function flush() {
     clearTimeout(uttTimer); uttTimer = null;
     const p = pending; pending = null;
+    carry = ''; lastHeard = '';
     uttStart = lastLen;
     if (!p) return;
     if (p.wakeOnly) return goActive();
@@ -378,8 +395,11 @@
   function onSpeech(e) {
     lastLen = e.results.length;
     if (uttStart > lastLen) uttStart = 0;
-    const heard = joinResults(e.results, uttStart);
-    if (!heard) return;
+    const now = joinResults(e.results, uttStart);
+    if (!now) return;
+    // words from earlier listening sessions of this same command (see rec.onend)
+    const heard = carry ? carry + ' ' + now : now;
+    lastHeard = heard;
 
     if (mode === 'active') {
       clearTimeout(activeTimer);
@@ -400,7 +420,7 @@
       pending = after.trim() ? { text: after, fromWake: true } : { wakeOnly: true };
     }
     clearTimeout(uttTimer);
-    uttTimer = setTimeout(flush, pending?.wakeOnly ? 900 : SILENCE_MS);
+    uttTimer = setTimeout(flush, pending?.wakeOnly ? 1100 : silenceFor(pending?.text));
   }
 
   function submit(text) {
