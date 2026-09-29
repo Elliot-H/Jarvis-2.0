@@ -68,7 +68,7 @@
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (m.speak && !DISPLAY_ONLY && booted) speak(m.text);
-        else { caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY) resumeListening(); }
+        else { caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
@@ -220,7 +220,7 @@
     if (!clean) { setState('idle'); resumeListening(); return; }
     speaking = true; pauseListening(); setState('speaking');
     caption(clean);
-    const done = () => { if (!speaking) return; speaking = false; currentAudio = null; setState('idle'); resumeListening(); };
+    const done = () => { if (!speaking) return; speaking = false; currentAudio = null; setState('idle'); afterReply(clean); };
 
     if (cfg.elevenlabs) {
       ensureAudio();
@@ -288,6 +288,11 @@
     if (!rec || DISPLAY_ONLY) return;
     mode = 'passive'; recWanted = true;
     if (!recOn) try { rec.start(); } catch {}
+  }
+  // If the reply ended with a question, listen for the answer straight away (no wake word needed)
+  function afterReply(text) {
+    if (/\?\s*["')\]]*\s*$/.test(text || '')) goActive();
+    else resumeListening();
   }
   function goActive() {
     stopSpeaking(false);
