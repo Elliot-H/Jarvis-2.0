@@ -188,9 +188,16 @@
     g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.18, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .22);
     o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t + .25);
   }
+  const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   async function startMicMeter() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (MOBILE) {
+        // Phones only let ONE thing use the mic. Keep it free for speech recognition.
+        stream.getTracks().forEach(t => t.stop());
+        chip('#chipMic', 'ok', 'MIC');
+        return true;
+      }
       const src = audioCtx.createMediaStreamSource(stream);
       micAnalyser = audioCtx.createAnalyser(); micAnalyser.fftSize = 256; micAnalyser.smoothingTimeConstant = .8;
       src.connect(micAnalyser);
@@ -257,8 +264,18 @@
     rec.onstart = () => { recOn = true; };
     rec.onend = () => { recOn = false; if (recWanted) setTimeout(() => { try { rec.start(); } catch {} }, 250); };
     rec.onerror = e => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      const why = {
+        'not-allowed': 'Microphone is blocked. Tap the lock icon in the address bar and allow the mic.',
+        'service-not-allowed': 'Speech recognition is turned off in this browser. Use Chrome.',
+        'audio-capture': 'Another app is using the microphone.',
+        network: 'Speech service unreachable. Check your connection.'
+      }[e.error] || ('Speech error: ' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { recWanted = false; chip('#chipMic', 'bad', 'MIC BLOCKED'); }
+      else chip('#chipMic', 'warn', 'MIC ' + e.error.toUpperCase());
+      addActivity(why); caption(why, { typed: false, pre: '!!' });
     };
+    rec.onaudiostart = () => chip('#chipMic', 'ok', 'MIC');
     rec.onresult = onSpeech;
     recWanted = true; try { rec.start(); } catch {}
   }
@@ -381,7 +398,7 @@
     } else if (fakeLevel) {
       targetLevel = .35 + Math.abs(Math.sin(t * 9)) * .35 * Math.random();
       for (let i = 0; i < freq.length; i++) freq[i] = Math.random() * 200 * targetLevel;
-    } else { targetLevel = state === 'thinking' ? .25 : .06 + Math.sin(t * 1.6) * .03; freq.fill(0); }
+    } else { targetLevel = state === 'thinking' ? .25 : state === 'listening' ? .3 + Math.sin(t * 5) * .1 : .06 + Math.sin(t * 1.6) * .03; freq.fill(0); }
     level += (targetLevel - level) * .18;
 
     // color lerp
