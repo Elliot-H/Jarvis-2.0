@@ -613,7 +613,7 @@
     try { cfg = await (await fetch('/api/config')).json(); } catch {}
     $('#brandName').textContent = cfg.name.split('').join('.').toUpperCase() + '.';
     $('#wakeHint').textContent = cap(cfg.wakeWord);
-    chip('#chipVoice', cfg.elevenlabs ? 'ok' : 'warn', cfg.elevenlabs ? 'ELEVENLABS' : 'BASIC VOICE');
+    chip('#chipVoice', cfg.elevenlabs ? 'ok' : 'warn', cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE');
     if (DISPLAY_ONLY) { $('#boot').classList.add('hide'); booted = true; $('.bottom .cmd').style.display = 'none'; chip('#chipMic', '', 'DISPLAY'); }
     setState('idle', { echo: false });
     resize(); connect(); requestAnimationFrame(frame);

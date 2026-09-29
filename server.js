@@ -1,6 +1,6 @@
 // Jarvis HUD server
 // Brain: Claude Agent SDK (Claude Code under the hood) + MCP connections
-// Voice: ElevenLabs TTS (falls back to the browser voice if no key)
+// Voice: Fish Audio or ElevenLabs TTS (falls back to the browser voice if no key)
 // Front-end: sci-fi HUD served from /public, talks over WebSocket
 
 import 'dotenv/config';
@@ -471,7 +471,8 @@ app.get('/api/config', (_req, res) => {
     name: process.env.JARVIS_NAME || 'JARVIS',
     wakeWord: (process.env.WAKE_WORD || 'jarvis').toLowerCase(),
     userTitle: process.env.USER_TITLE || 'sir',
-    elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY)
+    elevenlabs: Boolean(process.env.FISH_API_KEY || process.env.ELEVENLABS_API_KEY),
+    voiceProvider: process.env.FISH_API_KEY ? 'FISH AUDIO' : 'ELEVENLABS'
   });
 });
 
@@ -512,11 +513,51 @@ function explainVoiceError(status, body) {
   if (status === 401) return 'The ElevenLabs API key is wrong or was deleted.';
   return `ElevenLabs error ${status}: ${b.slice(0, 160)}`;
 }
-app.get('/api/voice-status', (_req, res) => res.json({ configured: Boolean(process.env.ELEVENLABS_API_KEY), ...voiceStatus }));
+app.get('/api/voice-status', (_req, res) => res.json({ configured: Boolean(process.env.FISH_API_KEY || process.env.ELEVENLABS_API_KEY), ...voiceStatus }));
+
+// Fish Audio: community "JARVIS" voice model. Used first when FISH_API_KEY is set.
+function explainFishError(status, body) {
+  const b = String(body || '');
+  if (status === 401) return 'The Fish Audio API key is wrong or was deleted.';
+  if (status === 402 || /balance|credit|payment/i.test(b)) return 'Fish Audio is out of credit. Add a few dollars at fish.audio.';
+  if (status === 404 || /reference|model.*not.*found/i.test(b)) return 'The Fish Audio voice ID (FISH_VOICE_ID) was not found.';
+  if (status === 429) return 'Fish Audio is rate limiting requests. Try again in a moment.';
+  return `Fish Audio error ${status}: ${b.slice(0, 160)}`;
+}
+async function fishTts(text, res) {
+  const voice = process.env.FISH_VOICE_ID || 'b841fc010afe43efa1b9fb702832988d'; // community "JARVIS 1"
+  try {
+    const r = await fetch(process.env.FISH_API_URL || 'https://api.fish.audio/v1/tts', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.FISH_API_KEY}`, 'Content-Type': 'application/json', model: process.env.FISH_MODEL || 's1' },
+      body: JSON.stringify({ text, reference_id: voice, format: 'mp3', mp3_bitrate: 128, latency: 'balanced', normalize: true })
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      voiceStatus = { ok: false, reason: explainFishError(r.status, body), at: new Date().toISOString() };
+      console.error('Fish Audio error', r.status, body.slice(0, 300));
+      return res.status(502).end();
+    }
+    voiceStatus = { ok: true, reason: '', at: new Date().toISOString() };
+    res.setHeader('Content-Type', 'audio/mpeg');
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (e) {
+    console.error('Fish TTS failed', e);
+    voiceStatus = { ok: false, reason: 'Could not reach Fish Audio: ' + String(e.message || e).slice(0, 120), at: new Date().toISOString() };
+    res.status(502).end();
+  }
+}
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   const text = String(req.body?.text || req.query?.text || '').slice(0, 2500);
+  if (process.env.FISH_API_KEY && text) return fishTts(text, res);
   if (!key || !text) return res.status(204).end();
   const voice = process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'; // "Daniel" – calm, polished British male
   try {
@@ -579,5 +620,5 @@ server.listen(PORT, HOST, () => {
   console.log(`\n  JARVIS online → http://localhost:${PORT}`);
   console.log(`  Connections: dashboard${mcp.length ? ', ' + mcp.join(', ') : ''}`);
   console.log(`  PIN lock: ${PIN ? 'on' : 'OFF (set JARVIS_PIN before putting this online)'}`);
-  console.log(`  Voice: ${process.env.ELEVENLABS_API_KEY ? 'ElevenLabs' : 'browser fallback (add ELEVENLABS_API_KEY for the real voice)'}\n`);
+  console.log(`  Voice: ${process.env.FISH_API_KEY ? 'Fish Audio' : process.env.ELEVENLABS_API_KEY ? 'ElevenLabs' : 'browser fallback (add ELEVENLABS_API_KEY for the real voice)'}\n`);
 });
