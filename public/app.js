@@ -50,6 +50,10 @@
     ws.onmessage = e => handle(JSON.parse(e.data));
   }
   function send(o) { if (ws?.readyState === 1) ws.send(JSON.stringify(o)); }
+  // Report screen errors to the server so Jarvis can read and fix them
+  const reportErr = t => { try { send({ type: 'client_error', text: `${t} | ${navigator.userAgent.slice(0, 80)}` }); } catch {} };
+  window.addEventListener('error', e => reportErr(`${e.message} @ ${e.filename}:${e.lineno}`));
+  window.addEventListener('unhandledrejection', e => reportErr('promise: ' + (e.reason?.stack || e.reason)));
   function chip(sel, cls, txt) { const c = $(sel); c.className = 'chip ' + cls; if (txt) c.querySelector('span').textContent = txt; }
 
   function handle(m) {
@@ -273,7 +277,7 @@
       }[e.error] || ('Speech error: ' + e.error);
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { recWanted = false; chip('#chipMic', 'bad', 'MIC BLOCKED'); }
       else chip('#chipMic', 'warn', 'MIC ' + e.error.toUpperCase());
-      addActivity(why); caption(why, { typed: false, pre: '!!' });
+      addActivity(why); caption(why, { typed: false, pre: '!!' }); reportErr('speech: ' + e.error);
     };
     rec.onaudiostart = () => chip('#chipMic', 'ok', 'MIC');
     rec.onresult = onSpeech;

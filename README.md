@@ -38,6 +38,20 @@ The reactor changes with its state: **cyan** = standby, **white** = listening, *
 
 The wake word works while the Jarvis tab is open and the screen is on. Phones stop the mic when the screen locks.
 
+## Self-repair
+
+Jarvis can change and fix its own code: "Jarvis, make the reactor purple", "Jarvis, check your logs and fix the mic", "Jarvis, roll back your last change".
+
+How it stays safe:
+- It edits a copy of its code, then checks it: syntax, a scan for leaked keys, and a real startup test of the new version.
+- It tells you what changed and asks **"Shall I deploy, sir?"**. Nothing goes live until you say yes in your next message.
+- A deploy is a commit to GitHub, so Railway rebuilds (about 2 minutes). If the new version fails Railway's health check, the old one keeps running.
+- "Roll back" restores the previous version.
+- If the main screen ever breaks, open **/safe** on the same link. It's a plain backup screen where you can still type to Jarvis.
+- Jarvis can't read its own keys, and it can only edit files in its code copy.
+
+Setup: add `GITHUB_TOKEN` in Railway → Variables. Create it as a GitHub fine-grained token with access to only this repo and **Contents: Read and write**.
+
 ## Extra screens (office Pi, shop monitors, phone)
 
 Open `http://<PC-IP>:7777/?display=1` on any device on the network. That gives a mirror of the HUD with no mic and no voice, which is right for your Jarvis V2 Pi kiosks (Chromium kiosk mode). Voice stays on the main PC.

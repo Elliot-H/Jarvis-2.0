@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { createSelfRepair } from './self.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 7777);
@@ -23,6 +24,19 @@ const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const WORKSPACE = process.env.JARVIS_WORKSPACE || path.join(__dirname, 'workspace');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(WORKSPACE, { recursive: true });
+
+// ---------- log ring buffer (Jarvis can read this to diagnose itself) ----------
+const LOG = [];
+const logs = {
+  push(kind, msg) { LOG.push(`${new Date().toISOString().slice(11, 19)} [${kind}] ${String(msg).slice(0, 2000)}`); if (LOG.length > 500) LOG.shift(); },
+  tail(n) { return LOG.slice(-n).join('\n'); }
+};
+for (const k of ['log', 'warn', 'error']) {
+  const orig = console[k].bind(console);
+  console[k] = (...a) => { logs.push(k, a.map(x => x instanceof Error ? x.stack : typeof x === 'string' ? x : JSON.stringify(x)).join(' ')); orig(...a); };
+}
+process.on('uncaughtException', e => console.error('uncaught', e));
+process.on('unhandledRejection', e => console.error('unhandled rejection', e));
 
 // ---------- persisted dashboard state ----------
 function loadState() {
@@ -114,6 +128,19 @@ const dashboard = createSdkMcpServer({
   ]
 });
 
+function setPanel(id, panel) {
+  if (panel) state.panels[id] = { id, ...panel, updatedAt: new Date().toISOString() };
+  else delete state.panels[id];
+  saveState();
+  broadcast({ type: 'panels', panels: state.panels });
+}
+
+// ---------- self-repair (Jarvis edits, tests and redeploys its own code) ----------
+let turnCounter = 0;
+let turn = { id: 0, text: '', origin: '' };
+const selfRepair = createSelfRepair({ tool, z, appDir: __dirname, workspace: WORKSPACE, getTurn: () => turn, broadcast, setPanel, logs });
+const selfServer = createSdkMcpServer({ name: 'self', version: '1.0.0', tools: selfRepair.tools });
+
 // ---------- external MCP connections from config/mcp.json ----------
 function loadMcp() {
   const file = path.join(CONFIG_DIR, 'mcp.json');
@@ -140,18 +167,21 @@ let current = null; // running Query, for interrupt
 const queue = [];
 
 function ask(text, opts = {}) {
-  queue.push({ text, opts });
-  if (!busy) drain();
+  return new Promise(resolve => {
+    queue.push({ text, opts, resolve });
+    if (!busy) drain();
+  });
 }
 async function drain() {
   while (queue.length) {
-    const { text, opts } = queue.shift();
-    await run(text, opts);
+    const { text, opts, resolve } = queue.shift();
+    resolve(await run(text, opts));
   }
 }
 
 async function run(text, { spoken = true, origin = 'user', label } = {}) {
   busy = true;
+  turn = { id: ++turnCounter, text, origin };
   broadcast({ type: 'state', state: 'thinking' });
   broadcast({ type: 'log', role: origin, text: label || text });
   const now = new Date();
@@ -159,13 +189,16 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
   const hud = `\nOn the HUD: ${Object.values(state.stats).map(s => `${s.label}=${s.value}${s.delta ? ` (${s.delta})` : ''}`).join('; ') || 'nothing yet'}.`;
 
   const external = loadMcp();
-  const mcpServers = { dashboard, ...external };
+  const mcpServers = { dashboard, self: selfServer, ...external };
   const persona = readText('persona.md');
   const allowed = [
-    'mcp__dashboard',
+    'mcp__dashboard', 'mcp__self',
     ...Object.keys(external).map(n => `mcp__${n}`),
-    'WebSearch', 'WebFetch', 'Read', 'Glob', 'Grep', 'TodoWrite',
-    ...(process.env.JARVIS_ALLOW_SHELL === '1' ? ['Bash', 'Write', 'Edit'] : [])
+    'WebSearch', 'WebFetch', 'TodoWrite',
+    // file access stays inside Jarvis's workspace; code edits only inside ./self
+    'Read(./**)', 'Glob(./**)', 'Grep(./**)',
+    'Edit(./self/**)', 'Write(./self/**)', 'MultiEdit(./self/**)',
+    ...(process.env.JARVIS_ALLOW_SHELL === '1' ? ['Bash'] : [])
   ];
 
   let finalText = '';
@@ -178,9 +211,10 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
         systemPrompt: { type: 'preset', preset: 'claude_code', append: persona + clock + hud },
         mcpServers,
         allowedTools: allowed,
+        disallowedTools: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//etc/**)', 'Read(~/**)', 'Read(//root/**)'],
         permissionMode: 'dontAsk', // voice assistant can't click "approve": anything not listed above is denied
         resume: state.sessionId || undefined,
-        maxTurns: Number(process.env.JARVIS_MAX_TURNS || 30)
+        maxTurns: Number(process.env.JARVIS_MAX_TURNS || 60)
       }
     });
 
@@ -216,6 +250,7 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
   }
 
   broadcast({ type: 'say', text: finalText, speak: spoken });
+  return finalText;
 }
 
 function prettyTool(name, input) {
@@ -233,7 +268,7 @@ async function briefing(reason = 'scheduled') {
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
 }
 const every = Number(process.env.BRIEFING_EVERY_MINUTES || 0);
-if (every > 0) setInterval(() => { if (!busy && !queue.length) briefing('scheduled'); }, every * 60_000);
+if (every > 0 && !process.env.JARVIS_SMOKE) setInterval(() => { if (!busy && !queue.length) briefing('scheduled'); }, every * 60_000);
 
 // ---------- HTTP ----------
 const app = express();
@@ -281,6 +316,31 @@ app.get('/api/config', (_req, res) => {
     elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY)
   });
 });
+
+// Plain text ask (used by the safe-mode page)
+app.post('/api/ask', async (req, res) => {
+  const t = String(req.body?.text || '').trim().slice(0, 4000);
+  if (!t) return res.status(400).json({ error: 'empty' });
+  res.json({ reply: await ask(t, { spoken: false }) });
+});
+app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
+
+// Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to
+// fix or roll back) even if the main screen breaks.
+app.get('/safe', (_req, res) => res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis · Safe mode</title>
+<style>body{margin:0;background:#02060c;color:#cfefff;font:16px system-ui,sans-serif;padding:16px}h1{color:#ffb547;font-size:18px;letter-spacing:.2em}
+#log{white-space:pre-wrap;line-height:1.45;margin:12px 0 90px}.u{color:#8fb3c4}.j{color:#8af3ff;margin-bottom:12px}
+form{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;padding:12px;background:#02060c;border-top:1px solid #3fe0ff55}
+input{flex:1;font-size:16px;padding:12px;background:#041422;color:#cfefff;border:1px solid #3fe0ff55}button{padding:0 16px;background:#3fe0ff;color:#001018;border:0;font-weight:700}
+a{color:#3fe0ff}</style></head><body><h1>JARVIS · SAFE MODE</h1>
+<p>Plain backup screen. Try: "roll back your last change" or "check your logs and fix the main screen". <a href="/">Back to main screen</a></p>
+<div id="log"></div><form id="f"><input id="t" placeholder="Type to Jarvis…" autocomplete="off"><button>SEND</button></form>
+<script>
+f.onsubmit=async e=>{e.preventDefault();const v=t.value.trim();if(!v)return;t.value='';
+log.insertAdjacentHTML('beforeend','<div class="u"></div><div class="j">…</div>');const u=log.children[log.children.length-2],j=log.lastChild;u.textContent='You: '+v;
+try{const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:v})});const d=await r.json();j.textContent='Jarvis: '+(d.reply||d.error)}catch(err){j.textContent='Error: '+err}
+scrollTo(0,document.body.scrollHeight)};
+</script></body></html>`));
 
 // ElevenLabs text-to-speech proxy (keeps the key on the server)
 app.all('/api/tts', async (req, res) => {
@@ -335,6 +395,7 @@ wss.on('connection', ws => {
       broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
     }
     if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
+    if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
   });
 });
 
