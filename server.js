@@ -128,6 +128,51 @@ const dashboard = createSdkMcpServer({
   ]
 });
 
+// ---------- failed commands (remembered across restarts so Jarvis can revisit them) ----------
+state.failures ||= [];
+const FAILURE_TTL = 7 * 24 * 60 * 60_000; // forget failed commands after about a week
+function pruneFailures() {
+  const cutoff = Date.now() - FAILURE_TTL;
+  const kept = state.failures.filter(f => Date.parse(f.at) > cutoff);
+  if (kept.length !== state.failures.length) { state.failures = kept; saveState(); }
+}
+function recordFailure(command, reason) {
+  pruneFailures();
+  const f = { id: crypto.randomUUID().slice(0, 8), command: String(command).slice(0, 500), reason: String(reason).slice(0, 300), at: new Date().toISOString() };
+  state.failures.push(f);
+  if (state.failures.length > 50) state.failures.shift();
+  saveState();
+  return f;
+}
+const failuresServer = createSdkMcpServer({
+  name: 'failures',
+  version: '1.0.0',
+  tools: [
+    tool(
+      'note_failure',
+      'Remember a command you could not carry out: cut off mid-sentence, unclear, blocked, missing a connection, or it errored. Call this before replying whenever a request did not succeed.',
+      { command: z.string().describe('what the Owner asked, as heard'), reason: z.string().describe('why it failed, in a few words') },
+      async ({ command, reason }) => ({ content: [{ type: 'text', text: `Remembered as failure ${recordFailure(command, reason).id}.` }] })
+    ),
+    tool(
+      'list_failures',
+      'List the commands that failed earlier and have not been resolved yet.',
+      {},
+      async () => (pruneFailures(), { content: [{ type: 'text', text: state.failures.length ? state.failures.map(f => `${f.id} · ${f.at.slice(0, 16).replace('T', ' ')} · "${f.command}" · ${f.reason}`).join('\n') : 'No failed commands on record.' }] })
+    ),
+    tool(
+      'resolve_failure',
+      'Forget a failed command once it has been done or the Owner no longer wants it. Pass "*" to clear all.',
+      { id: z.string() },
+      async ({ id }) => {
+        state.failures = id === '*' ? [] : state.failures.filter(f => f.id !== id);
+        saveState();
+        return { content: [{ type: 'text', text: 'Resolved.' }] };
+      }
+    )
+  ]
+});
+
 function setPanel(id, panel) {
   if (panel) state.panels[id] = { id, ...panel, updatedAt: new Date().toISOString() };
   else delete state.panels[id];
@@ -187,12 +232,16 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
   const now = new Date();
   const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}.`;
   const hud = `\nOn the HUD: ${Object.values(state.stats).map(s => `${s.label}=${s.value}${s.delta ? ` (${s.delta})` : ''}`).join('; ') || 'nothing yet'}.`;
+  pruneFailures();
+  const failed = state.failures.length
+    ? `\nUnresolved failed commands (resolve_failure once done): ${state.failures.slice(-10).map(f => `[${f.id}] "${f.command}" (${f.reason})`).join('; ')}.`
+    : '';
 
   const external = loadMcp();
-  const mcpServers = { dashboard, self: selfServer, ...external };
+  const mcpServers = { dashboard, self: selfServer, failures: failuresServer, ...external };
   const persona = readText('persona.md');
   const allowed = [
-    'mcp__dashboard', 'mcp__self',
+    'mcp__dashboard', 'mcp__self', 'mcp__failures',
     ...Object.keys(external).map(n => `mcp__${n}`),
     'WebSearch', 'WebFetch', 'TodoWrite',
     // file access stays inside Jarvis's workspace; code edits only inside ./self
@@ -208,7 +257,7 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
       options: {
         cwd: WORKSPACE,
         model: process.env.JARVIS_MODEL || undefined,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: persona + clock + hud },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: persona + clock + hud + failed },
         mcpServers,
         allowedTools: allowed,
         disallowedTools: ['Read(//proc/**)', 'Read(//sys/**)', 'Read(//etc/**)', 'Read(~/**)', 'Read(//root/**)'],
@@ -233,7 +282,7 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
       if (m.type === 'result') {
         if (m.session_id) { state.sessionId = m.session_id; saveState(); }
         if (m.subtype === 'success') finalText = m.result || '';
-        else finalText = 'I ran into a problem finishing that, sir. Check the log.';
+        else { finalText = 'I ran into a problem finishing that, sir. Check the log.'; if (origin === 'user') recordFailure(text, m.subtype); }
         broadcast({ type: 'meta', cost: m.total_cost_usd, ms: m.duration_ms });
       }
     }
@@ -242,6 +291,7 @@ async function run(text, { spoken = true, origin = 'user', label } = {}) {
     finalText = /auth|api key|login/i.test(String(err))
       ? 'I cannot reach my brain, sir. The Anthropic key or Claude login needs attention.'
       : `Something went wrong: ${String(err.message || err).slice(0, 160)}`;
+    if (origin === 'user') recordFailure(text, String(err.message || err));
     // a bad resume id shouldn't brick the assistant
     if (/session|resume/i.test(String(err))) { state.sessionId = null; saveState(); }
   } finally {
