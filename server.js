@@ -1268,7 +1268,7 @@ handlers.speaker_list = async () => state.speakers.length ? state.speakers.map(x
 handlers.speaker_remove = async ({ alias }) => { const n = state.speakers.length; state.speakers = state.speakers.filter(x => norm(x.alias) !== norm(alias) && norm(x.name) !== norm(alias)); saveState(); return n === state.speakers.length ? 'No such speaker.' : 'Removed.'; };
 handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   const sp = pickSpeaker(device) || state.speakers[0] || { name: process.env.BT_SPEAKER_NAME || 'Rockville' };
-  await deviceAction('media_key', { key: 'pause' }, 4000);   // stop the music first so it does not jump to the phone speaker
+  await deviceAction('media_key', { key: 'stop' }, 4000);   // stop the music first so it does not jump to the phone speaker
   const off = process.env.BT_TURN_OFF === '1' && !leave_bluetooth_on;  // Android blocks Tasker from switching Bluetooth off; disconnect only by default
   const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTOff');
   const c = await deviceAction('bt_disconnect', { name: sp.name, task, off }, 25000);

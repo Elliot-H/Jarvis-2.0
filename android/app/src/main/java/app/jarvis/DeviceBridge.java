@@ -181,7 +181,7 @@ public class DeviceBridge {
 
   // ---- Spotify without the Web API: drive the Spotify app like a remote ----
   private void mediaKey(String key) {
-    int code = "pause".equals(key) ? KeyEvent.KEYCODE_MEDIA_PAUSE : "next".equals(key) ? KeyEvent.KEYCODE_MEDIA_NEXT
+    int code = "stop".equals(key) ? KeyEvent.KEYCODE_MEDIA_STOP : "pause".equals(key) ? KeyEvent.KEYCODE_MEDIA_PAUSE : "next".equals(key) ? KeyEvent.KEYCODE_MEDIA_NEXT
         : "previous".equals(key) ? KeyEvent.KEYCODE_MEDIA_PREVIOUS : KeyEvent.KEYCODE_MEDIA_PLAY;
     AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
     am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
