@@ -76,6 +76,7 @@ public class SttBridge {
     try { if (feedRead != null) feedRead.close(); } catch (Exception ignored) {}
     feedRead = null; feedWrite = null;
   }
+  static volatile long noResumeUntil = 0;   // set when the server deliberately paused/stopped/closed the music: never auto-resume then
   private boolean musicBefore = false;   // music was playing when the mic opened (the recognizer pauses it)
   private boolean wantPause = false;     // he just told Jarvis to pause/stop: do not resume
   private final Runnable resume = this::doResume;
@@ -83,6 +84,7 @@ public class SttBridge {
     if (!musicBefore) return;
     musicBefore = false;
     try {
+      if (System.currentTimeMillis() < noResumeUntil) wantPause = true;
       if (!wantPause && !am.isMusicActive()) {
         long t = android.os.SystemClock.uptimeMillis();
         am.dispatchMediaKeyEvent(new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, 0));
@@ -92,7 +94,8 @@ public class SttBridge {
     } catch (Exception ignored) {}
     wantPause = false;
   }
-  private void scheduleResume() { if (musicBefore) { ui.removeCallbacks(resume); ui.postDelayed(resume, 1500); } }
+  private void scheduleResume() { if (musicBefore && System.currentTimeMillis() < noResumeUntil) musicBefore = false;
+    if (musicBefore) { ui.removeCallbacks(resume); ui.postDelayed(resume, 1500); } }
 
   /** Watchdog: the recognizer sometimes accepts startListening and then never answers (no ready, no error),
    *  which left the mic "on" with nothing listening. Tear it down so the page can start clean. */
@@ -153,7 +156,7 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
-    try { if (!musicBefore) musicBefore = am.isMusicActive(); } catch (Exception ignored) {}
+    try { if (!musicBefore) musicBefore = am.isMusicActive() && System.currentTimeMillis() >= noResumeUntil; } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;
     try { if (FEED_ENABLED && !feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}

@@ -1514,9 +1514,21 @@ handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   const off = process.env.BT_TURN_OFF === '1' && !leave_bluetooth_on;  // Android blocks Tasker from switching Bluetooth off; disconnect only by default
   const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTOff');
   const c = await deviceAction('bt_disconnect', { name: sp.name, task, off }, 25000);
-  await deviceAction('media_key', { key: 'pause' }, 3000).catch(() => {});   // if anything resumed on the phone speaker after the link dropped
+  // If anything is still playing (on the phone speaker now that the link dropped), keep stopping and closing it, up to 3 times.
+  let still = 'unknown';
+  for (let n = 0; n < 3; n++) {
+    await new Promise(r => setTimeout(r, 1200));
+    const m = await deviceAction('music_active', {}, 3000).catch(() => ({ ok: false, detail: 'unknown' }));
+    still = m.ok ? m.detail : 'unknown';
+    if (still !== 'playing') break;
+    await deviceAction('media_key', { key: 'pause' }, 3000).catch(() => {});
+    await deviceAction('media_key', { key: 'stop' }, 3000).catch(() => {});
+    await new Promise(r => setTimeout(r, 3500));
+    await deviceAction('close_app', { pkg: process.env.MUSIC_APP_PACKAGE || 'com.spotify.music' }, 4000).catch(() => {});
+  }
+  broadcast({ type: 'activity', text: `Music after disconnect: ${still}` });
   broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
-  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. The music is stopped and Spotify closed. Tell the Owner.` : `Could not finish: ${c.detail}`;
+  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. ${still === 'playing' ? 'BUT music is STILL playing on the phone after 3 tries: say so plainly.' : 'The music is stopped and Spotify closed. Tell the Owner.'}` : `Could not finish: ${c.detail}`;
 };
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
