@@ -18,7 +18,7 @@ Read this first. It lets a fresh Claude session (for example one opened from the
 - Voice, in priority order: Fish Audio (community "JARVIS 1" model, voice id `b841fc010afe43efa1b9fb702832988d`, used when `FISH_API_KEY` is set) → ElevenLabs (default voice Daniel `onwK4e9ZLuTAKqWW03F9`, model `eleven_flash_v2_5`) → browser speech synthesis. `/api/voice-status` and the Comms Log show the plain-English reason when the real voice fails.
 - Listening: browser SpeechRecognition (Chrome). Android quirks handled: mic stream released on mobile, utterance stitching with silence timer, wake-word variants, auto re-listen after Jarvis asks a question.
 - Security: PIN lock (`JARVIS_PIN`, cookie HMAC, rate limit 8 tries / 10 min, WS verifyClient). `/safe` fallback page, `/health`, `/api/logs`.
-- Phone install: PWA (manifest, service worker, arc-reactor icons). Chrome ⋮ → Add to Home screen.
+- Phone install: PWA (manifest, service worker, icons). Icons (PWA + Android adaptive icon PNGs in drawable-nodpi) are a still frame of the HUD reactor, rendered from the same drawing code; the boot screen shows the live reactor (`#bootReactor`). Chrome ⋮ → Add to Home screen.
 - Self-repair: uses the GitHub REST API (no git binary needed). Flow: checkout → edit `./self` copy → `self_check` (syntax, secret scan, boot test on a random port) → Jarvis asks "Shall I deploy, sir?" → `self_deploy` only after the Owner says yes in a LATER turn → commit to GitHub → Railway rebuilds. `self_rollback` makes a revert commit. Needs `GITHUB_TOKEN` (fine-grained, repo Contents: Read and write).
 
 ## Environment variables (names only)

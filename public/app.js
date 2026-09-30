@@ -636,7 +636,8 @@
   }
 
   // ======================= reactor =======================
-  const rc = $('#reactor'), rx = rc.getContext('2d');
+  const rc = $('#reactor'); let rx = rc.getContext('2d');
+  const brc = $('#bootReactor'), brx = brc && brc.getContext('2d');
   const bg = $('#bg'), bx = bg.getContext('2d');
   let W, H, BW, BH, dpr = Math.min(2, window.devicePixelRatio || 1);
   function resize() {
@@ -677,6 +678,7 @@
 
     drawBg(t);
     drawReactor(t);
+    if (brx && !$('#boot').classList.contains('hide')) drawBootReactor(t);
     requestAnimationFrame(frame);
   }
 
@@ -797,6 +799,15 @@
     rx.textAlign = 'right'; rx.fillText(`SIG ${(level * 100).toFixed(0).padStart(3, '0')}`, -R * .92, R * .74);
 
     rx.restore();
+  }
+
+  // boot screen emblem: same reactor, drawn on its own canvas
+  function drawBootReactor(t) {
+    const r = brc.getBoundingClientRect(), w = r.width * dpr, h = r.height * dpr;
+    if (brc.width !== w || brc.height !== h) { brc.width = w; brc.height = h; }
+    const keep = [rx, W, H]; rx = brx; W = w; H = h;
+    drawReactor(t);
+    [rx, W, H] = keep;
   }
 
   // ======================= start =======================
