@@ -668,13 +668,13 @@ app.get('/api/calendar-check', async (_req, res) => {
   const r = await cal.check();
   const lines = [
     'JARVIS CALENDAR CHECK', '',
-    `Robot email (share the calendar with this): ${r.robotEmail || 'unknown'}`,
-    `GOOGLE_CALENDAR_ID in Railway: ${r.configuredId || 'NOT SET'}`,
-    `That ID works: ${r.idWorks === null ? 'not tested' : r.idWorks ? 'YES' : 'NO - ' + r.idError}`, '',
-    `Calendars the robot can see (${r.visibleCalendars.length}):`,
+    `Robot email (share each calendar with this): ${r.robotEmail || 'unknown'}`,
+    `Calendars in Railway (GOOGLE_CALENDAR_ID): ${r.configured.join(', ') || 'NOT SET'}`, '',
+    ...r.perCalendar.map(p => p.works ? `  OK   ${p.id}: ${p.events} events (14 days back to 30 ahead)` : `  FAIL ${p.id}: ${p.error}`),
+    '', `Calendars the robot has in its list (${r.visibleCalendars.length}):`,
     ...r.visibleCalendars.map(c => `  - ${c.name}  |  id: ${c.id}  |  access: ${c.access}`),
-    ...(r.eventsFound !== undefined ? ['', `Jarvis's clock says now: ${r.today} (${process.env.TZ || 'America/New_York'})`, `Events the robot sees from 14 days ago to 30 days ahead: ${r.eventsFound}`, ...(r.sample || []).map(x => '  ' + x)] : []),
-    ...(r.eventsError ? ['', 'Event listing failed: ' + r.eventsError] : []),
+    '', `Jarvis's clock says now: ${r.today} (${process.env.TZ || 'America/New_York'})`,
+    ...(r.sample.length ? ['Latest events seen:', ...r.sample.map(x => '  ' + x)] : []),
     ...(r.problem ? ['', 'PROBLEM: ' + r.problem] : [])
   ];
   res.type('text/plain').send(lines.join('\n'));

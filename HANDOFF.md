@@ -73,6 +73,8 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - Colour meanings live in `state.calendarColors` (data/stats.json) and are taught by voice ("survey" then "set"). If Railway wipes data/, set `CALENDAR_COLOR_MEANINGS` (JSON) or add a Railway volume for data/.
 - Tested only against a mock Google API. Google event colours are the fixed 11 (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil, Tomato); custom hex colours are not readable via the API.
 
+- Calendar update: `GOOGLE_CALENDAR_ID` can list several calendars, comma separated (read from all, new events go to the first unless `calendar` is named). Owner's appointments live on defiantaudio1@gmail.com (Samsung calendar app account); DEFIANT AUDIO (owner elliothernandez41@gmail.com) is a second calendar. Each calendar must be shared with the robot email ("Make changes to events") from ITS owning Google account. `/api/calendar-check` reports per-calendar status.
+
 ## Backlog (the "functions" discussion)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).
 - Meta Ads: Pipeboard MCP (`https://meta-ads.mcp.pipeboard.co/?token=...`, slot exists in `config/mcp.json`) or an open-source Meta Ads MCP (attainmentlabs/meta-ads-mcp, amekala/ads-mcp).

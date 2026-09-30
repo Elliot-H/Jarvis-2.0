@@ -85,12 +85,12 @@ export const CALENDAR_TOOLS = [
   {
     name: 'calendar_add',
     description: 'Add an event to the Owner\'s calendar. ONLY call this after he has clearly asked for that specific appointment. Times are YYYY-MM-DDTHH:MM in his time zone (a bare date makes an all-day event). Set colorId from what the colours mean (see calendar_colors). Afterwards say back the title, day, time and colour.',
-    shape: { title: z.string(), start: z.string(), end: z.string().optional().describe('default one hour after start'), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional() }
+    shape: { title: z.string(), start: z.string(), end: z.string().optional().describe('default one hour after start'), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional(), calendar: z.string().optional().describe('which calendar (full id or part of it); default is the first, the Owner\'s main one') }
   },
   {
     name: 'calendar_update',
     description: 'Change an existing event (title, time, colour, location, notes) by its id from calendar_events. ONLY after the Owner has clearly asked for the change; if more than one event could match, list them and ask which. Use colorId "default" to remove a colour. Afterwards say back what changed.',
-    shape: { eventId: z.string(), title: z.string().optional(), start: z.string().optional(), end: z.string().optional(), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional() }
+    shape: { eventId: z.string(), calendar: z.string().optional().describe('the calendar field from calendar_events'), title: z.string().optional(), start: z.string().optional(), end: z.string().optional(), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional() }
   }
 ];
 
