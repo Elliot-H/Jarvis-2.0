@@ -48,7 +48,7 @@ public class WakeBridge {
   }
 
   private void begin(String thr) {
-    if (on) return;
+    if (on || (th != null && th.isAlive())) return;   // a previous run is still shutting down
     if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) { emit("error", "mic permission"); return; }
     float t0 = 0.5f; try { t0 = Float.parseFloat(thr); } catch (Exception ignored) {}
     final float threshold = t0 > 0.05f && t0 < 1f ? t0 : 0.5f;
@@ -66,10 +66,12 @@ public class WakeBridge {
       emb = new Interpreter(map("embedding_model.tflite"), o);
       clf = new Interpreter(map("hey_jarvis_v0.1.tflite"), o);
 
+      if (!on) { cleanup(mel, emb, clf); return; }   // stopped while the models were loading
       final int rate = 16000, chunk = 1280;
       int min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
       rec = new AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, chunk * 4) * 2);
       if (rec.getState() != AudioRecord.STATE_INITIALIZED) { emit("error", "mic not available"); cleanup(mel, emb, clf); return; }
+      if (!on) { cleanup(mel, emb, clf); return; }
       rec.startRecording();
       emit("started", "");
 
