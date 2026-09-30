@@ -39,6 +39,7 @@ public class SttBridge {
   private long lastQuietDiag = 0;
   // While music plays, feed the recognizer our own mic audio (AudioRecord takes no audio focus) instead of letting it open the mic
   // itself, because opening the mic is what makes it grab focus and pause Spotify. Needs Android 13+.
+  private static final boolean FEED_ENABLED = false;   // experiment left off: it made the mic deaf on this phone
   private volatile boolean feeding = false;
   private boolean fedSession = false, feedBroken = false;   // feedBroken: the recognizer ignored our audio, stop using the feed
   private android.media.AudioRecord rec;
@@ -155,9 +156,9 @@ public class SttBridge {
     try { if (!musicBefore) musicBefore = am.isMusicActive(); } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;
-    try { if (!feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
+    try { if (FEED_ENABLED && !feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
     fedSession = fed;
-    if (!feedBroken && am.isMusicActive()) emit("diag", fed ? "music playing: feeding the recognizer our own mic audio (no audio focus)" : "music playing: own-audio feed unavailable, using the recognizer's mic");
+    if (FEED_ENABLED && !feedBroken && am.isMusicActive()) emit("diag", fed ? "music playing: feeding the recognizer our own mic audio (no audio focus)" : "music playing: own-audio feed unavailable, using the recognizer's mic");
     ui.removeCallbacks(resume);
     running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
