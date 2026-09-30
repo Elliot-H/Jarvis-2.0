@@ -742,19 +742,21 @@ handlers.voice_check = async () => {
 };
 
 // Jarvis notification clip for the phone (ntfy custom sound). Made once with the Fish JARVIS voice, then cached.
-const ALERT_FILE = path.join(DATA_DIR, 'alert-sound.mp3');
-const ALERT_LINE = () => process.env.ALERT_LINE || `Pardon the interruption, ${process.env.USER_TITLE || 'sir'}. You have a new alert.`;
+const ALERT_LINE = () => process.env.ALERT_LINE || "I'm sure you're busy, but you asked me to alert you to any important news.";
+// The cache file name includes a hash of the line, so changing the wording always makes a fresh clip.
+const alertFile = line => path.join(DATA_DIR, `alert-sound-${crypto.createHash('sha1').update(line).digest('hex').slice(0, 8)}.mp3`);
 app.get('/api/alert-sound.mp3', async (req, res) => {
   try {
-    const fresh = req.query.remake !== undefined;
-    if (fresh || !fs.existsSync(ALERT_FILE)) {
+    const line = String(req.query.text || ALERT_LINE()).slice(0, 200);
+    const file = alertFile(line);
+    if (req.query.remake !== undefined || !fs.existsSync(file)) {
       if (!process.env.FISH_API_KEY) return res.status(503).type('text/plain').send('FISH_API_KEY is not set in Railway.');
-      const out = await fishFetch(String(req.query.text || ALERT_LINE()).slice(0, 200));
+      const out = await fishFetch(line);
       if (!out.r) return res.status(502).type('text/plain').send('Could not make the clip: ' + (out.status ? explainFishError(out.status, out.body) : out.body));
-      fs.writeFileSync(ALERT_FILE, Buffer.from(await out.r.arrayBuffer()));
+      fs.writeFileSync(file, Buffer.from(await out.r.arrayBuffer()));
     }
     res.setHeader('Content-Disposition', 'attachment; filename="jarvis-alert.mp3"');
-    res.type('audio/mpeg').sendFile(ALERT_FILE);
+    res.type('audio/mpeg').sendFile(file);
   } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
 });
 
