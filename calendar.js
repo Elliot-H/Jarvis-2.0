@@ -24,7 +24,12 @@ export function parseColor(v) {
   return NAME_TO_ID[s] || null;
 }
 
-export const configured = () => Boolean(process.env.GOOGLE_CALENDAR_KEY && process.env.GOOGLE_CALENDAR_ID);
+// The calendar id is cleaned before use: stray spaces or quotes removed, and email-style ids lower-cased (Google ids are lower case).
+export const calId = () => {
+  const raw = String(process.env.GOOGLE_CALENDAR_ID || '').trim().replace(/^["']|["']$/g, '').trim();
+  return raw.includes('@') ? raw.toLowerCase() : raw;
+};
+export const configured = () => Boolean(process.env.GOOGLE_CALENDAR_KEY && calId());
 const NOT_SET = 'The calendar is not connected yet. It needs GOOGLE_CALENDAR_KEY and GOOGLE_CALENDAR_ID in Railway. Tell the Owner plainly.';
 
 function key() {
@@ -52,7 +57,7 @@ async function token() {
 }
 
 async function call(method, pathAndQuery, body) {
-  const r = await fetch(`${API}/calendars/${encodeURIComponent(process.env.GOOGLE_CALENDAR_ID)}${pathAndQuery}`, {
+  const r = await fetch(`${API}/calendars/${encodeURIComponent(calId())}${pathAndQuery}`, {
     method, headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000)
   });
@@ -165,7 +170,7 @@ export async function update({ eventId, title, start, end, colorId, location, no
 
 /** Diagnostics for the Owner: which robot account this is, which calendars it can see, and whether GOOGLE_CALENDAR_ID works. */
 export async function check() {
-  const out = { robotEmail: null, configuredId: process.env.GOOGLE_CALENDAR_ID || null, visibleCalendars: [], idWorks: null, problem: null };
+  const out = { robotEmail: null, configuredId: calId() || null, visibleCalendars: [], idWorks: null, problem: null };
   try { out.robotEmail = key().client_email; } catch (e) { out.problem = e.message; return out; }
   try {
     const r = await fetch(`${API}/users/me/calendarList?minAccessRole=reader`, { headers: { Authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(20000) });
