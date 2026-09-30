@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { talk, brainConfig, chatSystemPrompt } from '../brain.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS } from '../tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS } from '../tools.js';
 import { CASES, GLOBAL_CHECK, contextFor, scriptedSearch } from './cases.js';
 
 // Candidates are matched against OpenRouter's live model list, so newer versions get picked up automatically.
@@ -23,7 +23,7 @@ export const CANDIDATES = [
 ];
 
 const WEB_SEARCH_TOOL = { name: 'web_search', description: 'Search the web for anything current: prices, weather, scores, news, hours, part availability. Returns short result snippets.', shape: { query: z.string() } };
-const TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS];
+const TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS];
 
 export async function resolveModels(cfg, ids) {
   const r = await fetch(`${cfg.baseUrl}/models`, { headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {} });
@@ -54,6 +54,7 @@ async function runCase(cfg, system, model, c) {
       if (name === 'note_failure') return 'Remembered as failure c3d4.';
       if (name === 'crypto_scan') return JSON.stringify({ coins: [{ symbol: 'BTC', price: 98000, change24h: 1.2, change7d: 4.1 }, { symbol: 'SOL', price: 210, change24h: -7.8, change7d: -3 }], movers: ['SOL', 'BTC'] }) + '\n\nHow to use this: web-search news for the biggest movers (max 3 searches), then show_panel id crypto. Analysis, not financial advice; never place trades.';
       if (name === 'crypto_watch') return 'Watchlist: solana.';
+      if (name === 'phone_alert') return 'Sent.';
       return 'Done.';
     }
   });

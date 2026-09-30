@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS } from './tools.js';
 import * as crypto_ from './crypto.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
@@ -396,7 +396,7 @@ Object.assign(handlers, {
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
   }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -485,11 +485,16 @@ const BRIEF_PROMPTS = {
 };
 async function push(title, body) {
   const topic = process.env.NTFY_TOPIC;
-  if (!topic) return;
+  if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
-    await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: title, Tags: 'chart_with_upwards_trend' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
-  } catch (e) { console.warn('phone notification failed:', String(e.message || e)); }
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
+    return r.ok ? null : `ntfy answered ${r.status}`;
+  } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
+handlers.phone_alert = async ({ title, message }) => {
+  const err = await push(title || 'Jarvis', message || '');
+  return err ? `Could not send: ${err} Tell the Owner plainly.` : 'Sent. Tell the Owner to check his phone.';
+};
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');
   if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }

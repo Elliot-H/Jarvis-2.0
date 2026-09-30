@@ -58,6 +58,14 @@ export const MODE_TOOLS = [
   }
 ];
 
+export const PHONE_TOOLS = [
+  {
+    name: 'phone_alert',
+    description: 'Send a short notification to the Owner\'s phone (through the ntfy app). Use when he asks for a test alert or asks you to notify or ping his phone. Keep the message under 200 characters.',
+    shape: { title: z.string().describe('a few words'), message: z.string() }
+  }
+];
+
 export const CRYPTO_TOOLS = [
   {
     name: 'crypto_scan',
