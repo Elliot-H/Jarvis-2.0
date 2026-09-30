@@ -517,7 +517,29 @@ async function pushNtfy(title, body) {
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
+// Pushover: a notification-only app that lets the Owner upload his own sound (website: Custom Sounds).
+// Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
+async function pushPushover(title, body) {
+  try {
+    const r = await fetch('https://api.pushover.net/1/messages.json', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        token: process.env.PUSHOVER_APP_TOKEN, user: process.env.PUSHOVER_USER_KEY,
+        title: String(title).slice(0, 250), message: String(body).slice(0, 1000) || ' ',
+        sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0'
+      }), signal: AbortSignal.timeout(10000)
+    });
+    return r.ok ? null : `Pushover answered ${r.status}: ${(await r.text()).slice(0, 160)}`;
+  } catch (e) { return String(e.message || e).slice(0, 120); }
+}
 async function push(title, body) {
+  if (process.env.PUSHOVER_APP_TOKEN && process.env.PUSHOVER_USER_KEY) {
+    const err = await pushPushover(title, body);
+    if (!err) return null;
+    console.warn('Pushover alert failed:', err);
+    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body) : process.env.NTFY_TOPIC ? await pushNtfy(title, body) : 'no backup set';
+    return backup ? `${err} (backup: ${backup})` : null;
+  }
   if (process.env.TELEGRAM_BOT_TOKEN) {
     const err = await pushTelegram(title, body);
     if (!err) return null;

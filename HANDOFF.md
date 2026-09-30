@@ -65,6 +65,9 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - Why: ntfy on the Owner's Samsung has no sound picker and plays the phone default. Telegram allows a custom sound per chat, so only Jarvis gets the clip. Setup by Owner: @BotFather /newbot, token into Railway `TELEGRAM_BOT_TOKEN`, send the bot any message once; chat id is found automatically (or `TELEGRAM_CHAT_ID`). Then in that Telegram chat: Notifications, Sound, Custom, pick jarvis-alert.mp3 (download it from /api/alert-sound.mp3).
 - `push()` sends via Telegram when the token is set, falls back to ntfy (`NTFY_TOPIC`, priority 4 via `NTFY_PRIORITY`) if Telegram fails. Crypto briefs and `phone_alert` both use it. Tested only against a mock Telegram API.
 
+## Phone alerts: Pushover (2026-09-29, preferred)
+- Owner wants ONE notification-only app with his own sound. `push()` order: Pushover (`PUSHOVER_APP_TOKEN`, `PUSHOVER_USER_KEY`, `PUSHOVER_SOUND` default `jarvis`) then Telegram then ntfy, each falling back to the next. Sound is uploaded once on pushover.net (Custom Sounds) using /api/alert-sound.mp3, named to match `PUSHOVER_SOUND`. Untested against the real API.
+
 ## Backlog (the "functions" discussion)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).
 - Meta Ads: Pipeboard MCP (`https://meta-ads.mcp.pipeboard.co/?token=...`, slot exists in `config/mcp.json`) or an open-source Meta Ads MCP (attainmentlabs/meta-ads-mcp, amekala/ads-mcp).
