@@ -106,7 +106,9 @@ public class MainActivity extends Activity {
         : Build.VERSION.SDK_INT >= 31
         ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.BLUETOOTH_CONNECT}
         : new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION};
-    for (String p : all) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
+    java.util.ArrayList<String> want = new java.util.ArrayList<>(java.util.Arrays.asList(all));
+    want.add("net.dinglisch.android.tasker.PERMISSION_RUN_TASKS"); // lets Jarvis start the Tasker Bluetooth task
+    for (String p : want) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
     if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ);
   }
 
