@@ -545,6 +545,11 @@
     else wake();
   }
   $('#bootBtn').onclick = boot;
+  // Inside the Android app there is no tap-to-start: boot straight away, and let the side key jump to listening.
+  if (/JarvisApp/.test(navigator.userAgent)) {
+    setTimeout(boot, 500);
+    window.__jarvisWake = () => { if (!booted) boot(); else goActive(); };
+  }
 
   // ======================= reactor =======================
   const rc = $('#reactor'), rx = rc.getContext('2d');
