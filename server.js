@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -688,6 +688,30 @@ async function shopAnswer(text) {
   return true;
 }
 handlers.shop_day = async ({ going }) => shopDay(going);
+// Places pinned from a street address (exact, not phone GPS). Public addresses live here in the code; private ones
+// (home) go in the Railway variable PLACES_JSON, e.g. [{"name":"Home","lat":38.9,"lon":-75.5,"radius":150}], because
+// this repo is public. Each seed is applied once (state.placeSeeds, backed up to the phone), so a place he deletes or
+// re-saves in the Places box stays the way he left it.
+const SEED_PLACES = [
+  { name: 'the shop', lat: 38.92050, lon: -75.56781, radius: SHOP_RADIUS, kind: 'work', address: '17399 S DuPont Hwy, Harrington, DE 19952', v: 1 }
+];
+function ensureSeedPlaces() {
+  let extra = []; try { extra = JSON.parse(process.env.PLACES_JSON || '[]'); } catch (e) { console.warn('PLACES_JSON is not valid JSON:', e.message); }
+  state.placeSeeds ||= {};
+  let changed = false;
+  for (const p of [...SEED_PLACES, ...(Array.isArray(extra) ? extra : [])]) {
+    const lat = Number(p.lat), lon = Number(p.lon), k = placeKey(p.name);
+    if (!k || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const tag = `${k}@${p.v || 1}:${lat.toFixed(5)},${lon.toFixed(5)}`;
+    if (state.placeSeeds[k] === tag) continue;
+    state.places = state.places.filter(x => placeKey(x.name) !== k);
+    state.places.push({ name: p.name, lat, lon, radius: Number(p.radius) || (k === 'shop' ? SHOP_RADIUS : 150), address: p.address,
+      kind: p.kind || (k === 'home' ? 'home' : k === 'shop' ? 'work' : 'place') });
+    state.placeSeeds[k] = tag; changed = true;
+  }
+  if (changed) saveState();
+}
+ensureSeedPlaces();
 
 
 handlers.weather = async ({ days } = {}) => {
@@ -1261,7 +1285,7 @@ wss.on('connection', ws => {
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
-      console.log('  restored memory from the phone backup');
+      console.log('  restored memory from the phone backup'); ensureSeedPlaces();
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
