@@ -1231,11 +1231,11 @@ app.get('/jarvis.apk', async (req, res) => {
       if (!r.ok) return res.status(502).type('text/plain').send('Could not fetch the app from GitHub: ' + r.status);
       fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
     }
-    const size = fs.statSync(file).size;
+    if (req.query.check !== undefined) return res.type('text/plain').send(`ok, ${fs.statSync(file).size} bytes, cached ${new Date(fs.statSync(file).mtimeMs).toISOString()}`);
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader('Content-Length', size);
     res.setHeader('Content-Disposition', 'attachment; filename="jarvis.apk"');
-    fs.createReadStream(file).pipe(res);
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(file, { acceptRanges: true });   // handles Range/resume, which Android's download manager uses
   } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
 });
 
