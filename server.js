@@ -1197,6 +1197,24 @@ app.get('/api/spotify/status', async (req, res) => {
     : await spo.devices(spoRef()).then(d => 'Connected. Players: ' + (d.map(x => `${x.name} (${x.type}${x.is_active ? ', active' : ''})`).join(', ') || 'none open right now.')).catch(e => spoFail(e)));
 });
 
+// The Android app, served from Jarvis itself (GitHub's download servers can be very slow on phones). Cached for 10 minutes.
+app.get('/jarvis.apk', async (req, res) => {
+  try {
+    const file = path.join(DATA_DIR, 'jarvis.apk');
+    const fresh = fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 10 * 60e3;
+    if (!fresh) {
+      const r = await fetch(`https://github.com/${process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0'}/releases/latest/download/jarvis.apk`, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
+      if (!r.ok) return res.status(502).type('text/plain').send('Could not fetch the app from GitHub: ' + r.status);
+      fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+    }
+    const size = fs.statSync(file).size;
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Length', size);
+    res.setHeader('Content-Disposition', 'attachment; filename="jarvis.apk"');
+    fs.createReadStream(file).pipe(res);
+  } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
+});
+
 lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
       console.log('  restored memory from the phone backup');
