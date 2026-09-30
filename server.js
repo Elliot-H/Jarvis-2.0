@@ -487,7 +487,7 @@ async function push(title, body) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
-    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
