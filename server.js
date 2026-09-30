@@ -1369,13 +1369,16 @@ handlers.speaker_list = async () => state.speakers.length ? state.speakers.map(x
 handlers.speaker_remove = async ({ alias }) => { const n = state.speakers.length; state.speakers = state.speakers.filter(x => norm(x.alias) !== norm(alias) && norm(x.name) !== norm(alias)); saveState(); return n === state.speakers.length ? 'No such speaker.' : 'Removed.'; };
 handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   const sp = pickSpeaker(device) || state.speakers[0] || { name: process.env.BT_SPEAKER_NAME || 'Rockville' };
-  await deviceAction('media_key', { key: 'stop' }, 4000);
-  await new Promise(r => setTimeout(r, 1500)); await deviceAction('close_app', { pkg: process.env.MUSIC_APP_PACKAGE || 'com.spotify.music' }, 4000).catch(() => {});   // close Spotify, not just stop it   // stop the music first so it does not jump to the phone speaker
+  await deviceAction('media_key', { key: 'pause' }, 4000);
+  await new Promise(r => setTimeout(r, 400)); await deviceAction('media_key', { key: 'stop' }, 4000).catch(() => {});
+  // Spotify keeps a foreground service while playing; once paused it drops it within a few seconds and can then be closed.
+  await new Promise(r => setTimeout(r, 4500)); await deviceAction('close_app', { pkg: process.env.MUSIC_APP_PACKAGE || 'com.spotify.music' }, 4000).catch(() => {});   // stop the music first so it does not jump to the phone speaker
   const off = process.env.BT_TURN_OFF === '1' && !leave_bluetooth_on;  // Android blocks Tasker from switching Bluetooth off; disconnect only by default
   const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTOff');
   const c = await deviceAction('bt_disconnect', { name: sp.name, task, off }, 25000);
+  await deviceAction('media_key', { key: 'pause' }, 3000).catch(() => {});   // if anything resumed on the phone speaker after the link dropped
   broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
-  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. The music is paused. Tell the Owner.` : `Could not finish: ${c.detail}`;
+  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. The music is stopped and Spotify closed. Tell the Owner.` : `Could not finish: ${c.detail}`;
 };
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
