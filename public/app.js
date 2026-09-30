@@ -557,7 +557,13 @@
       if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
       recThrottled = false;
       const wait = recBackoff || (recErrs.length >= 3 ? 8000 : 250);   // repeated failures: pause before retrying
-      if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
+      // With the wake word engine healthy the recognizer is single-shot: one session per "Hey Jarvis" / mic tap / question, so it does not
+      // re-open (and ding, through the Bluetooth speaker when music plays) every second. It only re-opens to finish a sentence he is mid-way through.
+      const single = WAKE_FIRST && wakeEver && !wakeErrShown;
+      if (single && !(pending && MID_THOUGHT.test(lastHeard || carry || ''))) {
+        manualMicUntil = 0;
+        if (mode === 'active' && !pending) { mode = 'passive'; clearTimeout(activeTimer); setState('idle'); }
+      } else if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
     };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;

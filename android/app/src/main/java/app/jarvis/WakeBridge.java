@@ -60,8 +60,10 @@ public class WakeBridge {
   private void run(float threshold) {
     Interpreter mel = null, emb = null, clf = null;
     try {
-      Interpreter.Options o = new Interpreter.Options(); o.setNumThreads(2);
-      mel = new Interpreter(map("melspectrogram.tflite"), o);
+      Interpreter.Options o = new Interpreter.Options(); o.setNumThreads(2); o.setUseXNNPACK(false);
+      // The mel model starts with a 1-sample input; XNNPACK (applied automatically at load) cannot prepare that, so load it without and size it first.
+      Interpreter.Options om = new Interpreter.Options(); om.setNumThreads(2); om.setUseXNNPACK(false);
+      mel = new Interpreter(map("melspectrogram.tflite"), om);
       mel.resizeInput(0, new int[]{1, 1760}); mel.allocateTensors();
       emb = new Interpreter(map("embedding_model.tflite"), o);
       clf = new Interpreter(map("hey_jarvis_v0.1.tflite"), o);
