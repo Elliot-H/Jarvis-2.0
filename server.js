@@ -481,20 +481,44 @@ function prettyTool(name, input) {
 // Weather via Open-Meteo (free, no key). Default location Harrington, DE; override with WEATHER_LAT / WEATHER_LON.
 const WX_KINDS = c => c === 0 ? 'clear' : c <= 3 ? 'cloudy' : c <= 48 ? 'foggy' : c <= 57 ? 'drizzling' : c <= 67 ? 'raining' : c <= 77 ? 'snowing' : c <= 82 ? 'raining' : c <= 86 ? 'snowing' : 'stormy';
 const WX_NOW = { clear: 'clear', cloudy: 'cloudy', foggy: 'foggy', drizzling: 'drizzling', raining: 'raining', snowing: 'snowing', stormy: 'stormy' };
-async function currentWeather() {
-  const lat = process.env.WEATHER_LAT || '38.92', lon = process.env.WEATHER_LON || '-75.57';
-  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`, { signal: AbortSignal.timeout(4000) });
+const US_TZ = /^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Juneau|Adak|Indiana|Kentucky|Menominee|North_Dakota)|Pacific\/Honolulu)/;
+// Position: the phone's last reported location (sent when the app opens), else WEATHER_LAT/LON, else Harrington DE.
+const wxPlace = () => state.location?.lat != null
+  ? { lat: state.location.lat, lon: state.location.lon, live: true }
+  : { lat: process.env.WEATHER_LAT || '38.92', lon: process.env.WEATHER_LON || '-75.57', live: false };
+async function wxFetch(days = 1) {
+  const { lat, lon } = wxPlace();
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=${Math.max(1, Math.min(7, days))}&timezone=auto`, { signal: AbortSignal.timeout(6000) });
   if (!r.ok) throw new Error('weather ' + r.status);
-  const c = (await r.json()).current;
-  return { kind: WX_KINDS(c.weather_code), temp: Math.round(c.temperature_2m) };
+  const j = await r.json();
+  const f = US_TZ.test(j.timezone || '');
+  if (f) { // ask again in Fahrenheit/mph for US timezones
+    const r2 = await fetch(r.url + '&temperature_unit=fahrenheit&wind_speed_unit=mph', { signal: AbortSignal.timeout(6000) }).catch(() => null);
+    if (r2?.ok) { const j2 = await r2.json(); j2.timezone = j.timezone; j2.__f = true; return j2; }
+  }
+  j.__f = false; return j;
 }
+async function currentWeather() {
+  const j = await wxFetch(1);
+  if (j.timezone && state.location) state.location.tz = j.timezone;
+  return { kind: WX_KINDS(j.current.weather_code), temp: Math.round(j.current.temperature_2m), unit: j.__f ? 'degrees' : 'degrees Celsius' };
+}
+handlers.weather = async ({ days } = {}) => {
+  try {
+    const j = await wxFetch(days || 3);
+    const u = j.__f ? 'F' : 'C', w = j.__f ? 'mph' : 'km/h';
+    const c = j.current, d = j.daily;
+    const lines = d.time.map((t, i) => `${t}: ${WX_KINDS(d.weather_code[i])}, high ${Math.round(d.temperature_2m_max[i])}${u}, low ${Math.round(d.temperature_2m_min[i])}${u}, rain chance ${d.precipitation_probability_max[i]}%`);
+    return `Weather at the Owner's ${wxPlace().live ? 'current phone location' : 'default location (phone location not shared yet)'} (${j.timezone}). Now: ${WX_KINDS(c.weather_code)}, ${Math.round(c.temperature_2m)}${u} (feels ${Math.round(c.apparent_temperature)}${u}), wind ${Math.round(c.wind_speed_10m)} ${w}. Forecast: ${lines.join(' | ')}`;
+  } catch (e) { return 'Could not get the weather: ' + String(e.message || e); }
+};
 // Weather is mentioned only on the first open of the day, or when it has changed since the last time it was mentioned/checked.
 async function weatherLine(today) {
   try {
     const w = await currentWeather();
     const prev = state.weather;
     let line = '';
-    if (!prev || prev.day !== today) line = ` It's ${w.temp} degrees and ${WX_NOW[w.kind]}.`;
+    if (!prev || prev.day !== today) line = ` It's ${w.temp} ${w.unit} and ${WX_NOW[w.kind]}.`;
     else if (prev.kind !== w.kind) {
       const wet = ['raining', 'drizzling', 'snowing', 'stormy'];
       if (wet.includes(prev.kind) && !wet.includes(w.kind)) line = ` Just so you know, it has stopped ${prev.kind === 'stormy' ? 'storming' : prev.kind}.`;
@@ -507,7 +531,7 @@ async function weatherLine(today) {
   } catch { return ''; }
 }
 async function localGreeting() {
-  const tz = process.env.TZ || 'America/New_York';
+  const tz = state.location?.tz || process.env.TZ || 'America/New_York';
   const now = new Date();
   const h = Number(now.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
   const part = h < 5 ? 'Up late, sir.' : h < 12 ? 'Good morning, sir.' : h < 17 ? 'Good afternoon, sir.' : 'Good evening, sir.';
@@ -949,6 +973,12 @@ wss.on('connection', ws => {
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
+    if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
+      const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
+      state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
+      if (moved) state.weather = undefined; // new place: report its weather fresh
+      saveState();
+    }
     if (msg.type === 'wake') briefing('wake');
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
     if (msg.type === 'new_session') {

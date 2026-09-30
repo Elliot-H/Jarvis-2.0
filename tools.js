@@ -65,6 +65,11 @@ export const PHONE_TOOLS = [
     shape: { title: z.string().describe('a few words'), message: z.string() }
   },
   {
+    name: 'weather',
+    description: 'Current weather and forecast at the Owner\'s phone location (wherever he is, any country). Use for any weather, forecast, rain, temperature or "do I need a jacket" question. days = 1-7 (default 3).',
+    shape: { days: z.number().optional() }
+  },
+  {
     name: 'voice_check',
     description: 'Test your real JARVIS voice (Fish Audio) right now and get the exact reason if it fails. Use whenever the Owner says your voice or accent is wrong, sounds like the phone, or changed.',
     shape: {}

@@ -99,3 +99,8 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 ## Open-app greeting + weather (server.js `localGreeting`, `weatherLine`)
 - First open of the day: full greeting (day, date, temp + conditions). Later opens: "At your service, sir." only, unless the weather changed since the last check ("it has stopped raining" / "started raining") or earlier requests failed.
 - Weather: Open-Meteo, no key. Default Harrington DE; set `WEATHER_LAT` / `WEATHER_LON` in Railway to change. Last seen weather + greeted day live in `data/stats.json` (`weather`, `greetedDay`); a redeploy wiping data/ just makes the next open a "first of day".
+
+## Weather follows the phone
+- App asks the browser for location on open (one-time permission) and sends `{type:'location',lat,lon}` before `wake`. Server keeps it in `state.location` (+ timezone). Moving >~35 miles resets the weather memory, so the new place is reported fresh. Greeting date/time uses the phone's timezone.
+- Units: F/mph for US timezones, otherwise C/km/h. `WEATHER_LAT/LON` are only the fallback if location is never granted.
+- New `weather` tool (tools.js PHONE_TOOLS, `handlers.weather`): now + up to 7-day forecast at the phone's location. Persona has a Weather section.

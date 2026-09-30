@@ -528,7 +528,12 @@
     loadFillers();
     chime(true);
     // "wake up" on start → greeting from the server-side briefing
-    setTimeout(() => send({ type: 'wake' }), 600);
+    // Share the phone's position first (for weather wherever he is), then greet. Never blocks longer than 4s.
+    const wake = () => setTimeout(() => send({ type: 'wake' }), 600);
+    if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
+      p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); wake(); },
+      () => wake(), { timeout: 4000, maximumAge: 600000 });
+    else wake();
   }
   $('#bootBtn').onclick = boot;
 
