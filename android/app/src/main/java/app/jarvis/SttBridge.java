@@ -39,7 +39,8 @@ public class SttBridge {
   private long lastQuietDiag = 0;
   private boolean musicBefore = false;   // music was playing when the mic opened (the recognizer pauses it)
   private boolean wantPause = false;     // he just told Jarvis to pause/stop: do not resume
-  private final Runnable resume = () -> {
+  private final Runnable resume = this::doResume;
+  private void doResume() {
     if (!musicBefore) return;
     musicBefore = false;
     try {
@@ -51,7 +52,7 @@ public class SttBridge {
       }
     } catch (Exception ignored) {}
     wantPause = false;
-  };
+  }
   private void scheduleResume() { if (musicBefore) { ui.removeCallbacks(resume); ui.postDelayed(resume, 1500); } }
 
   /** Watchdog: the recognizer sometimes accepts startListening and then never answers (no ready, no error),
