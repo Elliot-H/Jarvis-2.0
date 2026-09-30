@@ -56,14 +56,28 @@ async function token() {
   return tok.v;
 }
 
+let accepted = false;
+async function acceptShare() {
+  // A calendar shared with a service account is not in its calendar list until it is added. Harmless if already there.
+  if (accepted) return;
+  try {
+    const r = await fetch(`${API}/users/me/calendarList`, { method: 'POST', headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: calId() }), signal: AbortSignal.timeout(15000) });
+    if (r.ok || r.status === 409) accepted = true;
+  } catch {}
+}
 async function call(method, pathAndQuery, body) {
+  await acceptShare();
   const r = await fetch(`${API}/calendars/${encodeURIComponent(calId())}${pathAndQuery}`, {
     method, headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000)
   });
-  if (r.status === 404) throw new Error('Google cannot find that calendar. The calendar is probably not shared with the service account email yet, or GOOGLE_CALENDAR_ID is wrong.');
-  if (r.status === 403) throw new Error('Google says no permission. The calendar must be shared with the service account with "Make changes to events", and the Calendar API must be enabled.');
-  if (!r.ok) throw new Error(`Google Calendar returned ${r.status}: ${(await r.text()).slice(0, 160)}`);
+  if (!r.ok) {
+    const raw = await r.text();
+    let msg = raw.slice(0, 200); try { msg = JSON.parse(raw).error?.message || msg; } catch {}
+    if (r.status === 404) throw new Error(`Google cannot find that calendar (${msg}). The calendar is probably not shared with the robot email yet, or GOOGLE_CALENDAR_ID is wrong.`);
+    if (r.status === 403) throw new Error(`Google says no permission (${msg}). The calendar must be shared with the robot email with "Make changes to events", and the Calendar API must be enabled.`);
+    throw new Error(`Google Calendar returned ${r.status}: ${msg}`);
+  }
   return r.status === 204 ? {} : r.json();
 }
 
@@ -172,6 +186,7 @@ export async function update({ eventId, title, start, end, colorId, location, no
 export async function check() {
   const out = { robotEmail: null, configuredId: calId() || null, visibleCalendars: [], idWorks: null, problem: null };
   try { out.robotEmail = key().client_email; } catch (e) { out.problem = e.message; return out; }
+  await acceptShare();
   try {
     const r = await fetch(`${API}/users/me/calendarList?minAccessRole=reader`, { headers: { Authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(20000) });
     const j = await r.json().catch(() => ({}));
@@ -181,6 +196,6 @@ export async function check() {
   if (out.configuredId) {
     try { await call('GET', '/events?maxResults=1'); out.idWorks = true; } catch (e) { out.idWorks = false; out.idError = e.message; }
   }
-  if (!out.problem && !out.visibleCalendars.length) out.problem = 'The robot account cannot see any calendar. The share to its email did not save, or went to a different email. Share the calendar with exactly: ' + out.robotEmail;
+  if (!out.problem && out.idWorks === false && !out.visibleCalendars.length) out.problem = 'The robot account cannot see any calendar. The share to its email did not save, or went to a different email. Share the calendar with exactly: ' + out.robotEmail;
   return out;
 }
