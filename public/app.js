@@ -502,7 +502,9 @@
   function startMic() {
     const now = Date.now();
     if (!rec || now < micNotBefore || now - lastMicStart < 600) return;
-    if (WAKE_FIRST && wakeOn && mode === 'passive' && now > manualMicUntil) return;
+    // Two recorders on the mic at once leave the recognizer deaf: the wake word engine must be off while the recognizer listens.
+    if (WAKE_FIRST && wakeEver && !wakeErrShown && mode === 'passive' && now > manualMicUntil) return;
+    if (window.AndroidWake && wakeOn) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; setTimeout(startMic, 500); return; }
     if (now > manualMicUntil && musicPlaying()) {
       if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Music is playing: listening is off so it does not cut out. Tap the mic button to talk.'); }
       return;
@@ -511,10 +513,10 @@
     lastMicStart = now; try { rec.start(); } catch {}
   }
   // While music plays the recognizer stays off (it pauses Spotify). An on-device wake word (Porcupine, no audio focus) listens instead.
-  let wakeOn = false, wakeErrShown = false;
+  let wakeOn = false, wakeErrShown = false, wakeEver = false;
   window.__wake = (type, data) => {
-    if (type === 'started') { wakeOn = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
-    else if (type === 'stopped') wakeOn = false;
+    if (type === 'started') { wakeOn = true; wakeEver = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
+    else if (type === 'stopped') { wakeOn = false; }
     else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data + ' (back to speech listening)'); } setTimeout(() => { if (recWanted && !recOn) startMic(); }, 500); }
     else if (type === 'near') addActivity('Wake word almost (' + data + ')');
     else if (type === 'hit') { if (speaking) return; addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
@@ -522,12 +524,12 @@
   function syncWake() {
     if (!window.AndroidWake || !booted) return;
     try {
-      const want = WAKE_FIRST || musicPlaying();
+      const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil;
       if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
     } catch {}
   }
-  setInterval(syncWake, 3000);
+  setInterval(syncWake, 1200);
   // Pick listening back up by itself once the music stops.
   setInterval(() => { if (rec && recWanted && !recOn && musicHeld && !musicPlaying()) startMic(); }, 4000);
   const WAKE_VARIANTS = () => {
