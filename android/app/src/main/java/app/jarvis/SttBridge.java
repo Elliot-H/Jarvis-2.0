@@ -37,6 +37,43 @@ public class SttBridge {
   private boolean ready = false;        // recognizer said it is actually hearing audio
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
+  // While music plays, feed the recognizer our own mic audio (AudioRecord takes no audio focus) instead of letting it open the mic
+  // itself, because opening the mic is what makes it grab focus and pause Spotify. Needs Android 13+.
+  private volatile boolean feeding = false;
+  private android.media.AudioRecord rec;
+  private android.os.ParcelFileDescriptor feedRead, feedWrite;
+  private boolean startFeed(Intent i) {
+    if (android.os.Build.VERSION.SDK_INT < 33) return false;
+    try {
+      final int rate = 16000;
+      int min = android.media.AudioRecord.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT);
+      rec = new android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, Math.max(min, 8192) * 2);
+      if (rec.getState() != android.media.AudioRecord.STATE_INITIALIZED) { rec.release(); rec = null; return false; }
+      android.os.ParcelFileDescriptor[] p = android.os.ParcelFileDescriptor.createPipe();
+      feedRead = p[0]; feedWrite = p[1];
+      i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, feedRead);
+      i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1);
+      i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT);
+      i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, rate);
+      feeding = true; rec.startRecording();
+      final android.media.AudioRecord r = rec; final android.os.ParcelFileDescriptor w = feedWrite;
+      new Thread(() -> {
+        byte[] buf = new byte[3200];
+        try (java.io.OutputStream out = new android.os.ParcelFileDescriptor.AutoCloseOutputStream(w)) {
+          while (feeding) { int n = r.read(buf, 0, buf.length); if (n <= 0) break; out.write(buf, 0, n); }
+        } catch (Exception ignored) {}
+      }, "stt-feed").start();
+      return true;
+    } catch (Throwable t) { stopFeed(); return false; }
+  }
+  private void stopFeed() {
+    feeding = false;
+    try { if (rec != null) { rec.stop(); } } catch (Exception ignored) {}
+    try { if (rec != null) { rec.release(); } } catch (Exception ignored) {}
+    rec = null;
+    try { if (feedRead != null) feedRead.close(); } catch (Exception ignored) {}
+    feedRead = null; feedWrite = null;
+  }
   private boolean musicBefore = false;   // music was playing when the mic opened (the recognizer pauses it)
   private boolean wantPause = false;     // he just told Jarvis to pause/stop: do not resume
   private final Runnable resume = this::doResume;
@@ -66,7 +103,7 @@ public class SttBridge {
   private void reset() {
     ui.removeCallbacks(stall);
     if (sr != null) { try { sr.cancel(); } catch (Exception ignored) {} try { sr.destroy(); } catch (Exception ignored) {} sr = null; }
-    running = false; ready = false;
+    running = false; ready = false; stopFeed();
   }
 
   SttBridge(Context c, WebView w) {
@@ -115,6 +152,10 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
     try { if (!musicBefore) musicBefore = am.isMusicActive(); } catch (Exception ignored) {}
+    stopFeed();
+    boolean fed = false;
+    try { if (am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
+    if (am.isMusicActive()) emit("diag", fed ? "music playing: feeding the recognizer our own mic audio (no audio focus)" : "music playing: own-audio feed unavailable, using the recognizer's mic");
     ui.removeCallbacks(resume);
     running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
@@ -127,7 +168,7 @@ public class SttBridge {
     boolean was = running;
     ui.removeCallbacks(stall);
     try { sr.cancel(); } catch (Exception ignored) {}
-    running = false; ready = false;
+    running = false; ready = false; stopFeed();
     hush(500);
     if (was) emit("end", "");
   }
@@ -160,7 +201,7 @@ public class SttBridge {
     @Override public void onBufferReceived(byte[] b) {}
     @Override public void onEndOfSpeech() { hush(500); }
     @Override public void onError(int code) {
-      running = false; ready = false; ui.removeCallbacks(stall);
+      running = false; ready = false; stopFeed(); ui.removeCallbacks(stall);
       if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) emit("diag", "speech engine error " + code);
       else if (System.currentTimeMillis() - lastQuietDiag > 15000) {
         lastQuietDiag = System.currentTimeMillis();
@@ -190,7 +231,7 @@ public class SttBridge {
       emit("end", ""); scheduleResume();
     }
     @Override public void onPartialResults(Bundle b) { push(b, false); }
-    @Override public void onResults(Bundle b) { running = false; ready = false; ui.removeCallbacks(stall); push(b, true); emit("end", ""); scheduleResume(); }
+    @Override public void onResults(Bundle b) { running = false; ready = false; stopFeed(); ui.removeCallbacks(stall); push(b, true); emit("end", ""); scheduleResume(); }
     @Override public void onEvent(int t, Bundle b) {}
   };
 
@@ -211,7 +252,7 @@ public class SttBridge {
   }
 
   void release() {
-    ui.removeCallbacks(unhush); ui.removeCallbacks(stall); unhush.run();
+    stopFeed(); ui.removeCallbacks(unhush); ui.removeCallbacks(stall); unhush.run();
     if (sr != null) { try { sr.destroy(); } catch (Exception ignored) {} sr = null; }
   }
 }
