@@ -136,7 +136,12 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 
 ## The shop: perimeter + "headed to the shop?" (2026-09-30)
 - Shop = saved place named "the shop" (placeKey ignores a leading "the", so "shop" matches). Perimeter `SHOP_RADIUS_M` (default 250 m, wider than normal places because location is rounded to ~100 m). Reminders with place "shop" fire inside it.
-- One-time claim: the Owner said he was at the shop on 2026-09-30 afternoon. The first phone location within 15 km of Harrington before `SHOP_CLAIM_UNTIL` (default 2026-09-30 19:30 ET) is saved as the shop, and Jarvis says so. If it missed, he says "this is the shop" (place_save).
+- The 2026-09-30 one-time auto-claim of the shop was removed the same evening (it could have claimed home by mistake). Places are saved by voice or in the Places box.
 - Check-in: on `SHOP_DAYS` (default Mon-Sat), between `SHOP_ASK_FROM`-`SHOP_ASK_TO` (7-13 h), not at the shop, not yet asked or known today, rolled at `SHOP_ASK_CHANCE` (50%) on app open and on the 25-min idle loop. Asked at most once a day. State `workDay` {day,on} and `shopAsk` (in BACKUP_KEYS).
 - Short answers (<= 6 words, within 10 min) are handled in server.js `shopAnswer` with no AI call. Yes: today's appointments (events whose colour meaning contains "job", else all timed events) + next one + a random shop reminder. No: "No worries, sir. Not in work mode today. Understood." Longer answers go to the brain, which calls the `shop_day` tool. Arriving inside the perimeter sets work mode on.
 - Tested locally with a mock phone (claim, yes, no). Calendar part untested live.
+
+## Places box (/places, PLACES button on the HUD) (2026-09-30)
+- public/places.html + REST: GET /api/places, POST /api/places ({name, lat, lon} from the page's own GPS, or {name, address} geocoded with OpenStreetMap Nominatim, US only), PATCH /api/places/:name {radius}, DELETE /api/places/:name, POST /api/items (upsert), DELETE /api/items/:id. PIN-protected like the rest.
+- Bucket items (`state.reminders`) now have kind reminder|mention|question, trigger at|away (away = only while NOT at that place, needs a location under 30 min old), and for questions optional yes/no replies. `cleanItem()` validates. A question's short yes/no answer is handled in `bucketAnswer` (no AI call); `state.pendingQ`.
+- Quick chips for Home, The Camden House, The Shop. Nominatim could not be reached from the build sandbox; untested live.

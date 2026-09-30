@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis · Places</title>
+<meta name="theme-color" content="#02060c">
+<style>
+  :root { --bg:#02060c; --panel:#041422; --panel2:#061b2d; --line:#3fe0ff33; --cyan:#3fe0ff; --text:#cfefff; --dim:#7fa3b5; --ok:#4dffa6; --bad:#ff4d5e; --warn:#ffb547; --q:#c89bff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(circle at 50% 0,#06223a,var(--bg) 60%) fixed; color:var(--text); font:15px/1.45 system-ui,sans-serif; padding:16px; min-height:100vh; }
+  main { max-width:720px; margin:0 auto; }
+  h1 { margin:0; color:var(--cyan); letter-spacing:.25em; font-size:18px; text-shadow:0 0 12px #3fe0ff88; }
+  h2 { margin:0 0 10px; font-size:12px; letter-spacing:.18em; color:var(--dim); font-weight:600; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .top a { color:var(--dim); text-decoration:none; font-size:13px; letter-spacing:.12em; border:1px solid var(--line); padding:6px 10px; }
+  .status { color:var(--dim); margin:0 0 16px; }
+  .status b { color:var(--ok); font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); padding:14px; margin-bottom:12px; }
+  .card.here { border-color:var(--ok); box-shadow:0 0 18px #4dffa622; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .grow { flex:1 1 160px; min-width:0; }
+  input, select, textarea { background:var(--panel2); color:var(--text); border:1px solid var(--line); padding:10px; font:15px system-ui; width:100%; border-radius:0; }
+  textarea { resize:vertical; min-height:60px; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--cyan); }
+  button { font:600 12px system-ui; letter-spacing:.12em; padding:10px 14px; background:transparent; color:var(--cyan); border:1px solid var(--cyan); cursor:pointer; white-space:nowrap; }
+  button.primary { background:var(--cyan); color:#001018; }
+  button.ghost { border-color:var(--line); color:var(--dim); }
+  button.danger { border-color:#ff4d5e66; color:var(--bad); }
+  button:disabled { opacity:.4; cursor:default; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  .chip { border:1px solid var(--line); padding:6px 10px; color:var(--dim); font-size:13px; cursor:pointer; background:none; letter-spacing:0; font-weight:400; }
+  .chip.on { color:#001018; background:var(--cyan); border-color:var(--cyan); }
+  .pname { font-weight:700; font-size:17px; }
+  .meta { color:var(--dim); font-size:12px; }
+  .meta a { color:var(--dim); }
+  .items { margin:12px 0 0; display:grid; gap:8px; }
+  .item { border-left:3px solid var(--cyan); background:var(--panel2); padding:10px 12px; }
+  .item.mention { border-left-color:var(--warn); }
+  .item.question { border-left-color:var(--q); }
+  .item.off { opacity:.45; }
+  .item .text { margin:2px 0 6px; }
+  .badge { font-size:10px; letter-spacing:.15em; font-weight:700; text-transform:uppercase; color:var(--cyan); }
+  .mention .badge { color:var(--warn); } .question .badge { color:var(--q); }
+  .reply { font-size:13px; color:var(--dim); margin:0 0 6px; }
+  .reply b { color:var(--text); font-weight:600; }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; }
+  .acts button { padding:6px 10px; font-size:11px; }
+  .form { border:1px dashed var(--line); padding:12px; margin-top:12px; display:grid; gap:10px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  label small { display:block; color:var(--dim); font-size:11px; letter-spacing:.08em; margin-bottom:4px; text-transform:uppercase; }
+  .seg { display:flex; }
+  .seg button { flex:1; border-color:var(--line); color:var(--dim); padding:9px 6px; }
+  .seg button.on { background:var(--cyan); color:#001018; border-color:var(--cyan); }
+  .note { font-size:13px; color:var(--dim); border-left:2px solid var(--q); padding-left:10px; margin-top:10px; }
+  .empty { color:var(--dim); font-size:13px; margin-top:8px; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--cyan); padding:10px 16px; max-width:90vw; display:none; z-index:9; }
+  #toast.bad { border-color:var(--bad); }
+  @media (max-width:480px) { .grid2 { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>PLACES</h1><a href="/">‹ HUD</a></div>
+  <p class="status" id="status">Loading…</p>
+
+  <div class="card">
+    <h2>SAVE WHERE I AM NOW</h2>
+    <div class="chips" id="quick"></div>
+    <div class="row">
+      <input id="hereName" class="grow" placeholder="Place name">
+      <input id="hereRadius" type="number" inputmode="numeric" placeholder="Radius m" style="width:110px">
+      <button class="primary" id="saveHere">SAVE HERE</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ADD A PLACE BY ADDRESS</h2>
+    <div class="row">
+      <input id="addrName" class="grow" placeholder="Place name">
+      <input id="addrRadius" type="number" inputmode="numeric" placeholder="Radius m" style="width:110px">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="addr" class="grow" placeholder="Street, town, state">
+      <button id="saveAddr">ADD</button>
+    </div>
+  </div>
+
+  <div id="list"></div>
+</main>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const key = n => String(n || '').toLowerCase().trim().replace(/^the\s+/, '').replace(/[^a-z0-9]/g, '');
+let data = { places: [], items: [] }, editing = null; // editing = {id|null, place}
+
+function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.className = bad ? 'bad' : ''; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+  return j;
+}
+const load = async () => { data = await api('GET', '/api/places'); render(); };
+
+function when(it) {
+  const bits = [];
+  if (it.place) bits.push(it.trigger === 'away' ? `when not at ${it.place}` : `at ${it.place}`); else bits.push('anywhere');
+  if (it.time) bits.push(it.time);
+  if (it.days) bits.push(it.days);
+  bits.push(`${it.chance ?? 40}% chance`, `every ${it.cooldownHours ?? 20}h at most`);
+  return bits.join(' · ');
+}
+function itemHtml(it) {
+  const kind = it.kind || 'reminder';
+  const replies = kind === 'question' && (it.yes || it.no)
+    ? `<p class="reply">${it.yes ? `Yes → <b>${esc(it.yes)}</b>` : ''}${it.yes && it.no ? '<br>' : ''}${it.no ? `No → <b>${esc(it.no)}</b>` : ''}</p>` : '';
+  return `<div class="item ${kind} ${it.on === false ? 'off' : ''}">
+    <span class="badge">${kind}</span>
+    <div class="text">${esc(it.text)}</div>${replies}
+    <div class="meta" style="margin-bottom:8px">${esc(when(it))}</div>
+    <div class="acts">
+      <button class="ghost" data-edit="${esc(it.id)}">EDIT</button>
+      <button class="ghost" data-toggle="${esc(it.id)}">${it.on === false ? 'TURN ON' : 'PAUSE'}</button>
+      <button class="danger" data-del="${esc(it.id)}">DELETE</button>
+    </div></div>`;
+}
+function formHtml(place) {
+  const it = editing.id ? data.items.find(i => i.id === editing.id) || {} : { kind: 'reminder', place, trigger: 'at', chance: 40, cooldownHours: 20 };
+  const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === (cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`;
+  return `<div class="form" id="itemForm">
+    <div class="seg" id="kindSeg">${['reminder', 'mention', 'question'].map(k => `<button type="button" data-kind="${k}" class="${(it.kind || 'reminder') === k ? 'on' : ''}">${k.toUpperCase()}</button>`).join('')}</div>
+    <label><small>What Jarvis says</small><textarea id="fText" placeholder="e.g. Did you lock the back gate?">${esc(it.text)}</textarea></label>
+    <div class="grid2" id="qReplies" style="display:${(it.kind || 'reminder') === 'question' ? 'grid' : 'none'}">
+      <label><small>If you say yes</small><input id="fYes" value="${esc(it.yes)}" placeholder="Very good, sir."></label>
+      <label><small>If you say no</small><input id="fNo" value="${esc(it.no)}" placeholder="Understood, sir."></label>
+    </div>
+    <div class="grid2">
+      <label><small>Place</small><select id="fPlace">${opt('', 'Anywhere', it.place)}${data.places.map(p => opt(p.name, p.name, it.place)).join('')}</select></label>
+      <label><small>Trigger</small><select id="fTrigger">${opt('at', 'While I am there', it.trigger || 'at')}${opt('away', 'When I am NOT there', it.trigger)}</select></label>
+      <label><small>Time of day</small><select id="fTime">${opt('', 'Any time', it.time)}${['morning', 'afternoon', 'evening', 'night'].map(t => opt(t, t[0].toUpperCase() + t.slice(1), it.time)).join('')}</select></label>
+      <label><small>Days</small><select id="fDays">${opt('', 'Every day', it.days)}${opt('weekdays', 'Weekdays', it.days)}${opt('weekends', 'Weekends', it.days)}</select></label>
+      <label><small>Chance each check: <span id="chanceV">${it.chance ?? 40}</span>%</small><input id="fChance" type="range" min="5" max="100" step="5" value="${it.chance ?? 40}"></label>
+      <label><small>At most every (hours)</small><input id="fCool" type="number" inputmode="numeric" min="1" value="${it.cooldownHours ?? 20}"></label>
+    </div>
+    <div class="acts"><button class="primary" id="fSave">SAVE</button><button class="ghost" id="fCancel">CANCEL</button></div>
+  </div>`;
+}
+function placeCard(p) {
+  const items = data.items.filter(i => key(i.place) === key(p.name));
+  const isHere = data.here && key(data.here) === key(p.name);
+  const map = `https://www.google.com/maps?q=${p.lat},${p.lon}`;
+  const shopNote = key(p.name) === 'shop' ? `<div class="note">Built in: on ${data.shop.days.map(d => d[0].toUpperCase() + d.slice(1)).join(', ')} between ${data.shop.from}:00 and ${data.shop.to}:00, if you're not here yet, Jarvis may ask if you're headed in (once a day).</div>` : '';
+  return `<div class="card ${isHere ? 'here' : ''}">
+    <div class="row" style="justify-content:space-between">
+      <div><div class="pname">${esc(p.name)}${isHere ? ' <span class="badge" style="color:var(--ok)">YOU ARE HERE</span>' : ''}</div>
+        <div class="meta">${p.kind === 'home' ? 'Home · ' : p.kind === 'work' ? 'Work · ' : ''}${esc(p.address || `${p.lat}, ${p.lon}`)} · <a href="${map}" target="_blank" rel="noopener">map</a></div></div>
+      <div class="row">
+        <input type="number" inputmode="numeric" value="${p.radius}" data-radius="${esc(p.name)}" style="width:90px" title="Perimeter in metres">
+        <span class="meta">m</span>
+        <button class="danger" data-delplace="${esc(p.name)}">DELETE</button>
+      </div>
+    </div>${shopNote}
+    <div class="items">${items.map(itemHtml).join('') || '<div class="empty">Nothing in the box for this place yet.</div>'}</div>
+    ${editing && editing.place === p.name ? formHtml(p.name) : `<div style="margin-top:10px"><button data-add="${esc(p.name)}">+ ADD REMINDER / MENTION / QUESTION</button></div>`}
+  </div>`;
+}
+function render() {
+  $('#status').innerHTML = data.here ? `You're at <b>${esc(data.here)}</b>.` : data.located ? 'You are not at a saved place right now.' : 'Jarvis has no location yet. Open the HUD once with location allowed.';
+  const names = data.places.map(p => key(p.name));
+  $('#quick').innerHTML = ['Home', 'The Camden House', 'The Shop'].map(n => `<button class="chip ${names.includes(key(n)) ? '' : 'on'}" data-quick="${n}">${n}${names.includes(key(n)) ? ' ✓' : ''}</button>`).join('');
+  const known = new Set(names);
+  const loose = data.items.filter(i => !i.place || !known.has(key(i.place)));
+  $('#list').innerHTML = data.places.map(placeCard).join('') + `<div class="card"><div class="pname">Anywhere</div>
+    <div class="meta">No place tied, or the place was deleted.</div>
+    <div class="items">${loose.map(itemHtml).join('') || '<div class="empty">Empty.</div>'}</div>
+    ${editing && editing.place === '' ? formHtml('') : '<div style="margin-top:10px"><button data-add="">+ ADD</button></div>'}</div>`;
+  if (editing) wireForm();
+}
+function wireForm() {
+  const f = $('#itemForm'); if (!f) return;
+  let kind = f.querySelector('#kindSeg .on').dataset.kind;
+  f.querySelectorAll('#kindSeg button').forEach(b => b.onclick = () => {
+    kind = b.dataset.kind; f.querySelectorAll('#kindSeg button').forEach(x => x.classList.toggle('on', x === b));
+    $('#qReplies').style.display = kind === 'question' ? 'grid' : 'none';
+  });
+  $('#fChance').oninput = e => $('#chanceV').textContent = e.target.value;
+  $('#fCancel').onclick = () => { editing = null; render(); };
+  $('#fSave').onclick = async () => {
+    try {
+      data = await api('POST', '/api/items', { id: editing.id || undefined, kind, text: $('#fText').value, place: $('#fPlace').value || undefined,
+        trigger: $('#fTrigger').value, time: $('#fTime').value || undefined, days: $('#fDays').value || undefined,
+        chance: $('#fChance').value, cooldown_hours: $('#fCool').value, yes: $('#fYes').value, no: $('#fNo').value,
+        on: editing.id ? data.items.find(i => i.id === editing.id)?.on : undefined });
+      editing = null; render(); toast('Saved.');
+    } catch (e) { toast(e.message, true); }
+  };
+  f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  try {
+    if (d.quick) { $('#hereName').value = d.quick; $('#addrName').value = d.quick; $('#hereName').focus(); }
+    else if ('add' in d) { editing = { id: null, place: d.add }; render(); }
+    else if (d.edit) { const it = data.items.find(i => i.id === d.edit); const k = data.places.some(p => key(p.name) === key(it.place)) ? data.places.find(p => key(p.name) === key(it.place)).name : ''; editing = { id: d.edit, place: k }; render(); }
+    else if (d.toggle) { const it = data.items.find(i => i.id === d.toggle); data = await api('POST', '/api/items', { ...it, on: it.on === false }); render(); }
+    else if (d.del) { if (confirm('Delete this?')) { data = await api('DELETE', '/api/items/' + encodeURIComponent(d.del)); render(); } }
+    else if (d.delplace) { if (confirm(`Delete ${d.delplace}? Its items move to Anywhere.`)) { data = await api('DELETE', '/api/places/' + encodeURIComponent(d.delplace)); render(); } }
+  } catch (err) { toast(err.message, true); }
+});
+document.addEventListener('change', async e => {
+  const n = e.target.dataset?.radius; if (!n) return;
+  try { data = await api('PATCH', '/api/places/' + encodeURIComponent(n), { radius: e.target.value }); render(); toast(`Perimeter set to ${e.target.value} m.`); }
+  catch (err) { toast(err.message, true); }
+});
+$('#saveHere').onclick = () => {
+  const name = $('#hereName').value.trim(); if (!name) return toast('Type a name or tap one above.', true);
+  if (!navigator.geolocation) return toast('This browser has no location.', true);
+  const btn = $('#saveHere'); btn.disabled = true; btn.textContent = 'LOCATING…';
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      data = await api('POST', '/api/places', { name, lat: pos.coords.latitude, lon: pos.coords.longitude, radius: $('#hereRadius').value || undefined });
+      $('#hereName').value = ''; render();
+      toast(`Saved ${name} (GPS accuracy about ${Math.round(pos.coords.accuracy)} m).`);
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false; btn.textContent = 'SAVE HERE';
+  }, err => { toast('Location blocked: ' + err.message, true); btn.disabled = false; btn.textContent = 'SAVE HERE'; },
+  { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+};
+$('#saveAddr').onclick = async () => {
+  const name = $('#addrName').value.trim(), address = $('#addr').value.trim();
+  if (!name || !address) return toast('Name and address, please.', true);
+  const btn = $('#saveAddr'); btn.disabled = true;
+  try { data = await api('POST', '/api/places', { name, address, radius: $('#addrRadius').value || undefined }); render(); toast('Found: ' + data.address); $('#addr').value = ''; $('#addrName').value = ''; }
+  catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+};
+load().catch(e => $('#status').textContent = e.message);
+</script>
+</body>
+</html>

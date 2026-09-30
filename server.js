@@ -542,13 +542,39 @@ const placeKey = n => String(n || '').toLowerCase().trim().replace(/^the\s+/, ''
 function pickReminder(roll = Math.random) {
   const pl = currentPlace(), c = nowCtx(), now = Date.now();
   const ok = state.reminders.filter(r => r.on !== false
-    && (!r.place || (pl && placeKey(pl.name) === placeKey(r.place)))
+    && placeOk(r, pl)
     && (!r.time || r.time === c.tod)
     && (!r.days || (r.days === 'weekends') === c.weekend)
     && (!r.lastShown || now - r.lastShown > (r.cooldownHours ?? 20) * 3600e3));
   // contextual ones (tied to a place or time) get rolled by their own chance; one at most per check
-  for (const r of ok.sort(() => roll() - .5)) if (roll() * 100 < (r.chance ?? 40)) { r.lastShown = now; saveState(); return r; }
+  for (const r of ok.sort(() => roll() - .5)) if (roll() * 100 < (r.chance ?? 40)) {
+    r.lastShown = now;
+    state.pendingQ = r.kind === 'question' ? { id: r.id, at: now } : null;
+    saveState(); return r;
+  }
   return null;
+}
+// trigger "at" (default): only while inside the place's perimeter. "away": only while NOT there (fresh location needed).
+function placeOk(r, pl) {
+  if (!r.place) return true;
+  const here = pl && placeKey(pl.name) === placeKey(r.place);
+  if (r.trigger !== 'away') return !!here;
+  const L = state.location, known = state.places.some(p => placeKey(p.name) === placeKey(r.place));
+  return known && !here && L && Date.now() - Date.parse(L.at) < 30 * 60e3;
+}
+// A bucket question with its own yes/no replies is answered here (short answers only, within 10 minutes).
+async function bucketAnswer(text) {
+  const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
+  const r = state.reminders.find(x => x.id === q.id);
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
+  const yes = SHOP_NO.test(t) ? false : SHOP_YES.test(t) ? true : null;
+  if (yes === null) return false;
+  state.pendingQ = null; saveState();
+  const reply = (yes ? r.yes : r.no) || (yes ? 'Very good, sir.' : 'Understood, sir.');
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
 }
 // Arrival remark only when the place changed since the last check, so it is news and not a habit.
 function placeNote() {
@@ -574,10 +600,22 @@ handlers.place_save = async ({ name, radius_m, home }) => {
 handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now.` : '. He is not at any saved place now.') : 'No places saved yet.';
 handlers.reminder_add = async a => {
   const id = Math.random().toString(36).slice(2, 7);
-  state.reminders.push({ id, text: a.text, place: a.place, time: a.time, days: a.days, chance: a.chance ?? 40, cooldownHours: a.cooldown_hours ?? 20 });
+  state.reminders.push(cleanItem({ ...a, id }));
   saveState(); return `Added reminder ${id}. It will come up at random when it fits (chance ${a.chance ?? 40}% per check).`;
 };
-handlers.reminder_list = async () => state.reminders.length ? state.reminders.map(r => `${r.id}: "${r.text}"${r.place ? ' @' + r.place : ''}${r.time ? ' ' + r.time : ''}${r.days ? ' ' + r.days : ''} ${r.chance}%`).join('\n') : 'The reminder bucket is empty.';
+// One bucket item: reminder | mention | question (a question may carry its own yes/no replies).
+function cleanItem(a) {
+  const pick = (v, ok) => ok.includes(v) ? v : undefined, str = v => String(v ?? '').trim().slice(0, 300) || undefined;
+  const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? Math.min(hi, Math.max(lo, n)) : d; };
+  const kind = pick(a.kind, ['reminder', 'mention', 'question']) || 'reminder';
+  return { id: str(a.id) || Math.random().toString(36).slice(2, 7), kind, text: str(a.text), place: str(a.place),
+    trigger: a.place ? pick(a.trigger, ['at', 'away']) || 'at' : undefined,
+    time: pick(a.time, ['morning', 'afternoon', 'evening', 'night']), days: pick(a.days, ['weekdays', 'weekends']),
+    chance: num(a.chance, 40, 1, 100), cooldownHours: num(a.cooldown_hours ?? a.cooldownHours, 20, 1, 24 * 30),
+    yes: kind === 'question' ? str(a.yes) : undefined, no: kind === 'question' ? str(a.no) : undefined,
+    on: a.on === false ? false : undefined, lastShown: a.lastShown };
+}
+handlers.reminder_list = async () => state.reminders.length ? state.reminders.map(r => `${r.id} [${r.kind || 'reminder'}]: "${r.text}"${r.place ? (r.trigger === 'away' ? ' away from ' : ' @') + r.place : ''}${r.time ? ' ' + r.time : ''}${r.days ? ' ' + r.days : ''} ${r.chance}%`).join('\n') : 'The reminder bucket is empty.';
 handlers.reminder_remove = async ({ id }) => { const n = state.reminders.length; state.reminders = state.reminders.filter(r => r.id !== id); saveState(); return n === state.reminders.length ? 'No reminder with that id.' : 'Removed.'; };
 if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
   state.reminders.push({ id: 'dogs', text: "Do you have the dogs with you? Don't forget to check that they have food.", place: 'home', time: 'morning', chance: 45, cooldownHours: 22 });
@@ -650,18 +688,7 @@ async function shopAnswer(text) {
   return true;
 }
 handlers.shop_day = async ({ going }) => shopDay(going);
-// One-time: the Owner said "where I am now is the shop" on 2026-09-30. The first fresh phone fix near Harrington before
-// SHOP_CLAIM_UNTIL is saved as the shop (only if none exists). If it misses, he just says "this is the shop".
-const SHOP_CLAIM_UNTIL = Date.parse(process.env.SHOP_CLAIM_UNTIL || '2026-09-30T23:30:00Z');
-function claimShop() {
-  const L = state.location;
-  if (!L || shopPlace() || Date.now() > SHOP_CLAIM_UNTIL) return;
-  if (km(L, { lat: 38.924, lon: -75.578 }) > 15) return;
-  state.places.push({ name: 'the shop', lat: L.lat, lon: L.lon, radius: SHOP_RADIUS, kind: 'work' });
-  state.lastPlace = 'shop'; state.workDay = { day: nowCtx().day, on: true }; saveState();
-  const text = "I've marked this spot as the shop, sir, with a 250 metre perimeter.";
-  remember('jarvis', text); broadcast({ type: 'say', text, speak: true });
-}
+
 
 handlers.weather = async ({ days } = {}) => {
   try {
@@ -900,6 +927,56 @@ app.get('/api/calendar-check', async (_req, res) => {
   ];
   res.type('text/plain').send(lines.join('\n'));
 });
+// ---------- Places box (/places): places + the reminder / mention / question bucket ----------
+app.get('/places', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'places.html')));
+const placesView = () => {
+  const here = currentPlace();
+  return { places: state.places.map(p => ({ name: p.name, kind: p.kind, radius: p.radius || 150, lat: p.lat, lon: p.lon, address: p.address })),
+    here: here ? here.name : null, located: !!state.location, items: state.reminders, shop: { days: SHOP_DAYS, from: SHOP_FROM, to: SHOP_TO } };
+};
+app.get('/api/places', (_req, res) => res.json(placesView()));
+app.post('/api/places', async (req, res) => {
+  const b = req.body || {}, name = String(b.name || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'Give the place a name.' });
+  let lat = Number(b.lat), lon = Number(b.lon), address;
+  if (b.address) {
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ q: b.address, format: 'json', limit: '1', countrycodes: 'us' }),
+        { headers: { 'User-Agent': 'Jarvis-2.0 personal assistant (github.com/Elliot-H/Jarvis-2.0)' }, signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error(`lookup service answered ${r.status}`);
+      const j = await r.json();
+      if (!j[0]) return res.status(404).json({ error: 'Could not find that address. Try adding the town and state.' });
+      lat = Number(j[0].lat); lon = Number(j[0].lon); address = j[0].display_name;
+    } catch (e) { return res.status(502).json({ error: 'Address lookup failed: ' + e.message }); }
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'No position: allow location on this page, or type an address.' });
+  const key = placeKey(name), old = state.places.find(p => placeKey(p.name) === key);
+  const radius = Number(b.radius) > 0 ? Math.min(5000, Number(b.radius)) : old?.radius || (key === 'shop' ? SHOP_RADIUS : 150);
+  state.places = state.places.filter(p => placeKey(p.name) !== key);
+  state.places.push({ name, lat: +lat.toFixed(5), lon: +lon.toFixed(5), radius, address,
+    kind: b.home || key === 'home' ? 'home' : key === 'shop' ? 'work' : 'place' });
+  if (!b.address) state.lastPlace = key;
+  saveState(); res.json({ ok: true, address, ...placesView() });
+});
+app.patch('/api/places/:name', (req, res) => {
+  const p = state.places.find(x => placeKey(x.name) === placeKey(req.params.name));
+  if (!p) return res.status(404).json({ error: 'No such place.' });
+  if (Number(req.body?.radius) > 0) p.radius = Math.min(5000, Number(req.body.radius));
+  saveState(); res.json(placesView());
+});
+app.delete('/api/places/:name', (req, res) => {
+  const key = placeKey(req.params.name);
+  state.places = state.places.filter(p => placeKey(p.name) !== key);
+  saveState(); res.json(placesView());
+});
+app.post('/api/items', (req, res) => {
+  const it = cleanItem(req.body || {});
+  if (!it.text) return res.status(400).json({ error: 'Write what Jarvis should say.' });
+  const i = state.reminders.findIndex(r => r.id === it.id);
+  if (i >= 0) state.reminders[i] = { ...it, lastShown: state.reminders[i].lastShown }; else state.reminders.push(it);
+  saveState(); res.json(placesView());
+});
+app.delete('/api/items/:id', (req, res) => { state.reminders = state.reminders.filter(r => r.id !== req.params.id); saveState(); res.json(placesView()); });
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 
 // Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to
@@ -1188,12 +1265,12 @@ wss.on('connection', ws => {
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !(await shopAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
       if (moved) state.weather = undefined; // new place: report its weather fresh
-      saveState(); claimShop();
+      saveState();
     }
     if (msg.type === 'wake') briefing('wake', msg.memo);
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
