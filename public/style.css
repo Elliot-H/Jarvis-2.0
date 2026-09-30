@@ -159,7 +159,7 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
 /* ---------- small screens ---------- */
 @media (max-width:1000px){
   html,body{overflow:auto}
-  .top{padding:0 16px}
+  .top{padding:0 16px;background:#030b14}
   #clockTime{font-size:16px}
   .brand-ver{display:none}
   .top-mid{display:none}

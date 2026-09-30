@@ -416,7 +416,7 @@
 
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0;
+  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false;
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
     return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves'] : [w];
@@ -435,11 +435,18 @@
       if (pending && recWanted && !pending.wakeOnly) carry = lastHeard;
       else if (pending) flush();
       uttStart = 0; lastLen = 0;
-      const wait = recErrs.length >= 3 ? 8000 : 250;   // repeated failures: pause before retrying
+      // Android's recognizer refuses restarts that come too fast (error 10). Back off, then ease back down.
+      if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
+      recThrottled = false;
+      const wait = recBackoff || (recErrs.length >= 3 ? 8000 : 250);   // repeated failures: pause before retrying
       if (recWanted) setTimeout(() => { if (recWanted && !recOn) try { rec.start(); } catch {} }, wait);
     };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
+      if (e.error === 'throttled') {
+        recThrottled = true; recBackoff = Math.min(recBackoff ? recBackoff * 2 : 2000, 16000);
+        chip('#chipMic', 'warn', 'MIC COOLDOWN'); return;
+      }
       const why = {
         'not-allowed': 'Microphone is blocked. Tap the lock icon in the address bar and allow the mic.',
         'service-not-allowed': 'Speech recognition is turned off in this browser. Use Chrome.',
@@ -454,7 +461,7 @@
       if (why !== lastRecErr || now - lastRecErrAt > 30000) { addActivity(why); caption(why, { typed: false, pre: '!!' }); reportErr('speech: ' + e.error); lastRecErr = why; lastRecErrAt = now; }
     };
     rec.onaudiostart = () => chip('#chipMic', 'ok', 'MIC');
-    rec.onresult = onSpeech;
+    rec.onresult = e => { recBackoff = 0; onSpeech(e); };
     recWanted = true; try { rec.start(); } catch {}
   }
   function pauseListening() { recWanted = false; try { rec?.abort(); } catch {} }

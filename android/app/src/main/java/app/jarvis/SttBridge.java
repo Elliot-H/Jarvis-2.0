@@ -115,13 +115,14 @@ public class SttBridge {
         case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: e = "network"; break;
         case SpeechRecognizer.ERROR_AUDIO: e = "audio-capture"; break;
         case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: e = "aborted"; break;
+        case 10: e = "throttled"; break;   // ERROR_TOO_MANY_REQUESTS: restarted too fast; the page backs off
         default: e = "android-error-" + code;   // shows up on the HUD so it can be read off the screen
       }
       // Google's recognizer could not be used: rebuild with the phone's default one and carry on.
       if (!useDefault && (code == SpeechRecognizer.ERROR_CLIENT || code == 11 || code == 12 || code == 13)) {
         useDefault = true; emit("diag", "Google recognizer failed (" + code + "), trying the phone's default");
       }
-      if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT || useDefault && sr != null && code >= 11) {
+      if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT || code == 10 || useDefault && sr != null && code >= 11) {
         try { sr.destroy(); } catch (Exception ignored) {} sr = null;
       }
       if (!e.equals("no-speech") && !e.equals("aborted")) emit("error", e);
