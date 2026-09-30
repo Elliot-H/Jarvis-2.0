@@ -81,6 +81,13 @@ public class SttBridge {
       announced = true;
       emit("diag", "speech available: " + SpeechRecognizer.isRecognitionAvailable(ctx) + ", engine: " + (useDefault ? "phone default" : "Google"));
     }
+    try {
+      if (am.isMusicActive()) {
+        StringBuilder sb = new StringBuilder();
+        for (android.media.AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_INPUTS)) sb.append(d.getType()).append(' ');
+        emit("diag", "mic start while music plays; input device types: " + sb + "mode " + am.getMode() + ", engine " + (useDefault ? "default" : "Google"));
+      }
+    } catch (Exception ignored) {}
     if (sr == null) { sr = make(); sr.setRecognitionListener(listener); }
     Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
     i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
