@@ -511,7 +511,7 @@
   setInterval(() => { if (rec && recWanted && !recOn && musicHeld && !musicPlaying()) startMic(); }, 4000);
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
-    return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves'] : [w];
+    return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves', 'travis', 'jarvi', 'harvis', 'jarvice', 'charvis', 'jarvie', 'jervas', 'garvis'] : [w];
   };
   const WAKE_UP = /^(wake up|wakey|daddy'?s home|i'?m home|i'?m back|good (morning|afternoon|evening)|you (up|there|awake))\b/i;
 
@@ -660,6 +660,7 @@
     } else {
       const hit = findWake(heard);
       if (!hit) {
+        if (Date.now() - (window.__lastHeardDiag || 0) > 4000) { window.__lastHeardDiag = Date.now(); addActivity('Heard (no wake word): ' + heard.slice(-60)); }
         // background chatter: forget finished chunks so they don't pile up
         let lastFinal = -1;
         for (let i = uttStart; i < e.results.length; i++) if (e.results[i].isFinal) lastFinal = i;

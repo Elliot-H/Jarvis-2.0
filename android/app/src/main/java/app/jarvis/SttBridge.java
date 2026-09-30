@@ -31,7 +31,7 @@ public class SttBridge {
   private boolean muted = false;
   private final java.util.ArrayList<Integer> mutedStreams = new java.util.ArrayList<>();
   // The phone's own recognizer beeps on the notification/system streams, Google's on music: quiet all three while listening.
-  private static final int[] BEEP_STREAMS = {AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM};
+  private static final int[] BEEP_STREAMS = {AudioManager.STREAM_MUSIC}   // never the notification/system streams: muting those flipped the phone to silent;
   private boolean useDefault = false;   // switch to the phone's default recognizer if Google's own can't be used
   private boolean announced = false;
   private boolean ready = false;        // recognizer said it is actually hearing audio
