@@ -262,11 +262,27 @@
   // speaker while a Bluetooth speaker is playing music). PhoneClip looks enough like an Audio element for the code below.
   const PHONE_AUDIO = !!window.AndroidPhoneAudio;
   let clipSeq = 0; const clips = {};
-  window.__phoneClip = (id, ev) => { const c = clips[id]; if (c) c._fire(ev === 'ended' ? 'onended' : 'onerror'); };
+  window.__phoneClip = (id, ev) => {
+    ev = String(ev || '');
+    if (ev.startsWith('info:')) { addActivity('Voice: ' + ev.slice(5)); return; }
+    const c = clips[id]; if (!c) return;
+    if (ev.startsWith('error')) { addActivity('Voice: phone player failed (' + (ev.slice(6) || 'unknown') + '), using the app player'); return c._webFallback(); }
+    c._fire('onended');
+  };
   class PhoneClip {
     constructor(src) { this.src = src; this.id = 'c' + (++clipSeq) + Date.now().toString(36); this.phone = true; this.stopped = false; clips[this.id] = this; }
     _fire(n) { delete clips[this.id]; if (this.stopped) return; try { this[n] && this[n](); } catch {} }
+    // The page player plays out loud for sure (it may pause Spotify for a moment, which beats silence).
+    _webFallback() {
+      if (this.stopped || this.fellBack) return this._fire('onerror');
+      this.fellBack = true;
+      const a = new Audio(this.src); this.web = a;
+      a.onended = () => this._fire('onended'); a.onerror = () => this._fire('onerror');
+      a.play().catch(() => this._fire('onerror'));
+    }
     async play() {
+      // Newer app builds stream the voice straight from the server: playback starts as the first audio arrives.
+      if (window.AndroidPhoneAudio.playUrl) { window.AndroidPhoneAudio.playUrl(this.id, new URL(this.src, location.href).href); return; }
       try {
         const r = await fetch(this.src);
         if (r.status !== 200) throw new Error('no audio');
@@ -282,6 +298,7 @@
       if (this.stopped) return;
       this.stopped = true; delete clips[this.id];
       try { window.AndroidPhoneAudio.stop(this.id); } catch {}
+      try { this.web && this.web.pause(); } catch {}
       if (this.onpause) { try { this.onpause(); } catch {} }
     }
   }
@@ -665,7 +682,7 @@
     stopSpeaking(false);
     setState('thinking');
     startFillers(text);
-    sendLocation(() => send({ type: 'ask', text }));
+    send({ type: 'ask', text }); sendLocation(); // ask right away; the position follows (server uses the last one it has)
   }
 
   // Fresh phone position (cached up to 2 min, never waits more than 1.2s) so places and weather follow him.
@@ -728,7 +745,7 @@
   function resize() {
     const r = rc.getBoundingClientRect();
     W = rc.width = r.width * dpr; H = rc.height = r.height * dpr;
-    BW = bg.width = innerWidth * dpr; BH = bg.height = innerHeight * dpr;
+    BW = bg.width = innerWidth; BH = bg.height = innerHeight; // background at 1x: it is soft glow, and full-res costs the phone a lot
   }
   addEventListener('resize', resize);
 
@@ -741,8 +758,11 @@
 
   const parts = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), vx: (Math.random() - .5) * .00012, vy: (Math.random() - .5) * .00012, r: Math.random() * 1.6 + .3 }));
 
-  let t0 = performance.now();
+  let t0 = performance.now(), lastFrame = 0;
   function frame(now) {
+    // 30 fps is plenty for the HUD and halves the phone's work (less heat, snappier voice and mic).
+    if (now - lastFrame < 32) { requestAnimationFrame(frame); return; }
+    lastFrame = now;
     const t = (now - t0) / 1000;
 
     // audio level

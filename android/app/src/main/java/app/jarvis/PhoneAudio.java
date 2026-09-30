@@ -45,6 +45,41 @@ public class PhoneAudio {
 
   @JavascriptInterface public void play(final String id, final String base64) { ui.post(() -> start(id, base64)); }
   @JavascriptInterface public void stop(final String id) { ui.post(() -> release(id)); }
+  /** Stream a clip straight from the server (no base64 hop): it starts playing as soon as the first audio arrives. */
+  @JavascriptInterface public void playUrl(final String id, final String url) { ui.post(() -> startUrl(id, url, true)); }
+
+  private void startUrl(String id, String url, boolean route) {
+    try {
+      MediaPlayer mp = new MediaPlayer();
+      mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+      Map<String, String> h = new HashMap<>();
+      String ck = android.webkit.CookieManager.getInstance().getCookie(url);
+      if (ck != null) h.put("Cookie", ck);
+      mp.setDataSource(ctx, android.net.Uri.parse(url), h);
+      final boolean bt = btActive();
+      if (route && bt) { AudioDeviceInfo spk = find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER); if (spk != null) mp.setPreferredDevice(spk); }
+      mp.setOnPreparedListener(p -> {
+        p.start();
+        ui.postDelayed(() -> { try { if (players.get(id) == p) emit(id, "info:" + where(p, bt)); } catch (Exception ignored) {} }, 400);
+      });
+      mp.setOnCompletionListener(p -> { release(id); emit(id, "ended"); });
+      mp.setOnErrorListener((p, what, extra) -> {
+        release(id);
+        if (route && bt) { startUrl(id, url, false); return true; } // the speaker route failed: try the normal route once
+        emit(id, "error:" + what + "/" + extra); return true;
+      });
+      players.put(id, mp);
+      mp.prepareAsync();
+    } catch (Exception e) { release(id); emit(id, "error:" + e.getClass().getSimpleName()); }
+  }
+
+  // Where the voice actually went and how loud that output is, so a silent reply can be explained.
+  private String where(MediaPlayer p, boolean bt) {
+    AudioDeviceInfo d = p.getRoutedDevice();
+    String dev = d == null ? "no output" : d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ? "phone speaker" : d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ? "Bluetooth (" + d.getProductName() + ")" : String.valueOf(d.getProductName());
+    int v = am.getStreamVolume(AudioManager.STREAM_MUSIC), max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+    return "playing on " + dev + (bt ? " while Bluetooth music is on" : "") + ", media volume " + v + "/" + max;
+  }
 
   private void start(String id, String b64) {
     try {
