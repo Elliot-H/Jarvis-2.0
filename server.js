@@ -1221,11 +1221,11 @@ app.get('/api/spotify/status', async (req, res) => {
     : await spo.devices(spoRef()).then(d => 'Connected. Players: ' + (d.map(x => `${x.name} (${x.type}${x.is_active ? ', active' : ''})`).join(', ') || 'none open right now.')).catch(e => spoFail(e)));
 });
 
-// The Android app, served from Jarvis itself (GitHub's download servers can be very slow on phones). Cached for 10 minutes.
+// The Android app, served from Jarvis itself (GitHub's download servers can be very slow on phones). Cached for 1 minute (add ?fresh to skip).
 app.get('/jarvis.apk', async (req, res) => {
   try {
     const file = path.join(DATA_DIR, 'jarvis.apk');
-    const fresh = fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 10 * 60e3;
+    const fresh = fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 60e3 && req.query.fresh === undefined;
     if (!fresh) {
       const r = await fetch(`https://github.com/${process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0'}/releases/latest/download/jarvis.apk`, { redirect: 'follow', signal: AbortSignal.timeout(60000) });
       if (!r.ok) return res.status(502).type('text/plain').send('Could not fetch the app from GitHub: ' + r.status);
