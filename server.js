@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -529,7 +529,8 @@ const nowCtx = () => {
   const d = new Date();
   const h = Number(d.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
   const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: tz });
-  return { tod: h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night', weekend: wd === 'Sat' || wd === 'Sun', h };
+  return { tod: h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night', weekend: wd === 'Sat' || wd === 'Sun', h, wd, tz,
+    day: d.toLocaleDateString('en-CA', { timeZone: tz }) };
 };
 const currentPlace = () => {
   const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 6 * 3600e3) return null;
@@ -537,7 +538,7 @@ const currentPlace = () => {
   for (const p of state.places) { const d = km(L, p) * 1000; if (d <= (p.radius || 150) && (!best || d < best.d)) best = { ...p, d }; }
   return best;
 };
-const placeKey = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const placeKey = n => String(n || '').toLowerCase().trim().replace(/^the\s+/, '').replace(/[^a-z0-9]/g, ''); // "the shop" = "shop"
 function pickReminder(roll = Math.random) {
   const pl = currentPlace(), c = nowCtx(), now = Date.now();
   const ok = state.reminders.filter(r => r.on !== false
@@ -557,16 +558,18 @@ function placeNote() {
   if (!pl) return '';
   const c = nowCtx();
   if (pl.kind === 'home') return '';
+  if (placeKey(pl.name) === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; saveState(); }
   return ` I see you're at ${pl.name} ${c.tod === 'night' ? 'tonight' : 'this ' + c.tod}, sir.`;
 }
-function contextNote() { const r = pickReminder(); return placeNote() + (r ? ' ' + r.text : ''); }
+function contextNote() { const arrive = placeNote(); const q = shopQuestion(); if (q) return arrive + ' ' + q; const r = pickReminder(); return arrive + (r ? ' ' + r.text : ''); }
 handlers.place_save = async ({ name, radius_m, home }) => {
   const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 15 * 60e3) return 'I do not have a fresh location from the phone. Tell the Owner to allow location for the app, then try again.';
   const key = placeKey(name);
   state.places = state.places.filter(p => placeKey(p.name) !== key);
-  state.places.push({ name, lat: L.lat, lon: L.lon, radius: radius_m || 150, kind: home || /^home$/i.test(name) ? 'home' : 'place' });
+  const radius = radius_m || (key === 'shop' ? SHOP_RADIUS : 150);
+  state.places.push({ name, lat: L.lat, lon: L.lon, radius, kind: home || /^home$/i.test(name) ? 'home' : key === 'shop' ? 'work' : 'place' });
   state.lastPlace = key; saveState();
-  return `Saved "${name}" at his current position (within ${radius_m || 150} m).`;
+  return `Saved "${name}" at his current position (within ${radius} m).`;
 };
 handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now.` : '. He is not at any saved place now.') : 'No places saved yet.';
 handlers.reminder_add = async a => {
@@ -583,8 +586,82 @@ if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
 // While the app is open, now and then, a reminder can come up on its own (only when Jarvis is idle).
 if (!process.env.JARVIS_SMOKE) setInterval(() => {
   if (busy || !clients.size || Math.random() > .35) return;
-  const r = pickReminder(); if (r) { remember('jarvis', r.text); broadcast({ type: 'say', text: r.text, speak: true }); }
+  const text = shopQuestion() || pickReminder()?.text; if (text) { remember('jarvis', text); broadcast({ type: 'say', text, speak: true }); }
 }, 25 * 60_000);
+
+// ---------- the shop: perimeter + "headed to the shop?" check-in ----------
+// The shop is a saved place with a wider perimeter (SHOP_RADIUS_M, default 250 m). On shop days (SHOP_DAYS), in the
+// morning window (SHOP_ASK_FROM..SHOP_ASK_TO hours), when he is not at the shop yet, Jarvis now and then asks if he is
+// headed in. Yes: today's jobs from the calendar + a shop reminder from the bucket. No: not in work mode today, no more
+// asking. Asked at most once a day. Arriving inside the perimeter also counts as a yes.
+const SHOP_RADIUS = Number(process.env.SHOP_RADIUS_M || 250);
+const SHOP_DAYS = String(process.env.SHOP_DAYS || 'Mon,Tue,Wed,Thu,Fri,Sat').split(/[\s,]+/).map(d => d.slice(0, 3).toLowerCase());
+const SHOP_FROM = Number(process.env.SHOP_ASK_FROM ?? 7), SHOP_TO = Number(process.env.SHOP_ASK_TO ?? 13);
+const SHOP_CHANCE = Number(process.env.SHOP_ASK_CHANCE ?? 50);
+const shopPlace = () => state.places.find(p => placeKey(p.name) === 'shop');
+const SHOP_QS = ['Are you headed to the shop today, sir?', 'Will we be going to the shop today, sir?', 'Is it a shop day today, sir?'];
+function shopQuestion(roll = Math.random) {
+  const c = nowCtx(), pl = currentPlace();
+  if (!shopPlace() || !SHOP_DAYS.includes(c.wd.toLowerCase())) return null;
+  if (state.workDay?.day === c.day || state.shopAsk?.day === c.day) return null; // already know, or already asked today
+  if (pl && placeKey(pl.name) === 'shop') return null;
+  if (c.h < SHOP_FROM || c.h >= SHOP_TO || roll() * 100 >= SHOP_CHANCE) return null;
+  state.shopAsk = { day: c.day, at: Date.now(), pending: true }; saveState();
+  return SHOP_QS[Math.floor(roll() * SHOP_QS.length) % SHOP_QS.length];
+}
+async function shopDay(going) {
+  const c = nowCtx();
+  state.workDay = { day: c.day, on: !!going };
+  if (state.shopAsk) state.shopAsk.pending = false;
+  saveState();
+  if (!going) return 'No worries, sir. Not in work mode today. Understood.';
+  let line = 'Very good, sir.';
+  if (cal.configured()) {
+    try {
+      const r = await cal.list({}, state.calendarColors);
+      const timed = r.events.filter(e => !e.allDay);
+      const jobs = timed.some(e => /job/i.test(e.meaning || '')) ? timed.filter(e => /job/i.test(e.meaning || '')) : timed;
+      const next = jobs.find(e => Date.parse(e.start) > Date.now());
+      const at = e => new Date(e.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: c.tz });
+      if (!jobs.length) line += ' Nothing on the calendar for today.';
+      else line += ` You have ${jobs.length} ${jobs.length === 1 ? 'appointment' : 'appointments'} today` + (next ? `; next up, ${next.title} at ${at(next)}.` : ', all of them behind you now.');
+    } catch (e) { console.warn('shop day calendar:', e.message); }
+  }
+  const now = Date.now();
+  const rs = state.reminders.filter(r => r.on !== false && placeKey(r.place) === 'shop' && (!r.lastShown || now - r.lastShown > (r.cooldownHours ?? 20) * 3600e3));
+  const r = rs[Math.floor(Math.random() * rs.length)];
+  if (r) { r.lastShown = now; saveState(); line += ' ' + r.text; }
+  return line;
+}
+// A short yes/no right after the question is answered here, free and instant. Anything longer goes to the brain,
+// which has the question in its history and calls shop_day itself.
+const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
+const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
+async function shopAnswer(text) {
+  const a = state.shopAsk;
+  if (!a?.pending || Date.now() - a.at > 10 * 60e3) return false;
+  const t = norm(text).replace(/^(hey )?jarvis /, '').replace(/\bi m\b/g, 'i m');
+  if (t.split(' ').length > 6) { a.pending = false; saveState(); return false; }
+  const going = SHOP_NO.test(t) ? false : SHOP_YES.test(t) ? true : null; // "no" first: "it is not"
+  if (going === null) return false;
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  const reply = await shopDay(going);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
+handlers.shop_day = async ({ going }) => shopDay(going);
+// One-time: the Owner said "where I am now is the shop" on 2026-09-30. The first fresh phone fix near Harrington before
+// SHOP_CLAIM_UNTIL is saved as the shop (only if none exists). If it misses, he just says "this is the shop".
+const SHOP_CLAIM_UNTIL = Date.parse(process.env.SHOP_CLAIM_UNTIL || '2026-09-30T23:30:00Z');
+function claimShop() {
+  const L = state.location;
+  if (!L || shopPlace() || Date.now() > SHOP_CLAIM_UNTIL) return;
+  if (km(L, { lat: 38.924, lon: -75.578 }) > 15) return;
+  state.places.push({ name: 'the shop', lat: L.lat, lon: L.lon, radius: SHOP_RADIUS, kind: 'work' });
+  state.lastPlace = 'shop'; state.workDay = { day: nowCtx().day, on: true }; saveState();
+  const text = "I've marked this spot as the shop, sir, with a 250 metre perimeter.";
+  remember('jarvis', text); broadcast({ type: 'say', text, speak: true });
+}
 
 handlers.weather = async ({ days } = {}) => {
   try {
@@ -630,8 +707,8 @@ async function localGreeting(memo) {
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
   // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
   const ctx = contextNote();
-  if (first) return `${part}${day}${wx} All systems online.${ctx}${open}`;
-  return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${ctx}${open}`.trim() || 'At your service, sir.';
+  if (first) return `${part}${day}${wx} All systems online.${open}${ctx}`; // ctx last: it may be a question he answers
+  return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
   if (reason === 'wake') { const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
@@ -1111,12 +1188,12 @@ wss.on('connection', ws => {
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !(await shopAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
       if (moved) state.weather = undefined; // new place: report its weather fresh
-      saveState();
+      saveState(); claimShop();
     }
     if (msg.type === 'wake') briefing('wake', msg.memo);
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
