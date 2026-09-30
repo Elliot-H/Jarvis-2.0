@@ -121,7 +121,7 @@ public class DeviceBridge {
     final BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
     final BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
     if (ad == null) { reply(id, false, "This phone has no Bluetooth."); return; }
-    final long deadline = System.currentTimeMillis() + 18000;
+    final long deadline = System.currentTimeMillis() + 21000;
     final boolean[] sent = {false};
     final Runnable[] poll = new Runnable[1];
     poll[0] = () -> {
@@ -144,7 +144,10 @@ public class DeviceBridge {
                 ctx.sendBroadcast(t);
               }
             } else if (!still && !off) { reply(id, true, "disconnected"); return; }
-            if (System.currentTimeMillis() > deadline) { reply(id, false, "It did not finish. Check that Tasker has a task named " + task + " (Bluetooth Connection: Disconnect, then Net > Bluetooth Off). Still connected: " + still + "."); return; }
+            if (System.currentTimeMillis() > deadline) {
+              if (!still) { reply(id, true, "speaker disconnected, but Bluetooth is still on: Tasker's Bluetooth Off step did not run (run the " + task + " task by hand in Tasker to see its error)"); return; }
+              reply(id, false, "It did not finish. Check that Tasker has a task named " + task + ". Still connected: true."); return;
+            }
             ui.postDelayed(poll[0], 1200);
           }
           @Override public void onServiceDisconnected(int profile) {}
