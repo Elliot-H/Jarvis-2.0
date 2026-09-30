@@ -1,5 +1,7 @@
 plugins { id 'com.android.application' }
 
+def runNo = Integer.parseInt(System.getenv('RUN_NUMBER') ?: '1')
+
 android {
   namespace 'app.jarvis'
   compileSdk 34
@@ -7,8 +9,8 @@ android {
     applicationId 'app.jarvis.hud'
     minSdk 28
     targetSdk 34
-    versionCode (System.getenv('RUN_NUMBER') ?: '1').toInteger()
-    versionName '1.0.' + (System.getenv('RUN_NUMBER') ?: '1')
+    versionCode runNo
+    versionName "1.0.${runNo}"
     // Where the Jarvis server lives. Change here (or override with -PjarvisUrl=...) if the Railway address changes.
     buildConfigField 'String', 'BASE_URL', '"' + (project.findProperty('jarvisUrl') ?: 'https://jarvis-20-production-da28.up.railway.app') + '"'
   }
