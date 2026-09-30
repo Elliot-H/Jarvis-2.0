@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -556,6 +556,7 @@ function pickReminder(roll = Math.random) {
 }
 // trigger "at" (default): only while inside the place's perimeter. "away": only while NOT there (fresh location needed).
 function placeOk(r, pl) {
+  if (r.kind === 'bring' || ['arrive', 'leave', 'heading'].includes(r.trigger)) return false; // those fire on arrive/leave/heading events, not at random
   if (!r.place) return true;
   const here = pl && placeKey(pl.name) === placeKey(r.place);
   if (r.trigger !== 'away') return !!here;
@@ -565,6 +566,7 @@ function placeOk(r, pl) {
 // A bucket question with its own yes/no replies is answered here (short answers only, within 10 minutes).
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
+  if (q.type === 'dest') return destAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
@@ -583,6 +585,7 @@ function placeNote() {
   state.lastPlace = key; saveState();
   if (!pl) return '';
   const c = nowCtx();
+  if (state.at === key) return ''; // the movement engine already greeted this arrival
   if (pl.kind === 'home') return '';
   if (placeKey(pl.name) === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; saveState(); }
   return ` I see you're at ${pl.name} ${c.tod === 'night' ? 'tonight' : 'this ' + c.tod}, sir.`;
@@ -607,9 +610,10 @@ handlers.reminder_add = async a => {
 function cleanItem(a) {
   const pick = (v, ok) => ok.includes(v) ? v : undefined, str = v => String(v ?? '').trim().slice(0, 300) || undefined;
   const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? Math.min(hi, Math.max(lo, n)) : d; };
-  const kind = pick(a.kind, ['reminder', 'mention', 'question']) || 'reminder';
+  const kind = pick(a.kind, ['reminder', 'mention', 'question', 'bring']) || 'reminder';
   return { id: str(a.id) || Math.random().toString(36).slice(2, 7), kind, text: str(a.text), place: str(a.place),
-    trigger: a.place ? pick(a.trigger, ['at', 'away']) || 'at' : undefined,
+    trigger: a.place && kind !== 'bring' ? pick(a.trigger, ['at', 'away', 'arrive', 'leave', 'heading']) || 'at' : undefined,
+    once: kind === 'bring' || a.once === true || a.once === 'true' ? true : undefined,
     time: pick(a.time, ['morning', 'afternoon', 'evening', 'night']), days: pick(a.days, ['weekdays', 'weekends']),
     chance: num(a.chance, 40, 1, 100), cooldownHours: num(a.cooldown_hours ?? a.cooldownHours, 20, 1, 24 * 30),
     yes: kind === 'question' ? str(a.yes) : undefined, no: kind === 'question' ? str(a.no) : undefined,
@@ -688,6 +692,129 @@ async function shopAnswer(text) {
   return true;
 }
 handlers.shop_day = async ({ going }) => shopDay(going);
+
+// ---------- comings and goings: arrive / leave events from any location update (app open, or the app's background reports) ----------
+// Hysteresis: you are "at" a place inside its radius, and only "left" once you are 120 m past it, so GPS jitter at the edge
+// does not make Jarvis greet you twice. Events turn into at most one short remark each, rate limited, quiet at night.
+// Items (the Places box / voice): trigger arrive | leave | heading (said when he is headed there), once = fire then delete,
+// kind bring = something to bring TO that place (said when he leaves anywhere else / says he's headed there; cleared on arrival).
+const LEAVE_MARGIN = 120, QUIET_FROM = Number(process.env.QUIET_FROM ?? 22), QUIET_TO = Number(process.env.QUIET_TO ?? 6);
+const MAX_REMARKS_HOUR = Number(process.env.MAX_REMARKS_HOUR || 4);
+function placeFor(L, prevKey) {
+  let best = null;
+  for (const p of state.places) {
+    const d = km(L, p) * 1000, r = (p.radius || 150) + (placeKey(p.name) === prevKey ? LEAVE_MARGIN : 0);
+    if (d <= r && (!best || d < best.d)) best = { ...p, d };
+  }
+  return best;
+}
+const quietNow = () => { const h = nowCtx().h; return QUIET_FROM > QUIET_TO ? h >= QUIET_FROM || h < QUIET_TO : h >= QUIET_FROM && h < QUIET_TO; };
+function remarkAllowed() {
+  const now = Date.now(); state.remarks = (state.remarks || []).filter(t => now - t < 3600e3);
+  return !quietNow() && state.remarks.length < MAX_REMARKS_HOUR;
+}
+const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+const dueItem = (r, now) => r.on !== false && (!r.lastShown || r.once || now - r.lastShown > (r.cooldownHours ?? 20) * 3600e3) && (!r.time || r.time === nowCtx().tod)
+  && (!r.days || (r.days === 'weekends') === nowCtx().weekend);
+// Lines for an event at a place. Once-items always fire; the others roll their chance. Fired once-items are removed.
+function eventLines(trigger, placeName, roll = Math.random) {
+  const now = Date.now(), k = placeKey(placeName), out = [];
+  const hits = state.reminders.filter(r => r.kind !== 'bring' && r.trigger === trigger && placeKey(r.place) === k && dueItem(r, now));
+  for (const r of hits) if (r.once || roll() * 100 < (r.chance ?? 40)) { r.lastShown = now; out.push(r.text); if (r.kind === 'question') state.pendingQ = { id: r.id, at: now }; }
+  state.reminders = state.reminders.filter(r => !(r.once && r.lastShown === now && hits.includes(r)));
+  return out.slice(0, 2);
+}
+const bringFor = name => state.reminders.filter(r => r.kind === 'bring' && placeKey(r.place) === placeKey(name) && r.on !== false);
+function bringLine(name) { const b = bringFor(name); return b.length ? `Don't forget to bring ${listJoin(b.map(r => r.text))} to ${name}.` : ''; }
+// Where is he probably going next? Kept simple on purpose: evenings from work go home; shop-day mornings from home go to the shop.
+function guessNext(fromKey) {
+  const c = nowCtx(), home = state.places.find(p => p.kind === 'home'), shop = shopPlace();
+  if (fromKey === 'shop' && home && c.h >= 15) return home;
+  if (home && fromKey === placeKey(home.name) && shop && SHOP_DAYS.includes(c.wd.toLowerCase()) && c.h >= SHOP_FROM && c.h < SHOP_TO
+      && state.workDay?.day !== c.day && state.shopAsk?.day !== c.day) { state.shopAsk = { day: c.day, at: Date.now(), pending: false }; return shop; }
+  return null;
+}
+let pendingSay = null;
+// Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
+function deliver(text, title = 'Jarvis') {
+  text = text.replace(/\s+/g, ' ').trim(); if (!text) return;
+  (state.remarks ||= []).push(Date.now()); saveState();
+  remember('jarvis', text);
+  if (clients.size) {
+    pendingSay = { text, at: Date.now() };
+    setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, busy ? 6000 : 2500);
+  } else push(title, text).catch(() => {});
+}
+const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
+function onMove() {
+  const L = state.location; if (!L) return;
+  const prevKey = state.at || '', pl = placeFor(L, prevKey), key = pl ? placeKey(pl.name) : '';
+  if (key === prevKey) return;
+  const prev = state.places.find(p => placeKey(p.name) === prevKey);
+  state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
+  const c = nowCtx(), parts = [];
+  if (prev) { // left somewhere
+    parts.push(...eventLines('leave', prev.name));
+    const dest = pl ? null : guessNext(prevKey);
+    if (dest) {
+      const q = placeKey(dest.name) === 'shop' ? 'Headed to the shop, sir?' : dest.kind === 'home' ? 'Headed home, sir?' : `Headed to ${dest.name}, sir?`;
+      parts.push(q); state.pendingQ = { type: 'dest', place: dest.name, at: Date.now() };
+    } else if (!pl) { // not a guessable trip: mention anything waiting to be brought somewhere
+      const other = state.places.find(p => p.name !== prev.name && bringFor(p.name).length);
+      if (other) parts.push(bringLine(other.name));
+    }
+  }
+  if (pl) { // arrived somewhere
+    if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
+    const brought = bringFor(pl.name);
+    if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
+    const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
+    if (firstToday && pl.kind !== 'home' && !parts.length) parts.push(`Welcome to ${pl.name}, sir.`);
+    parts.push(...eventLines('arrive', pl.name));
+  }
+  saveState();
+  const text = parts.filter(Boolean).join(' ');
+  if (text && (remarkAllowed() || parts.some(t => /bring|remembered|grab/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
+}
+// Yes / no to "Headed home, sir?"
+async function destAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
+  const yes = SHOP_NO.test(t) ? false : SHOP_YES.test(t) ? true : null;
+  if (yes === null) return false;
+  state.pendingQ = null; saveState();
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  let reply;
+  if (placeKey(q.place) === 'shop') reply = await shopDay(yes);
+  else if (!yes) reply = 'Very good, sir.';
+  else reply = ['Very good, sir.', bringLine(q.place), ...eventLines('heading', q.place)].filter(Boolean).join(' ');
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
+handlers.heading_to = async ({ place }) => {
+  const p = state.places.find(x => placeKey(x.name) === placeKey(place));
+  if (!p) return `No saved place called ${place}. Saved: ${state.places.map(x => x.name).join(', ') || 'none'}.`;
+  return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name)].join(' ');
+};
+handlers.bring_add = async ({ place, item }) => {
+  const p = state.places.find(x => placeKey(x.name) === placeKey(place));
+  state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
+  saveState(); return `Added: bring ${item} to ${p ? p.name : place}${p ? '' : ' (no saved place by that name yet)'}. He'll be reminded when he heads there, and it clears when he arrives.`;
+};
+handlers.bring_list = async ({ place }) => {
+  const b = place ? bringFor(place) : state.reminders.filter(r => r.kind === 'bring');
+  return b.length ? b.map(r => `${r.id}: ${r.text} -> ${r.place}`).join('\n') : 'Nothing to bring anywhere.';
+};
+// Starter check-ins (edit or delete them in the Places box).
+if (!state.seededMoves) {
+  const home = () => state.places.find(p => p.kind === 'home')?.name || 'Home';
+  state.reminders.push(
+    cleanItem({ id: 'eat', kind: 'question', text: "Have you eaten today, sir? Might be worth grabbing some food on your way.", place: home(), trigger: 'heading', chance: 45, cooldown_hours: 20, yes: 'Very good, sir.', no: "Then I'd stop for something on the way, sir." }),
+    cleanItem({ id: 'princess', kind: 'reminder', text: 'You might check with Princess whether she needs anything brought from the shop.', place: 'the shop', trigger: 'leave', chance: 50, cooldown_hours: 20 }),
+    cleanItem({ id: 'dogfood', kind: 'question', text: 'Do the dogs have food at home, or should you grab some on the way?', place: home(), trigger: 'heading', chance: 30, cooldown_hours: 48, yes: 'Excellent, sir.', no: "Then let's pick some up on the way, sir." })
+  );
+  state.seededMoves = true;
+}
 // Places pinned from a street address (exact, not phone GPS). Public addresses live here in the code; private ones
 // (home) go in the Railway variable PLACES_JSON, e.g. [{"name":"Home","lat":38.9,"lon":-75.5,"radius":150}], because
 // this repo is public. Each seed is applied once (state.placeSeeds, backed up to the phone), so a place he deletes or
@@ -757,7 +884,7 @@ async function localGreeting(memo) {
   const n = state.failures.length;
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
   // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
-  const ctx = contextNote();
+  const ctx = contextNote() + takePendingSay(); // an arrival remark from the same moment joins the greeting instead of cutting it off
   if (first) return `${part}${day}${wx} All systems online.${open}${ctx}`; // ctx last: it may be a question he answers
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
@@ -1001,6 +1128,16 @@ app.post('/api/items', (req, res) => {
   saveState(); res.json(placesView());
 });
 app.delete('/api/items/:id', (req, res) => { state.reminders = state.reminders.filter(r => r.id !== req.params.id); saveState(); res.json(placesView()); });
+// Background position reports from the Android app (every ~100 m moved, at most once a minute).
+app.post('/api/loc', (req, res) => {
+  const lat = Number(req.body?.lat), lon = Number(req.body?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).end();
+  const moved = !state.location || Math.abs(state.location.lat - lat) > .5 || Math.abs(state.location.lon - lon) > .5;
+  state.location = { lat: +lat.toFixed(4), lon: +lon.toFixed(4), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz, bg: true };
+  if (moved) state.weather = undefined;
+  saveState(); onMove();
+  res.json({ ok: true, at: state.at || null });
+});
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 
 // Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to
@@ -1294,7 +1431,7 @@ wss.on('connection', ws => {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
       if (moved) state.weather = undefined; // new place: report its weather fresh
-      saveState();
+      saveState(); onMove();
     }
     if (msg.type === 'wake') briefing('wake', msg.memo);
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }

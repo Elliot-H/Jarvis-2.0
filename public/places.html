@@ -38,6 +38,8 @@
   .item { border-left:3px solid var(--cyan); background:var(--panel2); padding:10px 12px; }
   .item.mention { border-left-color:var(--warn); }
   .item.question { border-left-color:var(--q); }
+  .item.bring { border-left-color:var(--ok); } .bring .badge { color:var(--ok); }
+  .check { display:flex; gap:8px; align-items:center; color:var(--dim); font-size:13px; } .check input { width:auto; }
   .item.off { opacity:.45; }
   .item .text { margin:2px 0 6px; }
   .badge { font-size:10px; letter-spacing:.15em; font-weight:700; text-transform:uppercase; color:var(--cyan); }
@@ -104,9 +106,12 @@ async function api(method, url, body) {
 }
 const load = async () => { data = await api('GET', '/api/places'); render(); };
 
+const TRIG = { at: 'while at', away: 'when not at', arrive: 'on arriving at', leave: 'on leaving', heading: 'when headed to' };
 function when(it) {
+  if (it.kind === 'bring') return `bring to ${it.place} · reminded when you head there · clears when you arrive`;
   const bits = [];
-  if (it.place) bits.push(it.trigger === 'away' ? `when not at ${it.place}` : `at ${it.place}`); else bits.push('anywhere');
+  if (it.place) bits.push(`${TRIG[it.trigger || 'at']} ${it.place}`); else bits.push('anywhere');
+  if (it.once) bits.push('once, then deleted');
   if (it.time) bits.push(it.time);
   if (it.days) bits.push(it.days);
   bits.push(`${it.chance ?? 40}% chance`, `every ${it.cooldownHours ?? 20}h at most`);
@@ -130,20 +135,21 @@ function formHtml(place) {
   const it = editing.id ? data.items.find(i => i.id === editing.id) || {} : { kind: 'reminder', place, trigger: 'at', chance: 40, cooldownHours: 20 };
   const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === (cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`;
   return `<div class="form" id="itemForm">
-    <div class="seg" id="kindSeg">${['reminder', 'mention', 'question'].map(k => `<button type="button" data-kind="${k}" class="${(it.kind || 'reminder') === k ? 'on' : ''}">${k.toUpperCase()}</button>`).join('')}</div>
-    <label><small>What Jarvis says</small><textarea id="fText" placeholder="e.g. Did you lock the back gate?">${esc(it.text)}</textarea></label>
+    <div class="seg" id="kindSeg">${['reminder', 'mention', 'question', 'bring'].map(k => `<button type="button" data-kind="${k}" class="${(it.kind || 'reminder') === k ? 'on' : ''}">${k.toUpperCase()}</button>`).join('')}</div>
+    <label><small id="fTextLbl">${it.kind === 'bring' ? 'What to bring there' : 'What Jarvis says'}</small><textarea id="fText" placeholder="e.g. Did you lock the back gate?">${esc(it.text)}</textarea></label>
     <div class="grid2" id="qReplies" style="display:${(it.kind || 'reminder') === 'question' ? 'grid' : 'none'}">
       <label><small>If you say yes</small><input id="fYes" value="${esc(it.yes)}" placeholder="Very good, sir."></label>
       <label><small>If you say no</small><input id="fNo" value="${esc(it.no)}" placeholder="Understood, sir."></label>
     </div>
-    <div class="grid2">
+    <div class="grid2" id="fGrid">
       <label><small>Place</small><select id="fPlace">${opt('', 'Anywhere', it.place)}${data.places.map(p => opt(p.name, p.name, it.place)).join('')}</select></label>
-      <label><small>Trigger</small><select id="fTrigger">${opt('at', 'While I am there', it.trigger || 'at')}${opt('away', 'When I am NOT there', it.trigger)}</select></label>
+      <label><small>Trigger</small><select id="fTrigger">${opt('at', 'While I am there', it.trigger || 'at')}${opt('arrive', 'When I arrive', it.trigger)}${opt('leave', 'When I leave', it.trigger)}${opt('heading', 'When I am headed there', it.trigger)}${opt('away', 'When I am NOT there', it.trigger)}</select></label>
       <label><small>Time of day</small><select id="fTime">${opt('', 'Any time', it.time)}${['morning', 'afternoon', 'evening', 'night'].map(t => opt(t, t[0].toUpperCase() + t.slice(1), it.time)).join('')}</select></label>
       <label><small>Days</small><select id="fDays">${opt('', 'Every day', it.days)}${opt('weekdays', 'Weekdays', it.days)}${opt('weekends', 'Weekends', it.days)}</select></label>
       <label><small>Chance each check: <span id="chanceV">${it.chance ?? 40}</span>%</small><input id="fChance" type="range" min="5" max="100" step="5" value="${it.chance ?? 40}"></label>
       <label><small>At most every (hours)</small><input id="fCool" type="number" inputmode="numeric" min="1" value="${it.cooldownHours ?? 20}"></label>
     </div>
+    <label class="check" id="fOnceRow"><input type="checkbox" id="fOnce" ${it.once ? 'checked' : ''}> Only once, then delete it</label>
     <div class="acts"><button class="primary" id="fSave">SAVE</button><button class="ghost" id="fCancel">CANCEL</button></div>
   </div>`;
 }
@@ -163,6 +169,7 @@ function placeCard(p) {
       </div>
     </div>${shopNote}
     <div class="items">${items.map(itemHtml).join('') || '<div class="empty">Nothing in the box for this place yet.</div>'}</div>
+    <div class="row" style="margin-top:10px"><input class="grow" placeholder="Bring here next time… (e.g. the drill)" data-bringin="${esc(p.name)}"><button data-bring="${esc(p.name)}">+ BRING</button></div>
     ${editing && editing.place === p.name ? formHtml(p.name) : `<div style="margin-top:10px"><button data-add="${esc(p.name)}">+ ADD REMINDER / MENTION / QUESTION</button></div>`}
   </div>`;
 }
@@ -184,14 +191,23 @@ function wireForm() {
   f.querySelectorAll('#kindSeg button').forEach(b => b.onclick = () => {
     kind = b.dataset.kind; f.querySelectorAll('#kindSeg button').forEach(x => x.classList.toggle('on', x === b));
     $('#qReplies').style.display = kind === 'question' ? 'grid' : 'none';
+    showBring();
   });
+  // a bring item only needs the thing and the place
+  const showBring = () => {
+    const b = kind === 'bring';
+    $('#fTextLbl').textContent = b ? 'What to bring there' : 'What Jarvis says';
+    $('#fOnceRow').style.display = b ? 'none' : '';
+    f.querySelectorAll('#fGrid label').forEach((l, i) => { if (i) l.style.display = b ? 'none' : ''; });
+  };
+  showBring();
   $('#fChance').oninput = e => $('#chanceV').textContent = e.target.value;
   $('#fCancel').onclick = () => { editing = null; render(); };
   $('#fSave').onclick = async () => {
     try {
       data = await api('POST', '/api/items', { id: editing.id || undefined, kind, text: $('#fText').value, place: $('#fPlace').value || undefined,
         trigger: $('#fTrigger').value, time: $('#fTime').value || undefined, days: $('#fDays').value || undefined,
-        chance: $('#fChance').value, cooldown_hours: $('#fCool').value, yes: $('#fYes').value, no: $('#fNo').value,
+        chance: $('#fChance').value, cooldown_hours: $('#fCool').value, yes: $('#fYes').value, no: $('#fNo').value, once: $('#fOnce').checked,
         on: editing.id ? data.items.find(i => i.id === editing.id)?.on : undefined });
       editing = null; render(); toast('Saved.');
     } catch (e) { toast(e.message, true); }
@@ -203,6 +219,11 @@ document.addEventListener('click', async e => {
   const d = b.dataset;
   try {
     if (d.quick) { $('#hereName').value = d.quick; $('#addrName').value = d.quick; $('#hereName').focus(); }
+    else if (d.bring) {
+      const inp = [...document.querySelectorAll('[data-bringin]')].find(x => x.dataset.bringin === d.bring);
+      if (!inp.value.trim()) return toast('Type what to bring.', true);
+      data = await api('POST', '/api/items', { kind: 'bring', text: inp.value.trim(), place: d.bring }); render(); toast('Added to the bring list.');
+    }
     else if ('add' in d) { editing = { id: null, place: d.add }; render(); }
     else if (d.edit) { const it = data.items.find(i => i.id === d.edit); const k = data.places.some(p => key(p.name) === key(it.place)) ? data.places.find(p => key(p.name) === key(it.place)).name : ''; editing = { id: d.edit, place: k }; render(); }
     else if (d.toggle) { const it = data.items.find(i => i.id === d.toggle); data = await api('POST', '/api/items', { ...it, on: it.on === false }); render(); }
