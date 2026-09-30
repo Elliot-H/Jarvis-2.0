@@ -31,6 +31,21 @@ public class SttBridge {
   private boolean muted = false;
   private boolean useDefault = false;   // switch to the phone's default recognizer if Google's own can't be used
   private boolean announced = false;
+  private boolean ready = false;        // recognizer said it is actually hearing audio
+
+  /** Watchdog: the recognizer sometimes accepts startListening and then never answers (no ready, no error),
+   *  which left the mic "on" with nothing listening. Tear it down so the page can start clean. */
+  private final Runnable stall = () -> {
+    if (!running) return;
+    emit("diag", ready ? "listening session hung, resetting mic" : "mic did not start, resetting");
+    reset();
+    emit("error", "stalled"); emit("end", "");
+  };
+  private void reset() {
+    ui.removeCallbacks(stall);
+    if (sr != null) { try { sr.cancel(); } catch (Exception ignored) {} try { sr.destroy(); } catch (Exception ignored) {} sr = null; }
+    running = false; ready = false;
+  }
 
   SttBridge(Context c, WebView w) {
     ctx = c; web = w; am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
@@ -70,16 +85,18 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
-    running = true;
+    running = true; ready = false;
     hush(1600); // mute the recognizer's start "ding"
-    try { sr.startListening(i); } catch (Exception e) { running = false; emit("error", "aborted"); emit("end", ""); }
+    try { sr.startListening(i); } catch (Exception e) { reset(); emit("error", "aborted"); emit("end", ""); return; }
+    ui.removeCallbacks(stall); ui.postDelayed(stall, 5000);
   }
 
   private void cancel() {
     if (sr == null) return;
     boolean was = running;
+    ui.removeCallbacks(stall);
     try { sr.cancel(); } catch (Exception ignored) {}
-    running = false;
+    running = false; ready = false;
     hush(500);
     if (was) emit("end", "");
   }
@@ -99,13 +116,16 @@ public class SttBridge {
   private final Runnable unhush = this::doUnhush;
 
   private final RecognitionListener listener = new RecognitionListener() {
-    @Override public void onReadyForSpeech(Bundle p) { emit("start", ""); ui.removeCallbacks(unhush); ui.postDelayed(unhush, 450); }
+    @Override public void onReadyForSpeech(Bundle p) {
+      ready = true; ui.removeCallbacks(stall); ui.postDelayed(stall, 60000);   // a live session never runs this long
+      emit("start", ""); ui.removeCallbacks(unhush); ui.postDelayed(unhush, 450); }
     @Override public void onBeginningOfSpeech() {}
     @Override public void onRmsChanged(float v) {}
     @Override public void onBufferReceived(byte[] b) {}
     @Override public void onEndOfSpeech() { hush(500); }
     @Override public void onError(int code) {
-      running = false;
+      running = false; ready = false; ui.removeCallbacks(stall);
+      if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) emit("diag", "speech engine error " + code);
       String e;
       switch (code) {
         case SpeechRecognizer.ERROR_NO_MATCH:
@@ -129,7 +149,7 @@ public class SttBridge {
       emit("end", "");
     }
     @Override public void onPartialResults(Bundle b) { push(b, false); }
-    @Override public void onResults(Bundle b) { running = false; push(b, true); emit("end", ""); }
+    @Override public void onResults(Bundle b) { running = false; ready = false; ui.removeCallbacks(stall); push(b, true); emit("end", ""); }
     @Override public void onEvent(int t, Bundle b) {}
   };
 
@@ -149,7 +169,7 @@ public class SttBridge {
   }
 
   void release() {
-    ui.removeCallbacks(unhush); unhush.run();
+    ui.removeCallbacks(unhush); ui.removeCallbacks(stall); unhush.run();
     if (sr != null) { try { sr.destroy(); } catch (Exception ignored) {} sr = null; }
   }
 }

@@ -11,13 +11,19 @@
     window.__sttShim = true;
     let cur = null;
     function SR() { this.continuous = false; this.interimResults = false; this.lang = 'en-US'; this.maxAlternatives = 1; this._on = false; }
-    SR.prototype.start = function () { if (this._on) throw new Error('InvalidStateError'); cur = this; this._on = true; window.AndroidSTT.start(this.lang || 'en-US'); };
+    SR.prototype.start = function () {
+      // A session that never reported back must not block the mic forever.
+      if (this._on && Date.now() - this._t < 12000) throw new Error('InvalidStateError');
+      if (this._on) { try { window.AndroidSTT.abort(); } catch {} }
+      cur = this; this._on = true; this._t = Date.now(); window.AndroidSTT.start(this.lang || 'en-US');
+    };
     SR.prototype.stop = function () { window.AndroidSTT.stop(); };
     SR.prototype.abort = function () { window.AndroidSTT.abort(); };
     window.__stt = {
       ev: function (t, d) {
         if (t === 'diag') { window.__sttDiag && window.__sttDiag(d); return; }
         const r = cur; if (!r) return;
+        r._t = Date.now();
         if (t === 'start') r.onstart && r.onstart({});
         else if (t === 'result') {
           const res = [{ transcript: d.text, confidence: 0.9 }]; res.isFinal = !!d.final; res.item = function (i) { return this[i]; };
@@ -445,8 +451,9 @@
       if (e.error === 'no-speech' || e.error === 'aborted') return;
       if (e.error === 'throttled') {
         recThrottled = true; recBackoff = Math.min(recBackoff ? recBackoff * 2 : 2000, 16000);
-        chip('#chipMic', 'warn', 'MIC COOLDOWN'); return;
+        chip('#chipMic', 'warn', 'MIC COOLDOWN'); addActivity('Mic cooling down ' + Math.round(recBackoff / 1000) + 's'); return;
       }
+      if (e.error === 'stalled') { recBackoff = Math.max(recBackoff, 800); chip('#chipMic', 'warn', 'MIC RESET'); return; }
       const why = {
         'not-allowed': 'Microphone is blocked. Tap the lock icon in the address bar and allow the mic.',
         'service-not-allowed': 'Speech recognition is turned off in this browser. Use Chrome.',
