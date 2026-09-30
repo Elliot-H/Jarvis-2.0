@@ -153,3 +153,8 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - Items: trigger at|away|arrive|leave|heading, once (fire then delete), kind bring (to a place; cleared on arrival). Voice tools bring_add, bring_list, heading_to; reminder_add has trigger + once.
 - `deliver()`: spoken if the app is connected (joins the greeting if one is about to happen), else Pushover. Max `MAX_REMARKS_HOUR` (4), quiet `QUIET_FROM`-`QUIET_TO` (22-6); bring/grab lines bypass the hourly cap.
 - Starter items (seededMoves): "have you eaten" (heading home), check with Princess (leaving the shop), dogs' food (heading home). Tested locally with simulated moves.
+
+## W2 client follow-ups (2026-09-30)
+- The shop line is an iPhone (customer numbers are in its Contacts). iOS lets no app text on its own, so texts go out through an Apple Shortcut on that phone: GET /api/outbox?token=... (returns approved texts, marks them sending), then per message Find Contacts (name contains) -> Send Message -> GET /api/outbox/:id/sent?token=... (or ?status=notfound). Unconfirmed "sending" items return to approved after 2 h. Token `state.outboxToken` (random, in BACKUP_KEYS), not the PIN; the outbox routes sit before the PIN middleware.
+- Drafting: `followupTick` at FOLLOWUP_AT (08:45) drafts for calendar jobs that ended FOLLOWUP_DAYS (3) ago; customer = event title before " - ". Announced in the greeting (mornings or at the shop). Page /followups (HUD button FOLLOW-UPS): approve/edit/skip, add by hand, review link + wording, and the Shortcut setup steps with the links filled in. Voice tools followup_list/approve/skip/edit/add.
+- Tested locally (add, approve, outbox, token check, sent). The Shortcut itself is untested (built from the steps on the page).

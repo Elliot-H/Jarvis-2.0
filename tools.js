@@ -71,6 +71,11 @@ export const PHONE_TOOLS = [
   { name: 'bring_add', description: 'Add something the Owner must bring TO a place ("I need to bring the drill to the Camden house"). He is reminded when he leaves elsewhere or says he is headed there; it clears when he arrives.', shape: { place: z.string(), item: z.string() } },
   { name: 'bring_list', description: 'What he needs to bring, for one place or everywhere.', shape: { place: z.string().optional() } },
   { name: 'heading_to', description: 'He says he is heading to a saved place ("heading to the Camden house"): returns what to bring and any heads-up for that trip. Say it back briefly.', shape: { place: z.string() } },
+  { name: 'followup_list', description: 'Customer follow-up texts (W2) drafted from finished calendar jobs, with ids and status. They go out from the SHOP phone, only after the Owner approves.', shape: {} },
+  { name: 'followup_approve', description: 'Approve follow-ups to be sent from the shop phone. Only when the Owner clearly says to send them. all=true approves every waiting one.', shape: { ids: z.array(z.string()).optional(), all: z.boolean().optional() } },
+  { name: 'followup_skip', description: 'Skip (never send) follow-ups by id.', shape: { ids: z.array(z.string()) } },
+  { name: 'followup_edit', description: 'Change the wording of one follow-up before it is approved.', shape: { id: z.string(), text: z.string() } },
+  { name: 'followup_add', description: 'Draft a follow-up for a customer by name (as saved in the shop phone contacts). Still needs his OK to send.', shape: { customer: z.string(), text: z.string().optional() } },
   { name: 'reminder_list', description: 'List the reminders in the bucket with their ids.', shape: {} },
   { name: 'reminder_remove', description: 'Remove a reminder by id.', shape: { id: z.string() } },
   {

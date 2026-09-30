@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jarvis · Follow-ups</title>
+<meta name="theme-color" content="#02060c">
+<style>
+  :root { --bg:#02060c; --panel:#041422; --panel2:#061b2d; --line:#3fe0ff33; --cyan:#3fe0ff; --text:#cfefff; --dim:#7fa3b5; --ok:#4dffa6; --bad:#ff4d5e; --warn:#ffb547; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(circle at 50% 0,#06223a,var(--bg) 60%) fixed; color:var(--text); font:15px/1.45 system-ui,sans-serif; padding:16px; min-height:100vh; }
+  main { max-width:720px; margin:0 auto; }
+  h1 { margin:0; color:var(--cyan); letter-spacing:.25em; font-size:18px; text-shadow:0 0 12px #3fe0ff88; }
+  h2 { margin:0 0 10px; font-size:12px; letter-spacing:.18em; color:var(--dim); font-weight:600; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .top a { color:var(--dim); text-decoration:none; font-size:13px; letter-spacing:.12em; border:1px solid var(--line); padding:6px 10px; }
+  .sub { color:var(--dim); margin:0 0 16px; font-size:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); padding:14px; margin-bottom:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .grow { flex:1 1 160px; min-width:0; }
+  input, textarea { background:var(--panel2); color:var(--text); border:1px solid var(--line); padding:10px; font:15px system-ui; width:100%; border-radius:0; }
+  textarea { resize:vertical; min-height:70px; }
+  input:focus, textarea:focus { outline:none; border-color:var(--cyan); }
+  button { font:600 12px system-ui; letter-spacing:.12em; padding:10px 14px; background:transparent; color:var(--cyan); border:1px solid var(--cyan); cursor:pointer; white-space:nowrap; }
+  button.primary { background:var(--cyan); color:#001018; }
+  button.ghost { border-color:var(--line); color:var(--dim); }
+  button:disabled { opacity:.4; }
+  .f { border-left:3px solid var(--warn); background:var(--panel2); padding:10px 12px; margin-top:10px; }
+  .f.approved, .f.sending { border-left-color:var(--cyan); }
+  .f.sent { border-left-color:var(--ok); opacity:.7; }
+  .f.skipped { opacity:.4; } .f.failed { border-left-color:var(--bad); }
+  .who { font-weight:700; } .st { font-size:10px; letter-spacing:.15em; font-weight:700; text-transform:uppercase; margin-left:6px; }
+  .proposed .st { color:var(--warn); } .approved .st, .sending .st { color:var(--cyan); } .sent .st { color:var(--ok); } .failed .st { color:var(--bad); } .skipped .st { color:var(--dim); }
+  .meta { color:var(--dim); font-size:12px; }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .acts button { padding:7px 12px; font-size:11px; }
+  ol { padding-left:20px; margin:8px 0; } li { margin:6px 0; }
+  code { background:var(--panel2); border:1px solid var(--line); padding:1px 5px; font-size:13px; word-break:break-all; }
+  .url { display:flex; gap:6px; margin:6px 0 10px; } .url input { font:12px ui-monospace,monospace; }
+  details summary { cursor:pointer; color:var(--cyan); letter-spacing:.12em; font-size:12px; font-weight:600; }
+  .empty { color:var(--dim); font-size:13px; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--cyan); padding:10px 16px; max-width:90vw; display:none; z-index:9; }
+  #toast.bad { border-color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><h1>FOLLOW-UPS</h1><a href="/">‹ HUD</a></div>
+  <p class="sub" id="sub">Texts to customers after a job. Sent from the shop iPhone, only after you approve.</p>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">WAITING / RECENT</h2>
+      <div class="row"><button class="ghost" id="draft">DRAFT FROM CALENDAR NOW</button><button class="primary" id="approveAll">APPROVE ALL WAITING</button></div></div>
+    <div id="list"></div>
+  </div>
+
+  <div class="card">
+    <h2>ADD ONE BY HAND</h2>
+    <input id="aName" placeholder="Customer name, as saved in the shop phone">
+    <textarea id="aText" placeholder="Message (leave empty for the standard follow-up)" style="margin-top:8px"></textarea>
+    <div class="acts"><button id="add">DRAFT IT</button></div>
+  </div>
+
+  <div class="card">
+    <h2>MESSAGE SETTINGS</h2>
+    <label class="meta">Google review link (added to every follow-up)</label>
+    <input id="review" placeholder="https://g.page/r/...">
+    <label class="meta" style="display:block;margin-top:10px">Wording ({name}, {job} and {review} get filled in)</label>
+    <textarea id="tpl"></textarea>
+    <div class="acts"><button id="saveSet">SAVE</button></div>
+  </div>
+
+  <div class="card">
+    <details id="setup">
+      <summary>SHOP IPHONE SETUP (ONE TIME)</summary>
+      <p class="meta" style="margin-top:10px">On the shop iPhone, open the <b>Shortcuts</b> app → <b>+</b> → name it <b>Jarvis Follow-ups</b>, then add these actions in order:</p>
+      <ol>
+        <li><b>Get Contents of URL</b>: paste this link:
+          <div class="url"><input id="u1" readonly><button class="ghost" data-copy="u1">COPY</button></div></li>
+        <li><b>Get Dictionary Value</b>: Get <i>Value</i> for key <code>messages</code> in <i>Contents of URL</i>.</li>
+        <li><b>Repeat with Each</b> item in <i>Dictionary Value</i>. Inside the repeat:
+          <ol type="a">
+            <li><b>Get Dictionary Value</b> <code>name</code> from <i>Repeat Item</i> → <b>Set Variable</b> <code>Who</code></li>
+            <li><b>Get Dictionary Value</b> <code>text</code> from <i>Repeat Item</i> → <b>Set Variable</b> <code>Msg</code></li>
+            <li><b>Get Dictionary Value</b> <code>id</code> from <i>Repeat Item</i> → <b>Set Variable</b> <code>MsgID</code></li>
+            <li><b>Find Contacts</b> where <i>Name</i> <i>contains</i> <code>Who</code>, Limit 1.</li>
+            <li><b>If</b> <i>Contacts</i> <i>has any value</i>:
+              <ul><li><b>Send Message</b> <code>Msg</code> to <i>Contacts</i> (tap the arrow, turn <b>Show When Run</b> off).</li>
+                  <li><b>Get Contents of URL</b>: this link with <code>MsgID</code> put where it says ID:
+                    <div class="url"><input id="u2" readonly><button class="ghost" data-copy="u2">COPY</button></div></li></ul></li>
+            <li><b>Otherwise</b>: <b>Get Contents of URL</b>:
+              <div class="url"><input id="u3" readonly><button class="ghost" data-copy="u3">COPY</button></div></li>
+            <li><b>End If</b></li>
+          </ol></li>
+        <li><b>End Repeat</b>.</li>
+      </ol>
+      <p class="meta">Then <b>Automation</b> tab → <b>+</b> → <b>Time of Day</b> → 10:00 AM, Daily, <b>Run Immediately</b> → pick <b>Jarvis Follow-ups</b>. Repeat for 1:00 PM and 5:00 PM. Run it once by hand the first time and tap <b>Always Allow</b> on any prompts.</p>
+      <p class="meta">Keep this link private: it lets the phone collect the texts without the PIN.</p>
+    </details>
+  </div>
+</main>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+let data = { items: [] };
+function toast(m, bad) { const t = $('#toast'); t.textContent = m; t.className = bad ? 'bad' : ''; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'Error ' + r.status); return j;
+}
+const LABEL = { proposed: 'waiting for you', approved: 'approved, goes out next run', sending: 'sending', sent: 'sent', skipped: 'skipped', failed: 'not sent: no matching contact' };
+function render() {
+  const items = data.items.filter(f => f.status !== 'skipped' || Date.now() - f.at < 3 * 86400e3);
+  $('#list').innerHTML = items.map(f => `<div class="f ${f.status}">
+      <span class="who">${esc(f.customer)}</span><span class="st">${LABEL[f.status] || f.status}</span>
+      <div class="meta">${f.date ? 'Job on ' + esc(f.date) : 'Added by hand'}${f.sentAt ? ' · ' + new Date(f.sentAt).toLocaleString() : ''}</div>
+      ${f.status === 'proposed' ? `<textarea data-text="${f.id}" style="margin-top:8px">${esc(f.text)}</textarea>
+        <div class="acts"><button class="primary" data-act="approve" data-id="${f.id}">APPROVE</button><button class="ghost" data-act="skip" data-id="${f.id}">SKIP</button></div>`
+      : `<div style="margin-top:6px">${esc(f.text)}</div>${f.status === 'failed' ? `<div class="acts"><button data-act="retry" data-id="${f.id}">TRY AGAIN</button></div>` : ''}`}
+    </div>`).join('') || '<div class="empty" style="margin-top:8px">Nothing yet. Jarvis drafts them each morning from jobs that ended ' + data.days + ' days ago.</div>';
+  const waiting = data.items.filter(f => f.status === 'proposed').length;
+  $('#approveAll').disabled = !waiting; $('#approveAll').textContent = waiting ? `APPROVE ALL WAITING (${waiting})` : 'APPROVE ALL WAITING';
+}
+async function load() {
+  data = await api('GET', '/api/followups');
+  $('#review').value = data.reviewLink; $('#tpl').value = data.template || 'Hi {name}, this is Defiant Audio checking in on your {job}. How is everything holding up? Let us know if anything needs attention.{review}';
+  $('#u1').value = data.outboxUrl;
+  $('#u2').value = data.sentBase + 'ID/sent?token=' + data.token;
+  $('#u3').value = data.sentBase + 'ID/sent?status=notfound&token=' + data.token;
+  render();
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  try {
+    if (b.dataset.copy) { const i = $('#' + b.dataset.copy); i.select(); await navigator.clipboard.writeText(i.value).catch(() => document.execCommand('copy')); toast('Copied.'); return; }
+    if (b.dataset.act) {
+      const t = document.querySelector(`[data-text="${b.dataset.id}"]`);
+      await api('POST', '/api/followups', { id: b.dataset.id, action: b.dataset.act, text: t ? t.value : undefined });
+      toast(b.dataset.act === 'approve' ? 'Approved. The shop phone sends it on its next run.' : b.dataset.act === 'skip' ? 'Skipped.' : 'Queued again.');
+      return load();
+    }
+  } catch (err) { toast(err.message, true); }
+});
+$('#approveAll').onclick = async () => {
+  try { for (const f of data.items.filter(f => f.status === 'proposed')) { const t = document.querySelector(`[data-text="${f.id}"]`); await api('POST', '/api/followups', { id: f.id, action: 'approve', text: t ? t.value : undefined }); } toast('All approved.'); load(); }
+  catch (err) { toast(err.message, true); }
+};
+$('#draft').onclick = async () => { try { const r = await api('POST', '/api/followups', { action: 'draft' }); toast(r.drafted ? `Drafted ${r.drafted}.` : 'No new finished jobs for that day (or the calendar is not connected).'); load(); } catch (err) { toast(err.message, true); } };
+$('#add').onclick = async () => {
+  const n = $('#aName').value.trim(); if (!n) return toast('Customer name, please.', true);
+  try { await api('POST', '/api/followups', { action: 'add', customer: n, text: $('#aText').value.trim() || undefined }); $('#aName').value = ''; $('#aText').value = ''; toast('Drafted. Approve it above.'); load(); } catch (err) { toast(err.message, true); }
+};
+$('#saveSet').onclick = async () => { try { await api('POST', '/api/followups', { action: 'settings', reviewLink: $('#review').value, template: $('#tpl').value }); toast('Saved.'); } catch (err) { toast(err.message, true); } };
+load().catch(e => $('#sub').textContent = e.message);
+</script>
+</body>
+</html>

@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -884,7 +884,7 @@ async function localGreeting(memo) {
   const n = state.failures.length;
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
   // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
-  const ctx = contextNote() + takePendingSay(); // an arrival remark from the same moment joins the greeting instead of cutting it off
+  const ctx = contextNote() + takePendingSay() + (state.at === 'shop' || nowCtx().h < 12 ? followupNote() : ''); // an arrival remark from the same moment joins the greeting instead of cutting it off
   if (first) return `${part}${day}${wx} All systems online.${open}${ctx}`; // ctx last: it may be a question he answers
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
@@ -1008,6 +1008,71 @@ function briefTick() {
 }
 if (!process.env.JARVIS_SMOKE) setInterval(briefTick, 60_000);
 
+// ---------- W2 client follow-ups (texts go out from the shop iPhone through an Apple Shortcut) ----------
+// Every morning Jarvis drafts a follow-up for each job that ended FOLLOWUP_DAYS ago (calendar events whose colour meaning
+// contains "job"; all timed events if no meanings are set). Nothing is sent without the Owner's yes: he approves, edits or
+// skips each one (voice or /followups). The shop iPhone runs a Shortcut a few times a day: it fetches the approved texts
+// from /api/outbox (secret token, not the PIN), finds each customer in its Contacts by name, sends from the shop number,
+// then reports back. iPhones don't let apps text on their own; Shortcuts is the one allowed way.
+state.followups ||= [];
+state.outboxToken ||= crypto.randomBytes(18).toString('base64url');
+const FOLLOWUP_DAYS = Number(process.env.FOLLOWUP_DAYS || 3);
+const FOLLOWUP_AT = parseTime(process.env.FOLLOWUP_AT ?? '08:45');
+const custName = title => String(title || '').split(/\s[-–|:@]\s|,|\(/)[0].replace(/^(job|install|tint|appt|appointment)[:\s]+/i, '').trim().slice(0, 40);
+function followupText(f) {
+  const first = f.customer.split(/\s+/)[0];
+  const review = state.reviewLink ? ` If you have a minute, a quick review helps us a lot: ${state.reviewLink}` : '';
+  return (state.followupTemplate || 'Hi {name}, this is Defiant Audio checking in on your {job}. How is everything holding up? Let us know if anything needs attention.{review}')
+    .replace('{name}', first).replace('{job}', f.job || 'visit').replace('{review}', review);
+}
+async function draftFollowups() {
+  if (!cal.configured()) return 0;
+  const tz = process.env.TZ || 'America/New_York';
+  const day = new Date(Date.now() - FOLLOWUP_DAYS * 86400e3).toLocaleDateString('en-CA', { timeZone: tz });
+  const r = await cal.list({ from: day, to: day }, state.calendarColors);
+  const timed = r.events.filter(e => !e.allDay);
+  const jobs = timed.some(e => /job/i.test(e.meaning || '')) ? timed.filter(e => /job/i.test(e.meaning || '')) : timed;
+  let n = 0;
+  for (const e of jobs) {
+    if (state.followups.some(f => f.eventId === e.id)) continue;
+    const customer = custName(e.title); if (!customer) continue;
+    const f = { id: Math.random().toString(36).slice(2, 7), eventId: e.id, customer, job: (e.title.split(/\s[-–|:]\s/)[1] || '').trim().toLowerCase() || undefined, date: day, status: 'proposed', at: Date.now() };
+    f.text = followupText(f); state.followups.push(f); n++;
+  }
+  state.followups = state.followups.filter(f => Date.now() - f.at < 30 * 86400e3).slice(-200);
+  saveState(); return n;
+}
+const followupsWaiting = () => state.followups.filter(f => f.status === 'proposed');
+async function followupTick() {
+  const clock = localClock(new Date(), process.env.TZ || 'America/New_York');
+  if (FOLLOWUP_AT == null || state.followupDay === clock.day || clock.minutes < FOLLOWUP_AT || clock.minutes > FOLLOWUP_AT + 240) return;
+  state.followupDay = clock.day; saveState();
+  try {
+    const n = await draftFollowups();
+    if (n) console.log(`follow-ups: drafted ${n}`);
+  } catch (e) { console.warn('follow-ups:', e.message); }
+}
+if (!process.env.JARVIS_SMOKE) setInterval(followupTick, 5 * 60_000);
+function followupNote() {
+  const w = followupsWaiting(); if (!w.length || state.followupAnnounced === localClock().day) return '';
+  state.followupAnnounced = localClock().day; saveState();
+  return ` ${w.length} customer follow-up${w.length > 1 ? 's are' : ' is'} ready for your OK: ${listJoin(w.map(f => f.customer))}. Say "send the follow-ups", or check them on the follow-ups page.`;
+}
+Object.assign(handlers, {
+  followup_list: async () => state.followups.filter(f => f.status !== 'sent' && f.status !== 'skipped').map(f => `${f.id} [${f.status}] ${f.customer}: "${f.text}"`).join('\n') || 'No follow-ups waiting.',
+  followup_approve: async ({ ids, all }) => {
+    const pick = all ? followupsWaiting() : state.followups.filter(f => (ids || []).includes(f.id));
+    pick.forEach(f => { f.status = 'approved'; f.approvedAt = Date.now(); }); saveState();
+    return pick.length ? `Approved ${pick.length} (${pick.map(f => f.customer).join(', ')}). The shop iPhone sends them on its next run.` : 'Nothing matched.';
+  },
+  followup_skip: async ({ ids }) => { const pick = state.followups.filter(f => (ids || []).includes(f.id)); pick.forEach(f => f.status = 'skipped'); saveState(); return `Skipped ${pick.length}.`; },
+  followup_add: async ({ customer, text }) => {
+    const f = { id: Math.random().toString(36).slice(2, 7), customer, status: 'proposed', at: Date.now() };
+    f.text = text || followupText(f); state.followups.push(f); saveState(); return `Drafted for ${customer}: "${f.text}". Needs his OK before it goes out.`;
+  },
+  followup_edit: async ({ id, text }) => { const f = state.followups.find(x => x.id === id); if (!f) return 'No such follow-up.'; f.text = text; saveState(); return 'Updated.'; }
+});
+
 // ---------- HTTP ----------
 const app = express();
 app.set('trust proxy', 1);
@@ -1038,6 +1103,24 @@ app.post('/login', (req, res) => {
   res.redirect(303, '/');
 });
 app.get('/health', (_req, res) => res.send('ok'));
+// The shop iPhone's Shortcut: token in the URL instead of the PIN cookie.
+const outboxOk = req => String(req.query.token || '') === state.outboxToken;
+app.get('/api/outbox', (req, res) => {
+  if (!outboxOk(req)) return res.status(401).json({ error: 'bad token' });
+  const due = state.followups.filter(f => f.status === 'approved');
+  due.forEach(f => { f.status = 'sending'; f.pickedAt = Date.now(); }); saveState();
+  res.json({ count: due.length, messages: due.map(f => ({ id: f.id, name: f.customer, text: f.text })) });
+});
+app.all('/api/outbox/:id/sent', (req, res) => {
+  if (!outboxOk(req)) return res.status(401).json({ error: 'bad token' });
+  const f = state.followups.find(x => x.id === req.params.id); if (!f) return res.status(404).end();
+  const failed = /fail|notfound|missing/i.test(String(req.query.status || ''));
+  f.status = failed ? 'failed' : 'sent'; f.sentAt = Date.now(); saveState();
+  broadcast({ type: 'activity', text: failed ? `Follow-up to ${f.customer} NOT sent (no matching contact on the shop phone)` : `Follow-up sent to ${f.customer}` });
+  res.json({ ok: true });
+});
+// picked up but never confirmed within 2 hours: put it back so the next run retries
+setInterval(() => { let c = false; for (const f of state.followups) if (f.status === 'sending' && Date.now() - f.pickedAt > 2 * 3600e3) { f.status = 'approved'; c = true; } if (c) saveState(); }, 10 * 60_000);
 const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png)$/;
 app.use((req, res, next) => {
   if (authed(req) || PUBLIC_FILES.test(req.path)) return next();
@@ -1138,6 +1221,26 @@ app.post('/api/loc', (req, res) => {
   if (moved) state.weather = undefined;
   saveState(); onMove();
   res.json({ ok: true, at: state.at || null });
+});
+app.get('/followups', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'followups.html')));
+app.get('/api/followups', (req, res) => res.json({ items: state.followups.slice().reverse(), reviewLink: state.reviewLink || '', template: state.followupTemplate || '',
+  days: FOLLOWUP_DAYS, outboxUrl: `${req.protocol}://${req.get('host')}/api/outbox?token=${state.outboxToken}`, sentBase: `${req.protocol}://${req.get('host')}/api/outbox/`, token: state.outboxToken }));
+app.post('/api/followups', async (req, res) => {
+  const b = req.body || {};
+  try {
+    if (b.action === 'settings') { state.reviewLink = String(b.reviewLink || '').trim().slice(0, 300) || undefined; state.followupTemplate = String(b.template || '').trim().slice(0, 500) || undefined; saveState(); }
+    else if (b.action === 'draft') { const n = await draftFollowups(); saveState(); return res.json({ drafted: n }); }
+    else if (b.action === 'add') await handlers.followup_add({ customer: String(b.customer || '').trim().slice(0, 40), text: b.text });
+    else {
+      const f = state.followups.find(x => x.id === b.id); if (!f) return res.status(404).json({ error: 'Not found' });
+      if (b.text) f.text = String(b.text).slice(0, 600);
+      if (b.action === 'approve') { f.status = 'approved'; f.approvedAt = Date.now(); }
+      if (b.action === 'skip') f.status = 'skipped';
+      if (b.action === 'retry') f.status = 'approved';
+      saveState();
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 

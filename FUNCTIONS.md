@@ -7,10 +7,10 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
 | W1 | Calendar: read jobs, count by colour, add and change appointments | ✅ | Google Calendar (service account). Colour meanings taught by voice. |
-| W2 | Client follow-ups from the calendar | 🔧 | A few days after a job, a text to the customer (how is it holding up + review link). Must send from the **shop line**, never the Owner's cell. Owner approves each one. Needs the shop line's texting provider. |
+| W2 | Client follow-ups from the calendar | ✅ | Drafted each morning for jobs that ended 3 days ago (title "Name - job"). Owner approves by voice or on /followups (FOLLOW-UPS on the HUD). Sent from the **shop iPhone** by an Apple Shortcut (3x a day), matched to its Contacts by name. Needs the Shortcut set up once. |
 | W3 | Shop check-in: "Headed to the shop?" + today's jobs | ✅ | Shop days Mon-Sat mornings. |
 | W4 | Job log by voice | 💡 | "Log it: black Tahoe, 5% rears, 35 fronts, Mike." Searchable history. |
-| W5 | Missed-call catcher | 💡 | Missed shop call -> who it was + offer a text-back from the shop line. |
+| W5 | Missed-call catcher | 💡 | Shop line is an iPhone: apps can't read its call log. Possible via a Shortcut on missed-call notifications only in a limited way; revisit. |
 | W6 | Quote by voice | 💡 | Parts prices + labour rate -> text-ready quote. |
 | W7 | Money read-out: PayPal + Invoice Simple | 💡 | What came in, what's unpaid. |
 | W8 | End-of-day wrap-up | 💡 | Leaving the shop: jobs done, invoices not sent, what's unfinished for tomorrow. |
