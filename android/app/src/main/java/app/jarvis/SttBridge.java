@@ -122,7 +122,7 @@ public class SttBridge {
         useDefault = true; emit("diag", "Google recognizer failed (" + code + "), trying the phone's default");
       }
       if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT || useDefault && sr != null && code >= 11) {
-        try { sr.destroy(); } catch (ignored) {} sr = null;
+        try { sr.destroy(); } catch (Exception ignored) {} sr = null;
       }
       if (!e.equals("no-speech") && !e.equals("aborted")) emit("error", e);
       emit("end", "");
