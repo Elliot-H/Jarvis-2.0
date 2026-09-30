@@ -82,10 +82,11 @@ public class SttBridge {
     ui.removeCallbacks(unhush);
     ui.postDelayed(unhush, ms);
   }
-  private final Runnable unhush = () -> {
+  private void doUnhush() {
     try { if (muted) am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception ignored) {}
     muted = false;
-  };
+  }
+  private final Runnable unhush = this::doUnhush;
 
   private final RecognitionListener listener = new RecognitionListener() {
     @Override public void onReadyForSpeech(Bundle p) { emit("start", ""); ui.removeCallbacks(unhush); ui.postDelayed(unhush, 450); }
