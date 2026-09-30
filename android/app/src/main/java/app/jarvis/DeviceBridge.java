@@ -28,6 +28,7 @@ import java.util.List;
 public class DeviceBridge {
   private final Context ctx;
   private final WebView web;
+  private String lastTarget = "?";
   private final Handler ui = new Handler(Looper.getMainLooper());
 
   DeviceBridge(Context c, WebView w) { ctx = c; web = w; }
@@ -75,6 +76,10 @@ public class DeviceBridge {
     if (ad == null) { reply(id, false, "This phone has no Bluetooth."); return; }
     final long deadline = System.currentTimeMillis() + 20000;
     final boolean[] sent = {false};
+    // Tasker connects most reliably by hardware address: look up the paired speaker whose name contains what we were given.
+    final String[] target = {name, name};
+    try { for (BluetoothDevice d : ad.getBondedDevices()) { String n = d.getName(); if (n != null && n.toLowerCase().contains(name.toLowerCase())) { target[0] = d.getAddress(); target[1] = n; break; } } } catch (SecurityException ignored) {}
+    lastTarget = target[0] + " (" + target[1] + ")";
     final Runnable[] poll = new Runnable[1];
     poll[0] = () -> {
       try {
@@ -95,7 +100,8 @@ public class DeviceBridge {
                 t.setPackage(pkg);
                 t.putExtra("version_number", "1.0");
                 t.putExtra("task_name", task);
-                t.putExtra("par1", name); // the Tasker task reads the device name as %par1
+                t.putExtra("par1", target[0]); // the Tasker task reads the speaker's hardware address (or name) as %par1
+                t.putExtra("par2", target[1]);
                 ctx.sendBroadcast(t);
               }
             }
@@ -127,7 +133,7 @@ public class DeviceBridge {
       if (ad != null) for (BluetoothDevice d : ad.getBondedDevices()) { String n = d.getName(); if (names.length() > 0) names.append(", "); names.append(n); if (n != null && n.toLowerCase().contains(name.toLowerCase())) paired = true; }
       sb.append("Paired device matching \"").append(name).append("\": ").append(paired ? "yes" : "NO. Paired devices are: " + names).append(". ");
     } catch (SecurityException e) { sb.append("Jarvis lacks the Nearby devices permission. "); }
-    sb.append("Tasker task name sent: ").append(task).append(".");
+    sb.append("Tasker task name sent: ").append(task).append(", device sent as ").append(lastTarget).append(".");
     return sb.toString();
   }
 
