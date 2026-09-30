@@ -483,13 +483,49 @@ const BRIEF_PROMPTS = {
   midday: moved => `[crypto midday check] These coins moved a lot today: ${moved}. Find out why, and say whether it looks worth watching, worth being cautious about, or just noise. ${TAIL}`,
   evening: () => `[crypto evening brief] Scan crypto. Recap how today went, which news landed, and what to watch overnight and tomorrow. ${TAIL}`
 };
-async function push(title, body) {
+// Phone alerts: Telegram first (its own chat, so it can have its own sound), ntfy as the backup.
+// Telegram needs TELEGRAM_BOT_TOKEN. The chat id is found automatically after the Owner sends the bot any message once
+// (or set TELEGRAM_CHAT_ID). ntfy needs NTFY_TOPIC.
+const TG_FILE = path.join(DATA_DIR, 'telegram-chat.txt');
+async function tgChatId() {
+  if (process.env.TELEGRAM_CHAT_ID) return process.env.TELEGRAM_CHAT_ID;
+  try { const c = fs.readFileSync(TG_FILE, 'utf8').trim(); if (c) return c; } catch {}
+  const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates`, { signal: AbortSignal.timeout(10000) });
+  const j = await r.json();
+  const msg = (j.result || []).map(u => u.message || u.channel_post).filter(Boolean).pop();
+  if (!msg) return null;
+  const id = String(msg.chat.id);
+  try { fs.writeFileSync(TG_FILE, id); } catch {}
+  return id;
+}
+async function pushTelegram(title, body) {
+  try {
+    const chat = await tgChatId();
+    if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
+    const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500) }), signal: AbortSignal.timeout(10000)
+    });
+    return r.ok ? null : `Telegram answered ${r.status}: ${(await r.text()).slice(0, 120)}`;
+  } catch (e) { return String(e.message || e).slice(0, 120); }
+}
+async function pushNtfy(title, body) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
     const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
+}
+async function push(title, body) {
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    const err = await pushTelegram(title, body);
+    if (!err) return null;
+    console.warn('Telegram alert failed:', err);
+    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body) : 'no ntfy backup set';
+    return backup ? `${err} (ntfy backup: ${backup})` : null;
+  }
+  return pushNtfy(title, body);
 }
 handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '');

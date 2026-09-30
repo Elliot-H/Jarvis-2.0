@@ -61,6 +61,10 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - `voice_check` talk tool: live 1-word Fish test so Jarvis can state the exact reason the voice is off.
 - `/api/alert-sound.mp3` (PIN-authed): Jarvis-voice notification clip, made once and cached in data/ (`?remake` regenerates, `?text=` custom line, `ALERT_LINE` env). Owner downloads it on the phone and sets it as the ntfy notification sound.
 
+## Phone alerts: Telegram (2026-09-29)
+- Why: ntfy on the Owner's Samsung has no sound picker and plays the phone default. Telegram allows a custom sound per chat, so only Jarvis gets the clip. Setup by Owner: @BotFather /newbot, token into Railway `TELEGRAM_BOT_TOKEN`, send the bot any message once; chat id is found automatically (or `TELEGRAM_CHAT_ID`). Then in that Telegram chat: Notifications, Sound, Custom, pick jarvis-alert.mp3 (download it from /api/alert-sound.mp3).
+- `push()` sends via Telegram when the token is set, falls back to ntfy (`NTFY_TOPIC`, priority 4 via `NTFY_PRIORITY`) if Telegram fails. Crypto briefs and `phone_alert` both use it. Tested only against a mock Telegram API.
+
 ## Backlog (the "functions" discussion)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).
 - Meta Ads: Pipeboard MCP (`https://meta-ads.mcp.pipeboard.co/?token=...`, slot exists in `config/mcp.json`) or an open-source Meta Ads MCP (attainmentlabs/meta-ads-mcp, amekala/ads-mcp).
