@@ -90,3 +90,8 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - Do NOT rewrite git history to "fix" unverified commits (a stop hook complains about commits by Jarvis and by the Owner). Those commits are published, Railway deploys from main, and Jarvis's rollback relies on the hashes. Set `git config user.email noreply@anthropic.com` and `user.name Claude` for your own commits and leave older ones alone.
 - The workspace where earlier sessions ran could not reach Railway, Render, Fly, HuggingFace or api.elevenlabs.io from the shell. A session on the Owner's PC will not have that limit.
 - Owner cannot create keys or sign in for Claude; he does those steps when asked (Railway Variables, ElevenLabs/Fish keys, Anthropic billing, GitHub token).
+
+## Filler lines (ack + "still working")
+- `server.js`: `FILLERS()` (10 `ack` lines, 8 `still` lines, use USER_TITLE), `GET /api/fillers` (URL list), `GET /api/filler/:kind/:n.mp3` (Fish JARVIS voice, made once, cached `data/filler-<sha>.mp3`; 204 if no FISH key).
+- `public/app.js`: `loadFillers()` at boot preloads clips as blobs (zero-delay). `submit()` -> `startFillers()` plays a random ack instantly, then a "still" line at 9s and every 16s while state is `thinking`. `afterFiller()` lets a clip finish (max 3s) before the real reply speaks. "stop/cancel" kills them. Mic is paused during a clip so it can't hear itself.
+- To change wording, edit `FILLERS()` (new text = new cached clip automatically).

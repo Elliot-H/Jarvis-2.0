@@ -828,6 +828,44 @@ app.get('/api/alert-sound.mp3', async (req, res) => {
   } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
 });
 
+// Filler lines: an instant acknowledgement when a command lands, and "still working" updates during long jobs.
+// Made once with the Fish JARVIS voice, cached on disk, and preloaded by the app so they play with no delay.
+const FILLERS = () => {
+  const t = process.env.USER_TITLE || 'sir';
+  return {
+    ack: [
+      `Right away, ${t}.`, 'Give me just one moment.', 'Okay, let me find out.', 'Give me just a minute.',
+      "I'm working on it right now.", 'Just one second, please.', `On it, ${t}.`, 'Certainly. One moment.',
+      'Let me take a look.', `Very good, ${t}. Give me a second.`
+    ],
+    still: [
+      "Still working on it, ${t}.", 'This is taking a little longer than expected. Bear with me.', 'Almost there.',
+      "Still digging. Thank you for your patience.", "I'm still on it. Just a bit longer.",
+      'Nearly done. One more moment.', 'Bear with me, this one takes a minute.', 'Still gathering everything, one moment.'
+    ].map(l => l.replace('${t}', t))
+  };
+};
+app.get('/api/fillers', (req, res) => {
+  const f = FILLERS(); const out = {};
+  for (const k of Object.keys(f)) out[k] = f[k].map((_, i) => `/api/filler/${k}/${i}.mp3`);
+  res.json(out);
+});
+app.get('/api/filler/:kind/:n.mp3', async (req, res) => {
+  try {
+    const line = FILLERS()[req.params.kind]?.[Number(req.params.n)];
+    if (!line) return res.status(404).end();
+    const file = path.join(DATA_DIR, `filler-${crypto.createHash('sha1').update(line).digest('hex').slice(0, 10)}.mp3`);
+    if (!fs.existsSync(file)) {
+      if (!process.env.FISH_API_KEY) return res.status(204).end();
+      const out = await fishFetch(line);
+      if (!out.r) return res.status(502).end();
+      fs.writeFileSync(file, Buffer.from(await out.r.arrayBuffer()));
+    }
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.type('audio/mpeg').sendFile(file);
+  } catch { res.status(500).end(); }
+});
+
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   const text = String(req.body?.text || req.query?.text || '').slice(0, 2500);

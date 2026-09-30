@@ -67,8 +67,8 @@
       case 'say':
         ticker('');
         if (m.text) addLog('jarvis', m.text);
-        if (m.speak && !DISPLAY_ONLY && booted) speak(m.text);
-        else { caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
+        if (m.speak && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
+        else { stopFillers(); caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
@@ -279,6 +279,55 @@
     if (speaking) { speaking = false; if (resume) { setState('idle'); resumeListening(); } }
   }
 
+  // ======================= filler lines (ack + "still working") =======================
+  // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
+  const filler = { ack: [], still: [], cur: null, timer: null, lastIdx: {}, wasListening: false };
+  async function loadFillers() {
+    try {
+      const list = await (await fetch('/api/fillers')).json();
+      for (const kind of ['ack', 'still']) {
+        for (const u of list[kind] || []) {
+          fetch(u).then(r => r.ok && r.status === 200 ? r.blob() : null).then(b => { if (b && b.size > 500) filler[kind].push(URL.createObjectURL(b)); }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+  function pickFiller(kind) {
+    const l = filler[kind]; if (!l.length) return null;
+    let i = Math.floor(Math.random() * l.length);
+    if (l.length > 1 && i === filler.lastIdx[kind]) i = (i + 1) % l.length;
+    filler.lastIdx[kind] = i; return l[i];
+  }
+  function playFiller(kind) {
+    if (DISPLAY_ONLY || !booted || speaking || filler.cur) return;
+    const url = pickFiller(kind); if (!url) return;
+    const a = new Audio(url); filler.cur = a;
+    filler.wasListening = recWanted; pauseListening();
+    const end = () => { if (filler.cur !== a) return; filler.cur = null; if (state === 'thinking' && filler.wasListening) resumeListening(); };
+    a.onended = end; a.onerror = end;
+    a.play().catch(end);
+  }
+  function stopFillers() {
+    clearTimeout(filler.timer); filler.timer = null;
+  }
+  function startFillers() {
+    stopFillers();
+    playFiller('ack');
+    let n = 0;
+    const next = () => {
+      filler.timer = setTimeout(() => { if (state !== 'thinking') return; playFiller('still'); n++; next(); }, n === 0 ? 9000 : 16000);
+    };
+    next();
+  }
+  // Called before the real reply: let a filler that is mid-sentence finish (max 3s) so nothing is cut off.
+  function afterFiller(fn) {
+    stopFillers();
+    const a = filler.cur; if (!a) return fn();
+    let done = false; const go = () => { if (done) return; done = true; fn(); };
+    const prev = a.onended; a.onended = () => { prev && prev(); go(); }; a.onerror = a.onended;
+    setTimeout(go, 3000);
+  }
+
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0;
@@ -441,10 +490,11 @@
   function submit(text) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
-    if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); send({ type: 'interrupt' }); setState('idle'); return; }
+    if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
     stopSpeaking(false);
     send({ type: 'ask', text });
     setState('thinking');
+    startFillers();
   }
 
   // ======================= controls =======================
@@ -473,6 +523,7 @@
     ensureAudio(); audioCtx.resume();
     await startMicMeter();
     initRecognition();
+    loadFillers();
     chime(true);
     // "wake up" on start → greeting from the server-side briefing
     setTimeout(() => send({ type: 'wake' }), 600);
