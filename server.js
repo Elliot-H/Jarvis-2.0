@@ -742,7 +742,7 @@ handlers.voice_check = async () => {
 };
 
 // Jarvis notification clip for the phone (ntfy custom sound). Made once with the Fish JARVIS voice, then cached.
-const ALERT_LINE = () => process.env.ALERT_LINE || "I'm sure you're busy, but you asked me to alert you to any important news.";
+const ALERT_LINE = () => process.env.ALERT_LINE || `Pardon the interruption, ${process.env.USER_TITLE || 'sir'}. You have a new alert. I'm sure you're busy, but you asked me to alert you to any important news.`;
 // The cache file name includes a hash of the line, so changing the wording always makes a fresh clip.
 const alertFile = line => path.join(DATA_DIR, `alert-sound-${crypto.createHash('sha1').update(line).digest('hex').slice(0, 8)}.mp3`);
 app.get('/api/alert-sound.mp3', async (req, res) => {
