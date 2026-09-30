@@ -150,5 +150,5 @@ export const MUSIC_TOOLS = [
   { name: 'speaker_list', description: 'List taught speakers with their areas and volumes.', shape: {} },
   { name: 'speaker_remove', description: 'Forget a taught speaker (by alias or Bluetooth name).', shape: { alias: z.string() } },
   { name: 'bluetooth_disconnect', description: 'Disconnect the Bluetooth speaker (music then pauses) (the phone\'s Bluetooth itself stays on; Android does not let Tasker switch it off, so say that if he asks). Use for "disconnect the speaker", "turn off the Bluetooth", "shut the music off and unplug the speaker". device = alias or area (omit for the current one).', shape: { device: z.string().optional(), leave_bluetooth_on: z.boolean().optional() } },
-  { name: 'bluetooth_connect', description: 'Connect a taught speaker without playing music. device = alias or area (omit to use the one for where he is). Sets its default volume (45% unless changed).', shape: { device: z.string().optional() } }
+  { name: 'bluetooth_connect', description: 'Connect a taught speaker without playing music. device = alias or area (omit to use the one for where he is). Sets its default volume (65% unless changed).', shape: { device: z.string().optional() } }
 ];

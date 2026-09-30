@@ -497,9 +497,12 @@
   const MUSIC_QUIET = params.get('musicmic') !== 'on';
   let manualMicUntil = 0, musicHeld = false;
   const musicPlaying = () => { try { return MUSIC_QUIET && !!window.AndroidPhoneAudio && window.AndroidPhoneAudio.musicActive(); } catch { return false; } };
+  // The on-device wake word does the passive listening (no mic ding every second); the recognizer only opens after "Hey Jarvis" or the mic button. ?wake=speech goes back to recognizer-only listening.
+  const WAKE_FIRST = !!window.AndroidWake && params.get('wake') !== 'speech';
   function startMic() {
     const now = Date.now();
     if (!rec || now < micNotBefore || now - lastMicStart < 600) return;
+    if (WAKE_FIRST && wakeOn && mode === 'passive' && now > manualMicUntil) return;
     if (now > manualMicUntil && musicPlaying()) {
       if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Music is playing: listening is off so it does not cut out. Tap the mic button to talk.'); }
       return;
@@ -510,16 +513,16 @@
   // While music plays the recognizer stays off (it pauses Spotify). An on-device wake word (Porcupine, no audio focus) listens instead.
   let wakeOn = false, wakeErrShown = false;
   window.__wake = (type, data) => {
-    if (type === 'started') { wakeOn = true; addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
+    if (type === 'started') { wakeOn = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
     else if (type === 'stopped') wakeOn = false;
-    else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data); } }
+    else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data + ' (back to speech listening)'); } setTimeout(() => { if (recWanted && !recOn) startMic(); }, 500); }
     else if (type === 'near') addActivity('Wake word almost (' + data + ')');
-    else if (type === 'hit') { addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
+    else if (type === 'hit') { if (speaking) return; addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
   };
   function syncWake() {
     if (!window.AndroidWake || !booted) return;
     try {
-      const want = musicPlaying();
+      const want = WAKE_FIRST || musicPlaying();
       if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
     } catch {}

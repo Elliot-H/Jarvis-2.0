@@ -29,6 +29,11 @@ public class PhoneAudio {
   private final AudioManager am;
   private final Handler ui = new Handler(Looper.getMainLooper());
   private final Map<String, MediaPlayer> players = new HashMap<>();
+  private final Map<String, android.media.audiofx.LoudnessEnhancer> boosts = new HashMap<>();
+  private static final int VOICE_GAIN_MB = 1200;   // +12 dB on Jarvis's voice so it carries over the shop and over music
+  private void boost(String id, MediaPlayer p) {
+    try { android.media.audiofx.LoudnessEnhancer le = new android.media.audiofx.LoudnessEnhancer(p.getAudioSessionId()); le.setTargetGain(VOICE_GAIN_MB); le.setEnabled(true); boosts.put(id, le); } catch (Throwable ignored) {}
+  }
 
   PhoneAudio(Context c, WebView w) { ctx = c; web = w; am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE); }
 
@@ -59,7 +64,7 @@ public class PhoneAudio {
       final boolean bt = btActive();
       if (route && bt) { AudioDeviceInfo spk = find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER); if (spk != null) mp.setPreferredDevice(spk); }
       mp.setOnPreparedListener(p -> {
-        p.start();
+        boost(id, p); p.start();
         ui.postDelayed(() -> { try { if (players.get(id) == p) emit(id, "info:" + where(p, bt)); } catch (Exception ignored) {} }, 400);
       });
       mp.setOnCompletionListener(p -> { release(id); emit(id, "ended"); });
@@ -89,7 +94,7 @@ public class PhoneAudio {
       mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
       mp.setDataSource(f.getAbsolutePath());
       if (btActive()) { AudioDeviceInfo spk = find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER); if (spk != null) mp.setPreferredDevice(spk); }
-      mp.setOnPreparedListener(MediaPlayer::start);
+      mp.setOnPreparedListener(p -> { boost(id, p); p.start(); });
       mp.setOnCompletionListener(p -> { release(id); emit(id, "ended"); });
       mp.setOnErrorListener((p, what, extra) -> { release(id); emit(id, "error"); return true; });
       players.put(id, mp);
@@ -99,6 +104,7 @@ public class PhoneAudio {
 
   private void release(String id) {
     MediaPlayer mp = players.remove(id);
+    android.media.audiofx.LoudnessEnhancer le = boosts.remove(id); if (le != null) { try { le.release(); } catch (Throwable ignored) {} }
     if (mp != null) { try { mp.stop(); } catch (Exception ignored) {} try { mp.release(); } catch (Exception ignored) {} }
     try { new File(ctx.getCacheDir(), "clip-" + id + ".mp3").delete(); } catch (Exception ignored) {}
   }
