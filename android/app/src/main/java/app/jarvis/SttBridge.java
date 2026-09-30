@@ -40,6 +40,7 @@ public class SttBridge {
   // While music plays, feed the recognizer our own mic audio (AudioRecord takes no audio focus) instead of letting it open the mic
   // itself, because opening the mic is what makes it grab focus and pause Spotify. Needs Android 13+.
   private volatile boolean feeding = false;
+  private boolean fedSession = false, feedBroken = false;   // feedBroken: the recognizer ignored our audio, stop using the feed
   private android.media.AudioRecord rec;
   private android.os.ParcelFileDescriptor feedRead, feedWrite;
   private boolean startFeed(Intent i) {
@@ -154,8 +155,9 @@ public class SttBridge {
     try { if (!musicBefore) musicBefore = am.isMusicActive(); } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;
-    try { if (am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
-    if (am.isMusicActive()) emit("diag", fed ? "music playing: feeding the recognizer our own mic audio (no audio focus)" : "music playing: own-audio feed unavailable, using the recognizer's mic");
+    try { if (!feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
+    fedSession = fed;
+    if (!feedBroken && am.isMusicActive()) emit("diag", fed ? "music playing: feeding the recognizer our own mic audio (no audio focus)" : "music playing: own-audio feed unavailable, using the recognizer's mic");
     ui.removeCallbacks(resume);
     running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
@@ -202,6 +204,8 @@ public class SttBridge {
     @Override public void onEndOfSpeech() { hush(500); }
     @Override public void onError(int code) {
       running = false; ready = false; stopFeed(); ui.removeCallbacks(stall);
+      if (fedSession && maxRms <= -100f && code != 10) { feedBroken = true; emit("diag", "recognizer ignored our audio feed (code " + code + "), using its own mic from now on"); }
+      fedSession = false;
       if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) emit("diag", "speech engine error " + code);
       else if (System.currentTimeMillis() - lastQuietDiag > 15000) {
         lastQuietDiag = System.currentTimeMillis();
