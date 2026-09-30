@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     stt = new SttBridge(this, web);
     web.addJavascriptInterface(stt, "AndroidSTT");
     web.addJavascriptInterface(new DeviceBridge(this, web), "AndroidDevice");
+    web.addJavascriptInterface(new PhoneAudio(this, web), "AndroidPhoneAudio");
 
     final String origin = BuildConfig.BASE_URL;
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) && !shim.isEmpty()) {

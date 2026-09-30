@@ -257,6 +257,35 @@
     } catch (e) { chip('#chipMic', 'bad', 'MIC DENIED'); return false; }
   }
 
+  // In the Android app Jarvis's voice is played natively (no audio focus, so Spotify keeps playing; and on the phone's own
+  // speaker while a Bluetooth speaker is playing music). PhoneClip looks enough like an Audio element for the code below.
+  const PHONE_AUDIO = !!window.AndroidPhoneAudio;
+  let clipSeq = 0; const clips = {};
+  window.__phoneClip = (id, ev) => { const c = clips[id]; if (c) c._fire(ev === 'ended' ? 'onended' : 'onerror'); };
+  class PhoneClip {
+    constructor(src) { this.src = src; this.id = 'c' + (++clipSeq) + Date.now().toString(36); this.phone = true; this.stopped = false; clips[this.id] = this; }
+    _fire(n) { delete clips[this.id]; if (this.stopped) return; try { this[n] && this[n](); } catch {} }
+    async play() {
+      try {
+        const r = await fetch(this.src);
+        if (r.status !== 200) throw new Error('no audio');
+        const b = await r.blob();
+        if (this.stopped) return;
+        if (b.size < 500) throw new Error('empty audio');
+        const b64 = await new Promise(res => { const f = new FileReader(); f.onloadend = () => res(String(f.result).split(',')[1] || ''); f.readAsDataURL(b); });
+        if (this.stopped) return;
+        window.AndroidPhoneAudio.play(this.id, b64);
+      } catch (e) { this._fire('onerror'); throw e; }
+    }
+    pause() {
+      if (this.stopped) return;
+      this.stopped = true; delete clips[this.id];
+      try { window.AndroidPhoneAudio.stop(this.id); } catch {}
+      if (this.onpause) { try { this.onpause(); } catch {} }
+    }
+  }
+  const newClip = src => PHONE_AUDIO ? new PhoneClip(src) : new Audio(src);
+
   // ======================= speech out =======================
   function stripForSpeech(t) {
     return t.replace(/```[\s\S]*?```/g, ' ').replace(/[*_#`>]/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\n+/g, '. ').trim();
@@ -267,14 +296,14 @@
     if (!clean) { setState('idle'); resumeListening(); return; }
     speaking = true; pauseListening(); setState('speaking');
     caption(clean);
-    const done = () => { if (!speaking) return; speaking = false; currentAudio = null; setState('idle'); afterReply(clean); };
+    const done = () => { if (!speaking) return; speaking = false; currentAudio = null; fakeLevel = false; setState('idle'); afterReply(clean); };
 
     if (cfg.elevenlabs) {
       ensureAudio();
-      const a = new Audio(); a.crossOrigin = 'anonymous';
+      const a = newClip(); a.crossOrigin = 'anonymous';
       a.src = '/api/tts?text=' + encodeURIComponent(clean);
       currentAudio = a;
-      try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {}
+      if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
       a.onended = done;
       let fell = false;
       const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); browserSpeak(clean, done); };
@@ -377,7 +406,7 @@
     if (DISPLAY_ONLY || !booted || speaking) return;
     if (filler.cur) { if (Date.now() - filler.curAt < 6000) return; filler.cur = null; }   // a clip the phone paused must never block the next one
     const url = pickFiller(kind, group); if (!url) return;
-    const a = new Audio(url); filler.cur = a; filler.curAt = Date.now();
+    const a = newClip(url); filler.cur = a; filler.curAt = Date.now();
     const end = () => { if (filler.cur === a) filler.cur = null; };
     a.onended = end; a.onerror = end; a.onpause = end;
     setTimeout(end, 7000);
@@ -395,7 +424,7 @@
       if (r.status !== 200) return fallback();
       const blob = await r.blob(); if (blob.size < 500) return fallback();
       if (my !== ackSeq || state !== 'thinking' || speaking || filler.cur) return;   // the real answer beat it
-      const a = new Audio(URL.createObjectURL(blob)); filler.cur = a; filler.curAt = Date.now();
+      const a = newClip(URL.createObjectURL(blob)); filler.cur = a; filler.curAt = Date.now();
       const end = () => { if (filler.cur === a) filler.cur = null; };
       a.onended = end; a.onerror = end; a.onpause = end; setTimeout(end, 9000);
       a.play().catch(end);
@@ -437,7 +466,7 @@
     const a = filler.cur; if (!a) return fn();
     let done = false; const go = () => { if (done) return; done = true; fn(); };
     const prev = a.onended; a.onended = () => { prev && prev(); go(); }; a.onerror = a.onended;
-    setTimeout(go, 3000);
+    setTimeout(() => { if (!done) { try { a.pause(); } catch {} } go(); }, 5000);   // never talk over the acknowledgement
   }
 
   // ======================= speech in (wake word) =======================
