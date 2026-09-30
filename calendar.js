@@ -162,3 +162,20 @@ export async function update({ eventId, title, start, end, colorId, location, no
   if (!Object.keys(body).length) throw new Error('Nothing to change.');
   return shape(await call('PATCH', `/events/${encodeURIComponent(eventId)}`, body));
 }
+
+/** Diagnostics for the Owner: which robot account this is, which calendars it can see, and whether GOOGLE_CALENDAR_ID works. */
+export async function check() {
+  const out = { robotEmail: null, configuredId: process.env.GOOGLE_CALENDAR_ID || null, visibleCalendars: [], idWorks: null, problem: null };
+  try { out.robotEmail = key().client_email; } catch (e) { out.problem = e.message; return out; }
+  try {
+    const r = await fetch(`${API}/users/me/calendarList?minAccessRole=reader`, { headers: { Authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(20000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) out.problem = `Google answered ${r.status}: ${JSON.stringify(j.error?.message || j).slice(0, 200)}`;
+    out.visibleCalendars = (j.items || []).map(c => ({ id: c.id, name: c.summary, access: c.accessRole }));
+  } catch (e) { out.problem = e.message; }
+  if (out.configuredId) {
+    try { await call('GET', '/events?maxResults=1'); out.idWorks = true; } catch (e) { out.idWorks = false; out.idError = e.message; }
+  }
+  if (!out.problem && !out.visibleCalendars.length) out.problem = 'The robot account cannot see any calendar. The share to its email did not save, or went to a different email. Share the calendar with exactly: ' + out.robotEmail;
+  return out;
+}

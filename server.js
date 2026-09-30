@@ -662,6 +662,20 @@ app.post('/api/ask', async (req, res) => {
   if (!t) return res.status(400).json({ error: 'empty' });
   res.json({ reply: await ask(t, { spoken: false }) });
 });
+// Owner-facing calendar check (PIN protected like everything else): open /api/calendar-check on the phone.
+app.get('/api/calendar-check', async (_req, res) => {
+  const r = await cal.check();
+  const lines = [
+    'JARVIS CALENDAR CHECK', '',
+    `Robot email (share the calendar with this): ${r.robotEmail || 'unknown'}`,
+    `GOOGLE_CALENDAR_ID in Railway: ${r.configuredId || 'NOT SET'}`,
+    `That ID works: ${r.idWorks === null ? 'not tested' : r.idWorks ? 'YES' : 'NO - ' + r.idError}`, '',
+    `Calendars the robot can see (${r.visibleCalendars.length}):`,
+    ...r.visibleCalendars.map(c => `  - ${c.name}  |  id: ${c.id}  |  access: ${c.access}`),
+    ...(r.problem ? ['', 'PROBLEM: ' + r.problem] : [])
+  ];
+  res.type('text/plain').send(lines.join('\n'));
+});
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 
 // Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to
