@@ -63,6 +63,11 @@ export const PHONE_TOOLS = [
     name: 'phone_alert',
     description: 'Send a short notification to the Owner\'s phone (through the ntfy app). Use when he asks for a test alert or asks you to notify or ping his phone. Keep the message under 200 characters.',
     shape: { title: z.string().describe('a few words'), message: z.string() }
+  },
+  {
+    name: 'voice_check',
+    description: 'Test your real JARVIS voice (Fish Audio) right now and get the exact reason if it fails. Use whenever the Owner says your voice or accent is wrong, sounds like the phone, or changed.',
+    shape: {}
   }
 ];
 

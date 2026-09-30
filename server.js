@@ -656,35 +656,71 @@ function explainFishError(status, body) {
   if (status === 429) return 'Fish Audio is rate limiting requests. Try again in a moment.';
   return `Fish Audio error ${status}: ${b.slice(0, 160)}`;
 }
-async function fishTts(text, res) {
-  const voice = process.env.FISH_VOICE_ID || 'b841fc010afe43efa1b9fb702832988d'; // community "JARVIS 1"
-  try {
-    const r = await fetch(process.env.FISH_API_URL || 'https://api.fish.audio/v1/tts', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.FISH_API_KEY}`, 'Content-Type': 'application/json', model: process.env.FISH_MODEL || 's1' },
-      body: JSON.stringify({ text, reference_id: voice, format: 'mp3', mp3_bitrate: 128, latency: 'balanced', normalize: true })
-    });
-    if (!r.ok) {
-      const body = await r.text();
-      voiceStatus = { ok: false, reason: explainFishError(r.status, body), at: new Date().toISOString() };
-      console.error('Fish Audio error', r.status, body.slice(0, 300));
-      return res.status(502).end();
-    }
-    voiceStatus = { ok: true, reason: '', at: new Date().toISOString() };
-    res.setHeader('Content-Type', 'audio/mpeg');
-    const reader = r.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    res.end();
-  } catch (e) {
-    console.error('Fish TTS failed', e);
-    voiceStatus = { ok: false, reason: 'Could not reach Fish Audio: ' + String(e.message || e).slice(0, 120), at: new Date().toISOString() };
-    res.status(502).end();
+// Fish request with a model fallback: the chosen model (FISH_MODEL, default s1) first, then Fish's free
+// model if the first one fails for anything but a bad key. Returns { r } on success or { status, body }.
+const FISH_VOICE = () => process.env.FISH_VOICE_ID || 'b841fc010afe43efa1b9fb702832988d'; // community "JARVIS 1"
+async function fishFetch(text) {
+  const models = [...new Set([process.env.FISH_MODEL || 's1', process.env.FISH_FALLBACK_MODEL || 's2.1-pro-free'])];
+  let last = { status: 0, body: '' };
+  for (const model of models) {
+    try {
+      const r = await fetch(process.env.FISH_API_URL || 'https://api.fish.audio/v1/tts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.FISH_API_KEY}`, 'Content-Type': 'application/json', model },
+        body: JSON.stringify({ text, reference_id: FISH_VOICE(), format: 'mp3', mp3_bitrate: 128, latency: 'balanced', normalize: true }),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (r.ok) { if (model !== models[0]) console.warn(`Fish ${models[0]} failed (${last.status}); spoke with ${model}`); return { r, model }; }
+      last = { status: r.status, body: await r.text() };
+      console.error('Fish Audio error', model, r.status, last.body.slice(0, 300));
+      if (r.status === 401) break;
+    } catch (e) { last = { status: 0, body: 'Could not reach Fish Audio: ' + String(e.message || e).slice(0, 120) }; }
   }
+  return last;
 }
+async function fishTts(text, res) {
+  const out = await fishFetch(text);
+  if (!out.r) {
+    voiceStatus = { ok: false, reason: out.status ? explainFishError(out.status, out.body) : out.body, at: new Date().toISOString() };
+    return res.status(502).end();
+  }
+  voiceStatus = { ok: true, reason: '', model: out.model, at: new Date().toISOString() };
+  res.setHeader('Content-Type', 'audio/mpeg');
+  const reader = out.r.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(Buffer.from(value));
+  }
+  res.end();
+}
+
+// Jarvis's own voice check: a real 1-word Fish request, so he can say exactly why the voice is off.
+handlers.voice_check = async () => {
+  if (!process.env.FISH_API_KEY) return 'FISH_API_KEY is missing from Railway Variables, so the phone voice is used. Only the Owner can add it (fish.audio/app/api-keys, then Railway Variables).';
+  const out = await fishFetch('Check.');
+  if (out.r) { await out.r.arrayBuffer().catch(() => {}); voiceStatus = { ok: true, reason: '', model: out.model, at: new Date().toISOString() }; return `Fish Audio JARVIS voice works (model ${out.model}). If the Owner still hears the phone voice, tell him to fully close and reopen the app.`; }
+  const why = out.status ? explainFishError(out.status, out.body) : out.body;
+  voiceStatus = { ok: false, reason: why, at: new Date().toISOString() };
+  return `The JARVIS voice is failing: ${why} This is an account problem you cannot fix in code; tell the Owner exactly this.`;
+};
+
+// Jarvis notification clip for the phone (ntfy custom sound). Made once with the Fish JARVIS voice, then cached.
+const ALERT_FILE = path.join(DATA_DIR, 'alert-sound.mp3');
+const ALERT_LINE = () => process.env.ALERT_LINE || `Pardon the interruption, ${process.env.USER_TITLE || 'sir'}. You have a new alert.`;
+app.get('/api/alert-sound.mp3', async (req, res) => {
+  try {
+    const fresh = req.query.remake !== undefined;
+    if (fresh || !fs.existsSync(ALERT_FILE)) {
+      if (!process.env.FISH_API_KEY) return res.status(503).type('text/plain').send('FISH_API_KEY is not set in Railway.');
+      const out = await fishFetch(String(req.query.text || ALERT_LINE()).slice(0, 200));
+      if (!out.r) return res.status(502).type('text/plain').send('Could not make the clip: ' + (out.status ? explainFishError(out.status, out.body) : out.body));
+      fs.writeFileSync(ALERT_FILE, Buffer.from(await out.r.arrayBuffer()));
+    }
+    res.setHeader('Content-Disposition', 'attachment; filename="jarvis-alert.mp3"');
+    res.type('audio/mpeg').sendFile(ALERT_FILE);
+  } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
+});
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
