@@ -1233,7 +1233,8 @@ async function spotifyReady() {
 }
 // Bluetooth speakers he has taught Jarvis: { name (exact Bluetooth name), alias, area, volume }.
 state.speakers ||= [];
-const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 30);
+const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 45);
+for (const x of state.speakers) if (x.volume === 30) delete x.volume;   // the old default was saved onto speakers; let them follow the new one
 const norm = x => String(x || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 function pickSpeaker(hint) {
   const sp = state.speakers;
