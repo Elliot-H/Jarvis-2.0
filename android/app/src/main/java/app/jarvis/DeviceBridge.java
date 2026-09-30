@@ -42,6 +42,7 @@ public class DeviceBridge {
       String action = o.optString("action");
       if ("open_app".equals(action)) openApp(id, o.optString("package"));
       else if ("bt_connect".equals(action)) btConnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBT"));
+      else if ("bt_paired".equals(action)) btPaired(id);
       else if ("spotify_resume".equals(action)) spotifyResume(id);
       else if ("spotify_search".equals(action)) spotifySearch(id, o.optString("query"), o.optString("kind"));
       else if ("media_key".equals(action)) { mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
@@ -92,6 +93,7 @@ public class DeviceBridge {
               t.setPackage("net.dinglisch.android.tasker");
               t.putExtra("version_number", "1.0");
               t.putExtra("task_name", task);
+              t.putExtra("par1", name); // the Tasker task reads the device name as %par1
               ctx.sendBroadcast(t);
             }
             if (System.currentTimeMillis() > deadline) { reply(id, false, "The speaker did not connect. Check that Tasker has a task named " + task + " and external access is on, and that the speaker is on and in range."); return; }
@@ -154,5 +156,17 @@ public class DeviceBridge {
     int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
     am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, Math.round(max * pct / 100f))), 0);
     reply(id, true, "volume " + pct + "%");
+  }
+
+  /** Names of the phone's already-paired Bluetooth devices, so Jarvis can be taught which is which. */
+  private void btPaired(String id) {
+    try {
+      BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+      BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+      if (ad == null) { reply(id, false, "This phone has no Bluetooth."); return; }
+      StringBuilder sb = new StringBuilder();
+      for (BluetoothDevice d : ad.getBondedDevices()) { if (sb.length() > 0) sb.append(" | "); sb.append(d.getName()); }
+      reply(id, true, sb.length() == 0 ? "(no paired devices)" : sb.toString());
+    } catch (SecurityException e) { reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); }
   }
 }

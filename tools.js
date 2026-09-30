@@ -137,7 +137,13 @@ export const MUSIC_TOOLS = [
       action: z.enum(['start', 'play', 'pause', 'resume', 'next', 'previous', 'volume', 'status']),
       query: z.string().optional(),
       kind: z.enum(['track', 'artist', 'album', 'playlist']).optional(),
-      volume: z.number().optional()
+      volume: z.number().optional(),
+      speaker: z.string().optional().describe('which taught speaker/area, e.g. "office"; omit to use the one for where he is')
     }
-  }
+  },
+  { name: 'bluetooth_paired', description: 'List the Bluetooth devices already paired with the phone (exact names). Use when teaching a speaker: read the list out, then save the one he names with speaker_save.', shape: {} },
+  { name: 'speaker_save', description: 'Teach a Bluetooth speaker: name = EXACT Bluetooth name from bluetooth_paired, alias = what he calls it ("office speaker"), area = where it is ("office", "shop", "garage"), volume = its default % (omit for 30).', shape: { name: z.string(), alias: z.string().optional(), area: z.string().optional(), volume: z.number().optional() } },
+  { name: 'speaker_list', description: 'List taught speakers with their areas and volumes.', shape: {} },
+  { name: 'speaker_remove', description: 'Forget a taught speaker (by alias or Bluetooth name).', shape: { alias: z.string() } },
+  { name: 'bluetooth_connect', description: 'Connect a taught speaker without playing music. device = alias or area (omit to use the one for where he is). Sets its default volume (30% unless changed).', shape: { device: z.string().optional() } }
 ];

@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1100,15 +1100,46 @@ async function spotifyReady() {
   if (!d2) throw new Error(opened.ok ? 'NO_DEVICE' : opened.detail);
   return d2;
 }
+// Bluetooth speakers he has taught Jarvis: { name (exact Bluetooth name), alias, area, volume }.
+state.speakers ||= [];
+const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 30);
+const norm = x => String(x || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+function pickSpeaker(hint) {
+  const sp = state.speakers;
+  if (!sp.length) return { name: process.env.BT_SPEAKER_NAME || 'Rockville', volume: DEFAULT_VOLUME };   // nothing taught yet: old default
+  const h = norm(hint);
+  if (h) { const m = sp.find(x => [x.alias, x.area, x.name].some(v => norm(v) && (norm(v).includes(h) || h.includes(norm(v))))); if (m) return m; }
+  const here = currentPlace(); // at a saved place whose name matches a speaker's area
+  if (here) { const m = sp.find(x => norm(x.area) && (norm(here.name).includes(norm(x.area)) || norm(x.area).includes(norm(here.name)))); if (m) return m; }
+  if (sp.length === 1) return sp[0];
+  return null;
+}
+async function connectSpeaker(hint) {
+  const sp = pickSpeaker(hint);
+  if (!sp) return { ok: false, text: `I know these speakers: ${state.speakers.map(x => x.alias + (x.area ? ' (' + x.area + ')' : '')).join(', ')}. Which one?` };
+  const c = await deviceAction('bt_connect', { name: sp.name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
+  if (!c.ok) return { ok: false, text: `Could not confirm the ${sp.alias || sp.name}: ${c.detail}` };
+  const vol = sp.volume ?? DEFAULT_VOLUME;
+  await deviceAction('set_volume', { percent: vol }, 6000);
+  return { ok: true, text: `${sp.alias || sp.name} connected (${c.detail}), volume ${vol}%.`, sp };
+}
+handlers.bluetooth_paired = async () => { const r = await deviceAction('bt_paired', {}, 10000); return r.ok ? 'Paired devices on the phone: ' + r.detail : 'Phone problem: ' + r.detail; };
+handlers.speaker_save = async ({ name, alias, area, volume }) => {
+  const key = norm(name);
+  state.speakers = state.speakers.filter(x => norm(x.name) !== key);
+  state.speakers.push({ name, alias: alias || name, area: area || '', volume: volume ?? undefined });
+  saveState();
+  return `Saved "${alias || name}"${area ? ' for the ' + area : ''}. I will connect it when asked${area ? ' or when he is at ' + area : ''}, at ${volume ?? DEFAULT_VOLUME}% volume.`;
+};
+handlers.speaker_list = async () => state.speakers.length ? state.speakers.map(x => `${x.alias} = Bluetooth "${x.name}"${x.area ? ', area ' + x.area : ''}, volume ${x.volume ?? DEFAULT_VOLUME}%`).join('\n') : 'No speakers taught yet (default: Rockville).';
+handlers.speaker_remove = async ({ alias }) => { const n = state.speakers.length; state.speakers = state.speakers.filter(x => norm(x.alias) !== norm(alias) && norm(x.name) !== norm(alias)); saveState(); return n === state.speakers.length ? 'No such speaker.' : 'Removed.'; };
+handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
+
 // Without the Spotify Web API (Spotify limits who can create developer apps), the Android app drives the Spotify app directly.
-async function musicViaPhone({ action, query, kind, volume }) {
+async function musicViaPhone({ action, query, kind, volume, speaker }) {
   const say = r => (r.ok ? r.detail : 'Phone problem: ' + r.detail);
   const notes = [];
-  if (action === 'start') {
-    const name = process.env.BT_SPEAKER_NAME || 'Rockville';
-    const c = await deviceAction('bt_connect', { name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
-    notes.push(c.ok ? `Speaker connected (${c.detail}).` : `Could not confirm the speaker: ${c.detail}`);
-  }
+  if (action === 'start') { const c = await connectSpeaker(speaker); notes.push(c.text); if (!c.ok && !pickSpeaker(speaker)) return c.text; }
   if (action === 'start' || (action === 'play' && !query) || action === 'resume') {
     const r = await deviceAction('spotify_resume', {}, 15000);
     return notes.concat(r.ok ? 'Spotify is opening and resuming your most recent listening.' : say(r)).join(' ');
@@ -1119,8 +1150,8 @@ async function musicViaPhone({ action, query, kind, volume }) {
   if (action === 'status') return 'I cannot see what is playing without the Spotify connection; only controls work right now.';
   return 'Unknown music action.';
 }
-handlers.music_control = async ({ action, query, kind, volume }) => {
-  if (!spo.configured() || !spoRef()) return musicViaPhone({ action, query, kind, volume });
+handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
+  if (!spo.configured() || !spoRef()) return musicViaPhone({ action, query, kind, volume, speaker });
   const r = spoRef();
   try {
     if (action === 'status') { const st = await spo.status(r); return st ? `${st.playing ? 'Playing' : 'Paused'}: ${st.track} by ${st.artists} on ${st.device} (volume ${st.volume}%).` : 'Nothing is playing.'; }
@@ -1129,11 +1160,7 @@ handlers.music_control = async ({ action, query, kind, volume }) => {
     if (action === 'previous') { await spo.previous(r); return 'Back to the previous track.'; }
     if (action === 'volume') { await spo.volume(r, Number(volume)); return `Volume set to ${volume}%.`; }
     const notes = [];
-    if (action === 'start') { // connect the speaker first (if the Owner has it set up), then his latest playlist
-      const name = process.env.BT_SPEAKER_NAME || 'Rockville';
-      const c = await deviceAction('bt_connect', { name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
-      notes.push(c.ok ? `Speaker connected (${c.detail}).` : `Could not confirm the speaker: ${c.detail}`);
-    }
+    if (action === 'start') { const c = await connectSpeaker(speaker); notes.push(c.text); }
     const dev = await spotifyReady();
     if (action === 'resume' && !query) { await spo.play(r, { deviceId: dev.id }); return 'Playing again.'; }
     if (action === 'start' || (action === 'play' && !query)) {
