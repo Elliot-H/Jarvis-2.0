@@ -1269,8 +1269,8 @@ handlers.speaker_remove = async ({ alias }) => { const n = state.speakers.length
 handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   const sp = pickSpeaker(device) || state.speakers[0] || { name: process.env.BT_SPEAKER_NAME || 'Rockville' };
   await deviceAction('media_key', { key: 'pause' }, 4000);   // stop the music first so it does not jump to the phone speaker
-  const off = !leave_bluetooth_on;
-  const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTDisconnect');
+  const off = process.env.BT_TURN_OFF === '1' && !leave_bluetooth_on;  // Android blocks Tasker from switching Bluetooth off; disconnect only by default
+  const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTOff');
   const c = await deviceAction('bt_disconnect', { name: sp.name, task, off }, 25000);
   broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
   return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. The music is paused. Tell the Owner.` : `Could not finish: ${c.detail}`;
