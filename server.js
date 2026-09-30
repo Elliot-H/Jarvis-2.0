@@ -1075,7 +1075,31 @@ wss.on('connection', ws => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'restore' && msg.data && Number(msg.data.stamp) > (state.backupStamp || 0)) {
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
-      state.backupStamp = Number(msg.data.stamp); // ---------- music: Spotify + the phone (Android app) ----------
+      state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
+      try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
+      console.log('  restored memory from the phone backup');
+    }
+    if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
+    if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
+    if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
+    if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
+      const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
+      state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
+      if (moved) state.weather = undefined; // new place: report its weather fresh
+      saveState();
+    }
+    if (msg.type === 'wake') briefing('wake', msg.memo);
+    if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
+    if (msg.type === 'new_session') {
+      state.sessionId = null; state.workSessionId = null; state.history = []; saveState();
+      broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
+    }
+    if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
+    if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
+  });
+});
+
+// ---------- music: Spotify + the phone (Android app) ----------
 // Device actions go to the Android app over the websocket (open Spotify, connect the Bluetooth speaker through Tasker)
 // and the app reports back, so Jarvis only says "connected" when it really is.
 const deviceClients = new Set(); const devWait = new Map();
@@ -1213,30 +1237,6 @@ app.get('/jarvis.apk', async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="jarvis.apk"');
     fs.createReadStream(file).pipe(res);
   } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
-});
-
-lastBackup = JSON.stringify(backupOf());
-      try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
-      console.log('  restored memory from the phone backup');
-    }
-    if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
-    if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
-    if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
-      const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
-      state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
-      if (moved) state.weather = undefined; // new place: report its weather fresh
-      saveState();
-    }
-    if (msg.type === 'wake') briefing('wake', msg.memo);
-    if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
-    if (msg.type === 'new_session') {
-      state.sessionId = null; state.workSessionId = null; state.history = []; saveState();
-      broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
-    }
-    if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
-    if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
-  });
 });
 
 lastBackup = JSON.stringify(backupOf()); // starting point: boot-time seeding is not a change
