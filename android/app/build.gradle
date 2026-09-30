@@ -15,6 +15,7 @@ android {
     buildConfigField 'String', 'BASE_URL', '"' + (project.findProperty('jarvisUrl') ?: 'https://jarvis-20-production-da28.up.railway.app') + '"'
   }
   buildFeatures { buildConfig true }
+  androidResources { noCompress 'tflite' }
   signingConfigs {
     release {
       // Personal side-loaded app: the key is committed so every build has the same signature and updates install over the old one.
@@ -30,5 +31,5 @@ android {
 
 dependencies {
   implementation 'androidx.webkit:webkit:1.11.0'
-  implementation 'ai.picovoice:porcupine-android:4.0.2'
+  implementation 'org.tensorflow:tensorflow-lite:2.14.0'
 }

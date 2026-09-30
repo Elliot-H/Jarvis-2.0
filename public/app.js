@@ -510,16 +510,17 @@
   // While music plays the recognizer stays off (it pauses Spotify). An on-device wake word (Porcupine, no audio focus) listens instead.
   let wakeOn = false, wakeErrShown = false;
   window.__wake = (type, data) => {
-    if (type === 'started') { wakeOn = true; addActivity('Wake word "Jarvis" is listening (music keeps playing).'); }
+    if (type === 'started') { wakeOn = true; addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
     else if (type === 'stopped') wakeOn = false;
     else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data); } }
-    else if (type === 'hit') { addActivity('Heard "Jarvis"'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
+    else if (type === 'near') addActivity('Wake word almost (' + data + ')');
+    else if (type === 'hit') { addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
   };
   function syncWake() {
-    if (!window.AndroidWake || !cfg.picovoiceKey || !booted) return;
+    if (!window.AndroidWake || !booted) return;
     try {
       const want = musicPlaying();
-      if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(cfg.picovoiceKey);
+      if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
     } catch {}
   }
