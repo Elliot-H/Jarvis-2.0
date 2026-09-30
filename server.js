@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { createSelfRepair } from './self.js';
 import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS } from './tools.js';
 import * as crypto_ from './crypto.js';
+import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
 
@@ -455,7 +456,8 @@ function localGreeting() {
   const day = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: tz });
   const n = state.failures.length;
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
-  return `${part} It's ${day}. All systems online.${open}`;
+  const brief = state.panels?.crypto ? ' Your crypto watch is on screen.' : '';
+  return `${part} It's ${day}. All systems online.${brief}${open}`;
 }
 async function briefing(reason = 'scheduled') {
   if (reason === 'wake') { broadcast({ type: 'say', text: localGreeting(), speak: true }); return; }
@@ -465,6 +467,54 @@ async function briefing(reason = 'scheduled') {
 }
 const every = Number(process.env.BRIEFING_EVERY_MINUTES || 0);
 if (every > 0 && !process.env.JARVIS_SMOKE) setInterval(() => { if (!busy && !queue.length) briefing('scheduled'); }, every * 60_000);
+
+// ---------- scheduled crypto briefs: morning, midday (only if something big moved), evening ----------
+// Times are in TZ. Set a time to "off" to skip that brief. Briefs are silent: they land on the HUD and the comms log,
+// and (optionally) as a phone notification through ntfy.sh. Needs the OpenRouter talk brain.
+const BRIEF_SLOTS = {
+  morning: parseTime(process.env.CRYPTO_BRIEF_MORNING ?? '08:00'),
+  midday: parseTime(process.env.CRYPTO_BRIEF_MIDDAY ?? '12:30'),
+  evening: parseTime(process.env.CRYPTO_BRIEF_EVENING ?? '18:30')
+};
+const ALERT_PCT = Number(process.env.CRYPTO_ALERT_PCT || 6);
+const TAIL = 'Reply with one or two spoken sentences (the headline only); the detail goes in the "crypto" panel.';
+const BRIEF_PROMPTS = {
+  morning: () => `[crypto morning brief] Scan crypto. What moved overnight, which news matters today, and anything on my watchlist. ${TAIL}`,
+  midday: moved => `[crypto midday check] These coins moved a lot today: ${moved}. Find out why, and say whether it looks worth watching, worth being cautious about, or just noise. ${TAIL}`,
+  evening: () => `[crypto evening brief] Scan crypto. Recap how today went, which news landed, and what to watch overnight and tomorrow. ${TAIL}`
+};
+async function push(title, body) {
+  const topic = process.env.NTFY_TOPIC;
+  if (!topic) return;
+  try {
+    await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: title, Tags: 'chart_with_upwards_trend' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
+  } catch (e) { console.warn('phone notification failed:', String(e.message || e)); }
+}
+async function cryptoBrief(slot) {
+  const blocked = overBudget('chat');
+  if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }
+  let prompt;
+  if (slot === 'midday') {
+    let moved;
+    try { moved = crypto_.notable((await crypto_.scan({ watch: state.watchlist })).coins, ALERT_PCT); }
+    catch (e) { console.warn('crypto midday check failed:', e.message); return; }
+    if (!moved.length) { console.log('crypto midday check: nothing notable'); return; }
+    prompt = BRIEF_PROMPTS.midday(moved.map(c => `${c.name} ${c.change24h > 0 ? '+' : ''}${c.change24h}%`).join(', '));
+  } else prompt = BRIEF_PROMPTS[slot]();
+  console.log(`crypto ${slot} brief starting`);
+  const text = await ask(prompt, { spoken: false, origin: 'system', label: `Crypto ${slot} brief` });
+  if (text && !/spending limit|allowance|out of|could not|problem finishing/i.test(text)) await push(`Crypto ${slot}`, text);
+}
+function briefTick() {
+  if (BRAIN !== 'openrouter' || !TALK.apiKey) return;
+  state.briefs ||= {};
+  const clock = localClock(new Date(), process.env.TZ || 'America/New_York');
+  for (const slot of dueSlots({ clock, slots: BRIEF_SLOTS, done: state.briefs })) {
+    state.briefs[slot] = clock.day; saveState(); // mark first so a slow brief can't run twice
+    cryptoBrief(slot).catch(e => console.error(`crypto ${slot} brief failed`, e));
+  }
+}
+if (!process.env.JARVIS_SMOKE) setInterval(briefTick, 60_000);
 
 // ---------- HTTP ----------
 const app = express();
@@ -697,6 +747,8 @@ server.listen(PORT, HOST, () => {
   console.log(`\n  JARVIS online → http://localhost:${PORT}`);
   console.log(`  Connections: dashboard${mcp.length ? ', ' + mcp.join(', ') : ''}`);
   console.log(`  Talk brain: ${BRAIN === 'openrouter' ? `OpenRouter · ${talkModel()}` : `Claude · ${CHAT_MODEL}`} · repairs: Claude · ${WORK_MODEL}`);
+  const at = m => m == null ? 'off' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  console.log(`  Crypto briefs: morning ${at(BRIEF_SLOTS.morning)} · midday ${at(BRIEF_SLOTS.midday)} (only if a coin moves ${ALERT_PCT}%+) · evening ${at(BRIEF_SLOTS.evening)}${process.env.NTFY_TOPIC ? ' · phone alerts on' : ''}${BRAIN === 'openrouter' ? '' : ' · OFF (needs OpenRouter brain)'}`);
   console.log(`  Caps: $${DAILY_BUDGET}/day · $${MONTHLY_BUDGET}/month all AI · $${WORK_MONTHLY_BUDGET}/month repairs`);
   console.log(`  PIN lock: ${PIN ? 'on' : 'OFF (set JARVIS_PIN before putting this online)'}`);
   console.log(`  Voice: ${process.env.FISH_API_KEY ? 'Fish Audio' : process.env.ELEVENLABS_API_KEY ? 'ElevenLabs' : 'browser fallback (add ELEVENLABS_API_KEY for the real voice)'}\n`);

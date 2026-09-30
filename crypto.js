@@ -33,7 +33,16 @@ async function get(pathAndQuery) {
 }
 
 /** Top coins by market cap, plus any watchlist ids (CoinGecko ids like "bitcoin", "solana"). */
-export async function scan({ top = 25, watch = [] } = {}) {
+const cache = new Map(); // scans are reused for 5 minutes (a brief and the model's own call in the same minute cost one request)
+export async function scan(args = {}) {
+  const key = JSON.stringify([args.top || 25, [...(args.watch || [])].sort()]);
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.t < 300_000) return hit.v;
+  const v = await scanFresh(args);
+  cache.set(key, { t: Date.now(), v });
+  return v;
+}
+async function scanFresh({ top = 25, watch = [] } = {}) {
   top = Math.min(Math.max(Number(top) || 25, 1), 100);
   const list = await get(`/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${top}&page=1&sparkline=false&price_change_percentage=24h,7d`);
   const coins = list.map(shape);
@@ -60,3 +69,9 @@ export const PLAYBOOK = `How to use this (spoken reply must stay short; detail g
 3. show_panel id "crypto" with title "Crypto watch": one bullet per coin, ranked by how much the news matters. Add update_stats tiles only for the few coins the Owner follows.
 4. Say only the headline aloud, e.g. "Bitcoin steady, two stories worth your eye, on screen."
 Ground rules: this is analysis, not financial advice, and you are not a licensed advisor. News moves prices unpredictably and often the move happened before the story; say so when it applies. Never promise a direction. Never place, suggest placing, or offer to place a trade; if asked to, say the Owner must do it himself. If the news search returns nothing solid for a coin, say "no clear news" rather than guessing.`;
+
+/** Which coins moved enough today to be worth a midday look. Watched coins need a smaller move. */
+export function notable(coins, pct = 6) {
+  return coins.filter(c => c.change24h != null && Math.abs(c.change24h) >= (c.watched ? pct * 0.66 : pct))
+    .sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h)).slice(0, 6);
+}
