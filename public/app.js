@@ -422,7 +422,10 @@
 
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false;
+  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
+  // Every mic start goes through here so a cooldown is honoured no matter who asks (the phone's recognizer refuses
+  // requests that come too fast, and hammering it makes it refuse for longer).
+  function startMic() { const now = Date.now(); if (!rec || now < micNotBefore || now - lastMicStart < 600) return; lastMicStart = now; try { rec.start(); } catch {} }
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
     return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves'] : [w];
@@ -445,12 +448,12 @@
       if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
       recThrottled = false;
       const wait = recBackoff || (recErrs.length >= 3 ? 8000 : 250);   // repeated failures: pause before retrying
-      if (recWanted) setTimeout(() => { if (recWanted && !recOn) try { rec.start(); } catch {} }, wait);
+      if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
     };
     rec.onerror = e => {
       if (e.error === 'no-speech' || e.error === 'aborted') return;
       if (e.error === 'throttled') {
-        recThrottled = true; recBackoff = Math.min(recBackoff ? recBackoff * 2 : 2000, 16000);
+        recThrottled = true; recBackoff = Math.min(recBackoff ? recBackoff * 2 : 2000, 30000); micNotBefore = Date.now() + recBackoff;
         chip('#chipMic', 'warn', 'MIC COOLDOWN'); addActivity('Mic cooling down ' + Math.round(recBackoff / 1000) + 's'); return;
       }
       if (e.error === 'stalled') { recBackoff = Math.max(recBackoff, 800); chip('#chipMic', 'warn', 'MIC RESET'); return; }
@@ -469,13 +472,13 @@
     };
     rec.onaudiostart = () => chip('#chipMic', 'ok', 'MIC');
     rec.onresult = e => { recBackoff = 0; onSpeech(e); };
-    recWanted = true; try { rec.start(); } catch {}
+    recWanted = true; startMic();
   }
   function pauseListening() { recWanted = false; try { rec?.abort(); } catch {} }
   function resumeListening() {
     if (!rec || DISPLAY_ONLY) return;
     mode = 'passive'; recWanted = true;
-    if (!recOn) try { rec.start(); } catch {}
+    if (!recOn) startMic();
   }
   // When Jarvis asks something, open the mic for the answer straight away (no wake word).
   // Any question counts: a "?" anywhere in his last couple of sentences, or a phrase like "shall I" / "would you like".
@@ -494,8 +497,10 @@
   // Phones sometimes refuse to restart the mic right after audio playback; keep trying until it is really on.
   function ensureMic(tries = 8) {
     if (!rec || !recWanted || recOn) return;
-    try { rec.start(); } catch {}
-    if (tries > 0) setTimeout(() => ensureMic(tries - 1), 350);
+    const cool = micNotBefore - Date.now();
+    if (cool > 0) { setTimeout(() => ensureMic(tries), cool + 100); return; }   // cooling down: wait it out, don't burn retries
+    startMic();
+    if (tries > 0) setTimeout(() => ensureMic(tries - 1), 700);
   }
   function goActive(o = {}) {
     stopSpeaking(false);
