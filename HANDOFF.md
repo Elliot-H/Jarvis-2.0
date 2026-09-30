@@ -93,7 +93,7 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 
 ## Filler lines (ack + "still working")
 - `server.js`: `FILLERS()` (10 `ack` lines, 8 `still` lines, use USER_TITLE), `GET /api/fillers` (URL list), `GET /api/filler/:kind/:n.mp3` (Fish JARVIS voice, made once, cached `data/filler-<sha>.mp3`; 204 if no FISH key).
-- `public/app.js`: `loadFillers()` at boot preloads clips as blobs (zero-delay). `submit()` -> `startFillers()` plays a random ack instantly, then a "still" line at 9s and every 16s while state is `thinking`. `afterFiller()` lets a clip finish (max 3s) before the real reply speaks. "stop/cancel" kills them. Mic is paused during a clip so it can't hear itself.
+- `public/app.js`: `loadFillers()` at boot preloads clips as blobs (zero-delay). `submit()` -> `startFillers()` plays a random ack instantly, then a "still" line at ~4s a "progress" line ("I have found the data"), then "still" lines from ~15s every 16s while state is `thinking`. `afterFiller()` lets a clip finish (max 3s) before the real reply speaks. "stop/cancel" kills them. Mic is paused during a clip so it can't hear itself.
 - To change wording, edit `FILLERS()` (new text = new cached clip automatically).
 
 ## Open-app greeting + weather (server.js `localGreeting`, `weatherLine`)

@@ -981,6 +981,10 @@ const FILLERS = () => {
       "I'm working on it right now.", 'Just one second, please.', `On it, ${t}.`, 'Certainly. One moment.',
       'Let me take a look.', `Very good, ${t}. Give me a second.`
     ],
+    progress: [
+      "Okay, I've found the data.", 'Got it. Just pulling it together now.', `I have what I need, ${t}. One more moment.`,
+      'Found it. Putting it together now.', 'Okay, this is coming together.', 'Good, I have it. Just organizing it.'
+    ],
     still: [
       "Still working on it, ${t}.", 'This is taking a little longer than expected. Bear with me.', 'Almost there.',
       "Still digging. Thank you for your patience.", "I'm still on it. Just a bit longer.",

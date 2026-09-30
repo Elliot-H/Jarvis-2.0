@@ -289,11 +289,11 @@
 
   // ======================= filler lines (ack + "still working") =======================
   // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
-  const filler = { ack: [], still: [], cur: null, timer: null, lastIdx: {}, wasListening: false };
+  const filler = { ack: [], progress: [], still: [], cur: null, timer: null, lastIdx: {}, wasListening: false };
   async function loadFillers() {
     try {
       const list = await (await fetch('/api/fillers')).json();
-      for (const kind of ['ack', 'still']) {
+      for (const kind of ['ack', 'progress', 'still']) {
         for (const u of list[kind] || []) {
           fetch(u).then(r => r.ok && r.status === 200 ? r.blob() : null).then(b => { if (b && b.size > 500) filler[kind].push(URL.createObjectURL(b)); }).catch(() => {});
         }
@@ -321,11 +321,23 @@
   function startFillers() {
     stopFillers();
     playFiller('ack');
-    let n = 0;
-    const next = () => {
-      filler.timer = setTimeout(() => { if (state !== 'thinking') return; playFiller('still'); n++; next(); }, n === 0 ? 9000 : 16000);
+    // ~4s after the ack: "I've found the data" style progress line (waits for the ack to finish if needed)
+    const prog = (tries = 0) => {
+      filler.timer = setTimeout(() => {
+        if (state !== 'thinking') return;
+        if (filler.cur && tries < 6) return prog(tries + 1);
+        playFiller('progress'); later();
+      }, tries ? 500 : 4000);
     };
-    next();
+    // then a "still working" line every 16s while the job runs
+    const later = () => {
+      filler.timer = setTimeout(function again() {
+        if (state !== 'thinking') return;
+        playFiller('still');
+        filler.timer = setTimeout(again, 16000);
+      }, 11000);
+    };
+    prog();
   }
   // Called before the real reply: let a filler that is mid-sentence finish (max 3s) so nothing is cut off.
   function afterFiller(fn) {
