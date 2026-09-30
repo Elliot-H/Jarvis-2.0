@@ -1172,6 +1172,7 @@ async function connectSpeaker(hint) {
   const sp = pickSpeaker(hint);
   if (!sp) return { ok: false, text: `I know these speakers: ${state.speakers.map(x => x.alias + (x.area ? ' (' + x.area + ')' : '')).join(', ')}. Which one?` };
   const c = await deviceAction('bt_connect', { name: sp.name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
+  broadcast({ type: 'activity', text: `Speaker ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
   if (!c.ok) return { ok: false, text: `Could not confirm the ${sp.alias || sp.name}: ${c.detail}` };
   const vol = sp.volume ?? DEFAULT_VOLUME;
   await deviceAction('set_volume', { percent: vol }, 6000);
