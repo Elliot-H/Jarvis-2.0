@@ -1100,9 +1100,27 @@ async function spotifyReady() {
   if (!d2) throw new Error(opened.ok ? 'NO_DEVICE' : opened.detail);
   return d2;
 }
+// Without the Spotify Web API (Spotify limits who can create developer apps), the Android app drives the Spotify app directly.
+async function musicViaPhone({ action, query, kind, volume }) {
+  const say = r => (r.ok ? r.detail : 'Phone problem: ' + r.detail);
+  const notes = [];
+  if (action === 'start') {
+    const name = process.env.BT_SPEAKER_NAME || 'Rockville';
+    const c = await deviceAction('bt_connect', { name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
+    notes.push(c.ok ? `Speaker connected (${c.detail}).` : `Could not confirm the speaker: ${c.detail}`);
+  }
+  if (action === 'start' || (action === 'play' && !query) || action === 'resume') {
+    const r = await deviceAction('spotify_resume', {}, 15000);
+    return notes.concat(r.ok ? 'Spotify is opening and resuming your most recent listening.' : say(r)).join(' ');
+  }
+  if (action === 'play') { const r = await deviceAction('spotify_search', { query, kind: kind || 'track' }, 15000); return say(r); }
+  if (['pause', 'next', 'previous'].includes(action)) { const r = await deviceAction('media_key', { key: action }, 8000); return r.ok ? { pause: 'Paused.', next: 'Skipped.', previous: 'Previous track.' }[action] : say(r); }
+  if (action === 'volume') { const r = await deviceAction('set_volume', { percent: Number(volume) }, 8000); return say(r); }
+  if (action === 'status') return 'I cannot see what is playing without the Spotify connection; only controls work right now.';
+  return 'Unknown music action.';
+}
 handlers.music_control = async ({ action, query, kind, volume }) => {
-  if (!spo.configured()) return 'Spotify is not set up yet: SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are missing in Railway.';
-  if (!spoRef()) return 'Spotify is not approved yet. The Owner must open /api/spotify/login on his phone once.';
+  if (!spo.configured() || !spoRef()) return musicViaPhone({ action, query, kind, volume });
   const r = spoRef();
   try {
     if (action === 'status') { const st = await spo.status(r); return st ? `${st.playing ? 'Playing' : 'Paused'}: ${st.track} by ${st.artists} on ${st.device} (volume ${st.volume}%).` : 'Nothing is playing.'; }

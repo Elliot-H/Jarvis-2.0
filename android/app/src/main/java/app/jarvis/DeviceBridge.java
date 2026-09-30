@@ -6,7 +6,11 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.app.SearchManager;
 import android.content.Intent;
+import android.media.AudioManager;
+import android.provider.MediaStore;
+import android.view.KeyEvent;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.JavascriptInterface;
@@ -38,6 +42,10 @@ public class DeviceBridge {
       String action = o.optString("action");
       if ("open_app".equals(action)) openApp(id, o.optString("package"));
       else if ("bt_connect".equals(action)) btConnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBT"));
+      else if ("spotify_resume".equals(action)) spotifyResume(id);
+      else if ("spotify_search".equals(action)) spotifySearch(id, o.optString("query"), o.optString("kind"));
+      else if ("media_key".equals(action)) { mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
+      else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
     } catch (Exception e) { reply(id, false, String.valueOf(e.getMessage())); }
   }
@@ -94,5 +102,57 @@ public class DeviceBridge {
       } catch (SecurityException e) { reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); }
     };
     poll[0].run();
+  }
+
+  // ---- Spotify without the Web API: drive the Spotify app like a remote ----
+  private void mediaKey(String key) {
+    int code = "pause".equals(key) ? KeyEvent.KEYCODE_MEDIA_PAUSE : "next".equals(key) ? KeyEvent.KEYCODE_MEDIA_NEXT
+        : "previous".equals(key) ? KeyEvent.KEYCODE_MEDIA_PREVIOUS : KeyEvent.KEYCODE_MEDIA_PLAY;
+    AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+    am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
+    am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
+  }
+
+  private void backToJarvis(long delay) {
+    ui.postDelayed(() -> {
+      Intent back = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("silent", true);
+      try { ctx.startActivity(back); } catch (Exception ignored) {}
+    }, delay);
+  }
+
+  /** Open Spotify and press Play: Spotify carries on with whatever played last (your most recent playlist). */
+  private void spotifyResume(String id) {
+    Intent i = ctx.getPackageManager().getLaunchIntentForPackage("com.spotify.music");
+    if (i == null) { reply(id, false, "Spotify is not installed on the phone."); return; }
+    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    ctx.startActivity(i);
+    ui.postDelayed(() -> mediaKey("play"), 3500);
+    ui.postDelayed(() -> mediaKey("play"), 6000); // second press is ignored if it is already playing
+    backToJarvis(7500);
+    reply(id, true, "opened Spotify and pressed play; it resumes what played last");
+  }
+
+  private void spotifySearch(String id, String query, String kind) {
+    Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+    i.setPackage("com.spotify.music");
+    i.putExtra(SearchManager.QUERY, query);
+    String focus = "artist".equals(kind) ? "vnd.android.cursor.item/artist" : "album".equals(kind) ? "vnd.android.cursor.item/album"
+        : "playlist".equals(kind) ? "vnd.android.cursor.item/playlist" : "vnd.android.cursor.item/audio";
+    i.putExtra(MediaStore.EXTRA_MEDIA_FOCUS, focus);
+    if ("artist".equals(kind)) i.putExtra(MediaStore.EXTRA_MEDIA_ARTIST, query);
+    else if ("album".equals(kind)) i.putExtra(MediaStore.EXTRA_MEDIA_ALBUM, query);
+    else if ("playlist".equals(kind)) i.putExtra("android.intent.extra.playlist", query);
+    else i.putExtra(MediaStore.EXTRA_MEDIA_TITLE, query);
+    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    try { ctx.startActivity(i); } catch (Exception e) { reply(id, false, "Spotify would not take the search: " + e.getMessage()); return; }
+    backToJarvis(6000);
+    reply(id, true, "asked Spotify to play " + query + " (cannot confirm what it picked)");
+  }
+
+  private void setVolume(String id, int pct) {
+    AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+    int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+    am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, Math.round(max * pct / 100f))), 0);
+    reply(id, true, "volume " + pct + "%");
   }
 }
