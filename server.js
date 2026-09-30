@@ -976,30 +976,39 @@ app.get('/api/alert-sound.mp3', async (req, res) => {
 const FILLERS = () => {
   const t = process.env.USER_TITLE || 'sir';
   return {
-    ack: [
-      `Right away, ${t}.`, 'Give me just one moment.', 'Okay, let me find out.', 'Give me just a minute.',
-      "I'm working on it right now.", 'Just one second, please.', `On it, ${t}.`, 'Certainly. One moment.',
-      'Let me take a look.', `Very good, ${t}. Give me a second.`
-    ],
-    progress: [
-      "Okay, I've found the data.", 'Got it. Just pulling it together now.', `I have what I need, ${t}. One more moment.`,
-      'Found it. Putting it together now.', 'Okay, this is coming together.', 'Good, I have it. Just organizing it.'
-    ],
-    still: [
-      "Still working on it, ${t}.", 'This is taking a little longer than expected. Bear with me.', 'Almost there.',
-      "Still digging. Thank you for your patience.", "I'm still on it. Just a bit longer.",
-      'Nearly done. One more moment.', 'Bear with me, this one takes a minute.', 'Still gathering everything, one moment.'
-    ].map(l => l.replace('${t}', t))
+    ack: {
+      generic: [`Right away, ${t}.`, 'Give me just one moment.', 'Okay, let me find out.', 'Give me just a minute.', "I'm working on it right now.",
+        'Just one second, please.', `On it, ${t}.`, 'Certainly. One moment.', 'Let me take a look.', `Very good, ${t}. Give me a second.`],
+      calendar: ['Let me check your calendar.', `Pulling up your schedule, ${t}.`, 'One moment, checking the calendar.'],
+      weather: ['Let me check the forecast.', 'One moment, checking the weather.', `Checking the sky for you, ${t}.`],
+      crypto: ['Let me check the markets.', `Scanning the market now, ${t}.`, 'One moment, checking the coins.'],
+      lookup: ['Let me look that up.', `Searching for that now, ${t}.`, 'One moment, I will find out.'],
+      action: [`Certainly, ${t}. Making that change.`, 'On it. Taking care of that now.', 'One moment while I handle that.']
+    },
+    progress: {
+      generic: ["Okay, I've found the data.", 'Got it. Just pulling it together now.', `I have what I need, ${t}. One more moment.`,
+        'Found it. Putting it together now.', 'Okay, this is coming together.', 'Good, I have it. Just organizing it.'],
+      calendar: ['Okay, I have your appointments. Just organizing them.', 'Got the schedule. One moment.'],
+      weather: ['Got the forecast. Just putting it together.', 'I have the weather. One moment.'],
+      crypto: ['Okay, I have the numbers. Just reading them.', 'Got the market data. One moment.'],
+      lookup: ['Okay, I found something. Reading it now.', 'I have a few results. Picking the best one.'],
+      action: ['Almost done with that.', 'That is going through. One moment.']
+    },
+    still: {
+      generic: ["Still working on it, ${t}.", 'This is taking a little longer than expected. Bear with me.', 'Almost there.',
+        "Still digging. Thank you for your patience.", "I'm still on it. Just a bit longer.",
+        'Nearly done. One more moment.', 'Bear with me, this one takes a minute.', 'Still gathering everything, one moment.'].map(l => l.replace('${t}', t))
+    }
   };
 };
 app.get('/api/fillers', (req, res) => {
   const f = FILLERS(); const out = {};
-  for (const k of Object.keys(f)) out[k] = f[k].map((_, i) => `/api/filler/${k}/${i}.mp3`);
+  for (const k of Object.keys(f)) { out[k] = {}; for (const g of Object.keys(f[k])) out[k][g] = f[k][g].map((_, i) => `/api/filler/${k}/${g}/${i}.mp3`); }
   res.json(out);
 });
-app.get('/api/filler/:kind/:n.mp3', async (req, res) => {
+app.get('/api/filler/:kind/:group/:n.mp3', async (req, res) => {
   try {
-    const line = FILLERS()[req.params.kind]?.[Number(req.params.n)];
+    const line = FILLERS()[req.params.kind]?.[req.params.group]?.[Number(req.params.n)];
     if (!line) return res.status(404).end();
     const file = path.join(DATA_DIR, `filler-${crypto.createHash('sha1').update(line).digest('hex').slice(0, 10)}.mp3`);
     if (!fs.existsSync(file)) {

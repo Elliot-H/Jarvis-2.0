@@ -289,26 +289,50 @@
 
   // ======================= filler lines (ack + "still working") =======================
   // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
-  const filler = { ack: [], progress: [], still: [], cur: null, timer: null, lastIdx: {}, wasListening: false };
+  const filler = { ack: {}, progress: {}, still: {}, cur: null, timer: null, lastIdx: {} };
   async function loadFillers() {
     try {
       const list = await (await fetch('/api/fillers')).json();
-      for (const kind of ['ack', 'progress', 'still']) {
-        for (const u of list[kind] || []) {
-          fetch(u).then(r => r.ok && r.status === 200 ? r.blob() : null).then(b => { if (b && b.size > 500) filler[kind].push(URL.createObjectURL(b)); }).catch(() => {});
+      const jobs = [];
+      for (const kind of Object.keys(list)) for (const g of Object.keys(list[kind])) for (const u of list[kind][g]) jobs.push({ kind, g, u });
+      // generic lines first, then the topic ones, a few at a time so the server isn't flooded
+      jobs.sort((x, y) => (x.g === 'generic' ? 0 : 1) - (y.g === 'generic' ? 0 : 1));
+      let i = 0;
+      const worker = async () => {
+        while (i < jobs.length) {
+          const { kind, g, u } = jobs[i++];
+          try { const r = await fetch(u); if (r.ok && r.status === 200) { const b = await r.blob(); if (b.size > 500) ((filler[kind][g] ||= []).push(URL.createObjectURL(b))); } } catch {}
         }
-      }
+      };
+      await Promise.all([worker(), worker(), worker()]);
     } catch {}
   }
-  function pickFiller(kind) {
-    const l = filler[kind]; if (!l.length) return null;
-    let i = Math.floor(Math.random() * l.length);
-    if (l.length > 1 && i === filler.lastIdx[kind]) i = (i + 1) % l.length;
-    filler.lastIdx[kind] = i; return l[i];
+  // What kind of command is this? Chat and remarks get NO filler; requests get lines that fit the topic.
+  const REQUEST = /(\?\s*$|^(what|whats|what's|how|when|where|who|why|which|can|could|will|would|do|does|is|are|tell|give|show|find|check|look|search|read|list|add|create|schedule|set|change|update|move|reschedule|cancel|remind|send|call|open|get|pull|calculate|convert|translate|remember|brief|learn|save|remove|delete|put|make|start|play)\b|\b(can you|could you|would you|i need|i want|tell me|let me know|go ahead and)\b)/i;
+  const TOPICS = [
+    ['action', /\b(add|create|change|move|reschedule|cancel|remind|save|remove|delete|update|book)\b/i],
+    ['calendar', /\b(calendar|appointments?|schedule|jobs?|booked|meetings?|agenda|colou?rs?)\b|what'?s on\b/i],
+    ['weather', /\b(weather|forecast|rain|raining|snow|temperature|jacket|umbrella|humid|windy)\b/i],
+    ['crypto', /\b(crypto|bitcoin|btc|eth|ethereum|coins?|market|markets|solana)\b/i],
+    ['lookup', /\b(search|look up|find out|who is|how much|cost|price|news|score|hours|near me|parts?|fit)\b/i]
+  ];
+  function fillerTopic(text) {
+    const t = String(text || '').trim();
+    if (!REQUEST.test(t)) return null;              // chit-chat / remark: say nothing extra
+    for (const [g, re] of TOPICS) if (re.test(t)) return g;
+    return 'generic';
   }
-  function playFiller(kind) {
+  function pickFiller(kind, group) {
+    const l = (filler[kind][group] && filler[kind][group].length ? filler[kind][group] : filler[kind].generic) || [];
+    if (!l.length) return null;
+    const key = kind + group;
+    let i = Math.floor(Math.random() * l.length);
+    if (l.length > 1 && i === filler.lastIdx[key]) i = (i + 1) % l.length;
+    filler.lastIdx[key] = i; return l[i];
+  }
+  function playFiller(kind, group) {
     if (DISPLAY_ONLY || !booted || speaking || filler.cur) return;
-    const url = pickFiller(kind); if (!url) return;
+    const url = pickFiller(kind, group); if (!url) return;
     const a = new Audio(url); filler.cur = a;
     const end = () => { if (filler.cur !== a) return; filler.cur = null; };
     a.onended = end; a.onerror = end;
@@ -317,22 +341,24 @@
   function stopFillers() {
     clearTimeout(filler.timer); filler.timer = null;
   }
-  function startFillers() {
+  function startFillers(text) {
     stopFillers();
-    playFiller('ack');
-    // ~4s after the ack: "I've found the data" style progress line (waits for the ack to finish if needed)
+    const g = fillerTopic(text);
+    if (!g) return;                                   // just chatting: no filler lines
+    playFiller('ack', g);
+    // ~4s after the ack: a progress line that fits the topic
     const prog = (tries = 0) => {
       filler.timer = setTimeout(() => {
         if (state !== 'thinking') return;
         if (filler.cur && tries < 6) return prog(tries + 1);
-        playFiller('progress'); later();
+        playFiller('progress', g); later();
       }, tries ? 500 : 4000);
     };
-    // then a "still working" line every 16s while the job runs
+    // only for long jobs: a generic "still working" line after ~30s, then every 25s
     const later = () => {
       filler.timer = setTimeout(function again() {
         if (state !== 'thinking') return;
-        playFiller('still');
+        playFiller('still', 'generic');
         filler.timer = setTimeout(again, 25000);
       }, 26000);
     };
@@ -512,7 +538,7 @@
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
     stopSpeaking(false);
     setState('thinking');
-    startFillers();
+    startFillers(text);
     sendLocation(() => send({ type: 'ask', text }));
   }
 
