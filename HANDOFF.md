@@ -114,3 +114,7 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 ## Redeploys wipe data/ (important)
 - Every push to main redeploys and erases `data/` (stats.json: places, reminders, calendar colour meanings, watchlist, location...). Fix = attach a Railway Volume; server now uses `DATA_DIR` or `RAILWAY_VOLUME_MOUNT_PATH` automatically (no code change needed after the volume is added).
 - Until then the greeting memory (`greetedDay`, last weather) is kept on the phone (localStorage `jarvis.memo`) and sent with `wake`; the server echoes it back in the `say` message's `memo`.
+
+## Phone backup of Jarvis's memory (no Railway volume needed)
+- `BACKUP_KEYS` in server.js (places, reminders, calendarColors, watchlist, lastPlace, talkModel, seededReminders). Any change broadcasts `{type:'backup', data:{..., stamp}}`; the app stores it in localStorage `jarvis.backup`. On every WebSocket connect the app sends `{type:'restore', data}`; the server applies it only if `data.stamp` is newer than its own `state.backupStamp` (a freshly wiped server has none), so a redeploy restores everything the next time the app opens.
+- A Railway volume is still better (also keeps spend history etc.) but no longer required for these.

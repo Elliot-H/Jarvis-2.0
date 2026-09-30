@@ -65,7 +65,19 @@ function loadState() {
 }
 const state = loadState();
 state.stats ||= {}; state.panels ||= {};
-const saveState = () => fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2));
+const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
+// ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
+const BACKUP_KEYS = ['places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
+const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
+let lastBackup = null;
+function pushBackup() {
+  let j; try { if (!clients) return; j = JSON.stringify(backupOf()); } catch { return; }
+  if (lastBackup === null) { lastBackup = j; return; }      // first call after boot just records the starting point
+  if (j === lastBackup) return;
+  lastBackup = j; state.backupStamp = Date.now();
+  try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
+  broadcast({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } });
+}
 
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
@@ -1040,12 +1052,19 @@ const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) =
 
 wss.on('connection', ws => {
   clients.add(ws);
+  if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => clients.delete(ws));
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.type === 'restore' && msg.data && Number(msg.data.stamp) > (state.backupStamp || 0)) {
+      for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
+      state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
+      try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
+      console.log('  restored memory from the phone backup');
+    }
     if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
@@ -1064,6 +1083,7 @@ wss.on('connection', ws => {
   });
 });
 
+lastBackup = JSON.stringify(backupOf()); // starting point: boot-time seeding is not a change
 server.listen(PORT, HOST, () => {
   const mcp = Object.keys(loadMcp());
   console.log(`\n  JARVIS online → http://localhost:${PORT}`);
