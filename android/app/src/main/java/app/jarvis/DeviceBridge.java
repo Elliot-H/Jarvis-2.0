@@ -89,12 +89,15 @@ public class DeviceBridge {
             if (hit != null) { reply(id, true, hit + (sent[0] ? "" : " was already connected")); return; }
             if (!sent[0]) {
               sent[0] = true;
-              Intent t = new Intent("net.dinglisch.android.tasker.ACTION_TASK");
-              t.setPackage("net.dinglisch.android.tasker");
-              t.putExtra("version_number", "1.0");
-              t.putExtra("task_name", task);
-              t.putExtra("par1", name); // the Tasker task reads the device name as %par1
-              ctx.sendBroadcast(t);
+              // Tasker from Google Play is package net.dinglisch.android.taskerm; the direct-download build is ...tasker. Try both.
+              for (String pkg : new String[]{"net.dinglisch.android.taskerm", "net.dinglisch.android.tasker"}) {
+                Intent t = new Intent("net.dinglisch.android.tasker.ACTION_TASK");
+                t.setPackage(pkg);
+                t.putExtra("version_number", "1.0");
+                t.putExtra("task_name", task);
+                t.putExtra("par1", name); // the Tasker task reads the device name as %par1
+                ctx.sendBroadcast(t);
+              }
             }
             if (System.currentTimeMillis() > deadline) { reply(id, false, "The speaker did not connect. Check that Tasker has a task named " + task + " and external access is on, and that the speaker is on and in range."); return; }
             ui.postDelayed(poll[0], 1500);
