@@ -507,6 +507,23 @@
     if (musicHeld) { musicHeld = false; chip('#chipMic', 'ok', 'MIC'); }
     lastMicStart = now; try { rec.start(); } catch {}
   }
+  // While music plays the recognizer stays off (it pauses Spotify). An on-device wake word (Porcupine, no audio focus) listens instead.
+  let wakeOn = false, wakeErrShown = false;
+  window.__wake = (type, data) => {
+    if (type === 'started') { wakeOn = true; addActivity('Wake word "Jarvis" is listening (music keeps playing).'); }
+    else if (type === 'stopped') wakeOn = false;
+    else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data); } }
+    else if (type === 'hit') { addActivity('Heard "Jarvis"'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
+  };
+  function syncWake() {
+    if (!window.AndroidWake || !cfg.picovoiceKey || !booted) return;
+    try {
+      const want = musicPlaying();
+      if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(cfg.picovoiceKey);
+      else if (!want && wakeOn) window.AndroidWake.stop();
+    } catch {}
+  }
+  setInterval(syncWake, 3000);
   // Pick listening back up by itself once the music stops.
   setInterval(() => { if (rec && recWanted && !recOn && musicHeld && !musicPlaying()) startMic(); }, 4000);
   const WAKE_VARIANTS = () => {
