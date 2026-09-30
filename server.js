@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS } from './tools.js';
+import * as cal from './calendar.js';
 import * as crypto_ from './crypto.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
@@ -396,7 +397,35 @@ Object.assign(handlers, {
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
   }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS];
+// Calendar: what each colour means is saved in state.calendarColors ({ "6": "install job", "default": "personal" }).
+state.calendarColors ||= {};
+try { if (!Object.keys(state.calendarColors).length && process.env.CALENDAR_COLOR_MEANINGS) state.calendarColors = JSON.parse(process.env.CALENDAR_COLOR_MEANINGS); } catch {}
+const calFail = e => `Calendar problem: ${e.message} Tell the Owner plainly and call note_failure.`;
+Object.assign(handlers, {
+  calendar_events: async a => {
+    try {
+      const r = await cal.list(a, state.calendarColors);
+      const by = {};
+      for (const e of r.events) { const k = e.meaning || `${e.color} (no meaning saved yet)`; by[k] = (by[k] || 0) + 1; }
+      return JSON.stringify({ ...r, countsByMeaning: by });
+    } catch (e) { return calFail(e); }
+  },
+  calendar_colors: async ({ action, colorId, meaning }) => {
+    try {
+      if (action === 'set') {
+        const id = colorId && /^(default|none)$/i.test(colorId) ? 'default' : cal.parseColor(colorId);
+        if (!id || !meaning) return 'Need a valid colour (name or 1 to 11, or default) and a meaning.';
+        state.calendarColors[id] = String(meaning).slice(0, 60); saveState();
+        return `Saved: ${cal.colorName(id === 'default' ? '' : id)} means "${state.calendarColors[id]}".`;
+      }
+      if (action === 'survey') return JSON.stringify({ colours: await cal.colorSurvey(60, state.calendarColors), saved: state.calendarColors, palette: cal.COLORS });
+      return JSON.stringify({ saved: Object.fromEntries(Object.entries(state.calendarColors).map(([k, m]) => [`${cal.colorName(k === 'default' ? '' : k)} (${k})`, m])) });
+    } catch (e) { return calFail(e); }
+  },
+  calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
+  calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
+});
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 

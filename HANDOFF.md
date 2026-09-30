@@ -68,6 +68,11 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 ## Phone alerts: Pushover (2026-09-29, preferred)
 - Owner wants ONE notification-only app with his own sound. `push()` order: Pushover (`PUSHOVER_APP_TOKEN`, `PUSHOVER_USER_KEY`, `PUSHOVER_SOUND` default `jarvis`) then Telegram then ntfy, each falling back to the next. Sound is uploaded once on pushover.net (Custom Sounds) using /api/alert-sound.mp3, named to match `PUSHOVER_SOUND`. Untested against the real API.
 
+## Calendar (2026-09-29)
+- calendar.js + tools calendar_events / calendar_colors / calendar_add / calendar_update (talk brain). Google Calendar API through a SERVICE ACCOUNT (no consent screen, no expiring token): Owner shares his calendar with the service account email ("Make changes to events"); env `GOOGLE_CALENDAR_KEY` (JSON key, one line) and `GOOGLE_CALENDAR_ID`. The private iCal link was rejected: read-only and has no colours.
+- Colour meanings live in `state.calendarColors` (data/stats.json) and are taught by voice ("survey" then "set"). If Railway wipes data/, set `CALENDAR_COLOR_MEANINGS` (JSON) or add a Railway volume for data/.
+- Tested only against a mock Google API. Google event colours are the fixed 11 (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil, Tomato); custom hex colours are not readable via the API.
+
 ## Backlog (the "functions" discussion)
 - MyGuru stats (the Owner's app, myguru.app: creators host paid live broadcasts, Q-Coins currency).
 - Meta Ads: Pipeboard MCP (`https://meta-ads.mcp.pipeboard.co/?token=...`, slot exists in `config/mcp.json`) or an open-source Meta Ads MCP (attainmentlabs/meta-ads-mcp, amekala/ads-mcp).

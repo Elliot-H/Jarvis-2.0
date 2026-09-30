@@ -71,6 +71,29 @@ export const PHONE_TOOLS = [
   }
 ];
 
+export const CALENDAR_TOOLS = [
+  {
+    name: 'calendar_events',
+    description: 'Read the Owner\'s Google Calendar between two dates (inclusive, YYYY-MM-DD; omit "to" for a single day). Each event has its colour and, once taught, what that colour MEANS (for example "job"). Use for "what is on today", "how many jobs this week", "what are the jobs Friday". Count by meaning, not just by colour. Put long lists on the HUD, say only the headline.',
+    shape: { from: z.string().optional().describe('YYYY-MM-DD, default today'), to: z.string().optional().describe('YYYY-MM-DD, default same as from'), query: z.string().optional().describe('text to search for in titles') }
+  },
+  {
+    name: 'calendar_colors',
+    description: 'What each calendar colour means to the Owner. action "list" shows the saved meanings; "survey" shows how the colours are actually used lately (counts and sample titles) so you can propose meanings and ask him to confirm; "set" saves a meaning ONLY after he has said it (colorId is a Google colour name like Tangerine or a number 1 to 11, or "default" for uncoloured events).',
+    shape: { action: z.enum(['list', 'survey', 'set']), colorId: z.string().optional(), meaning: z.string().optional().describe('short, e.g. "install job", "quote / estimate", "personal"') }
+  },
+  {
+    name: 'calendar_add',
+    description: 'Add an event to the Owner\'s calendar. ONLY call this after he has clearly asked for that specific appointment. Times are YYYY-MM-DDTHH:MM in his time zone (a bare date makes an all-day event). Set colorId from what the colours mean (see calendar_colors). Afterwards say back the title, day, time and colour.',
+    shape: { title: z.string(), start: z.string(), end: z.string().optional().describe('default one hour after start'), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional() }
+  },
+  {
+    name: 'calendar_update',
+    description: 'Change an existing event (title, time, colour, location, notes) by its id from calendar_events. ONLY after the Owner has clearly asked for the change; if more than one event could match, list them and ask which. Use colorId "default" to remove a colour. Afterwards say back what changed.',
+    shape: { eventId: z.string(), title: z.string().optional(), start: z.string().optional(), end: z.string().optional(), colorId: z.string().optional(), location: z.string().optional(), notes: z.string().optional() }
+  }
+];
+
 export const CRYPTO_TOOLS = [
   {
     name: 'crypto_scan',
