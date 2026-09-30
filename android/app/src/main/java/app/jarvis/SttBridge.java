@@ -29,6 +29,8 @@ public class SttBridge {
   private SpeechRecognizer sr;
   private boolean running = false;
   private boolean muted = false;
+  // The phone's own recognizer beeps on the notification/system streams, Google's on music: quiet all three while listening.
+  private static final int[] BEEP_STREAMS = {AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM};
   private boolean useDefault = false;   // switch to the phone's default recognizer if Google's own can't be used
   private boolean announced = false;
   private boolean ready = false;        // recognizer said it is actually hearing audio
@@ -106,13 +108,16 @@ public class SttBridge {
   /** The recognizer's start/stop beeps ride the media stream. Jarvis never talks while listening, so mute it briefly. */
   private void hush(long ms) {
     try {
-      if (!muted) { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0); muted = true; }
+      if (!muted) {
+        for (int st : BEEP_STREAMS) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); } catch (Exception ignored) {} }
+        muted = true;
+      }
     } catch (Exception ignored) {}
     ui.removeCallbacks(unhush);
     ui.postDelayed(unhush, ms);
   }
   private void doUnhush() {
-    try { if (muted) am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception ignored) {}
+    if (muted) for (int st : BEEP_STREAMS) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception ignored) {} }
     muted = false;
   }
   private final Runnable unhush = this::doUnhush;
