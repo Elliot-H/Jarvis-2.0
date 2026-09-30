@@ -1176,7 +1176,7 @@ async function connectSpeaker(hint) {
   if (!c.ok) return { ok: false, text: `Could not confirm the ${sp.alias || sp.name}: ${c.detail}` };
   const vol = sp.volume ?? DEFAULT_VOLUME;
   await deviceAction('set_volume', { percent: vol }, 6000);
-  return { ok: true, text: `${sp.alias || sp.name} connected (${c.detail}), volume ${vol}%.`, sp };
+  return { ok: true, text: `SUCCESS: the ${sp.alias || sp.name} speaker is connected (${c.detail}), volume ${vol}%. Tell the Owner it is connected.`, sp };
 }
 handlers.bluetooth_paired = async () => { const r = await deviceAction('bt_paired', {}, 10000); return r.ok ? 'Paired devices on the phone: ' + r.detail : 'Phone problem: ' + r.detail; };
 handlers.speaker_save = async ({ name, alias, area, volume }) => {
