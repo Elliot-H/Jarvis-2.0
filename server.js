@@ -984,6 +984,7 @@ const FILLERS = () => {
       weather: ['Let me check the forecast.', 'One moment, checking the weather.', `Checking the sky for you, ${t}.`],
       crypto: ['Let me check the markets.', `Scanning the market now, ${t}.`, 'One moment, checking the coins.'],
       lookup: ['Let me look that up.', `Searching for that now, ${t}.`, 'One moment, I will find out.'],
+      music: [`Getting the music going, ${t}.`, 'Starting your tunes now.', 'Let me get that playing for you.', `Music coming up, ${t}.`],
       action: [`Certainly, ${t}. Making that change.`, 'On it. Taking care of that now.', 'One moment while I handle that.']
     },
     progress: {
@@ -993,6 +994,7 @@ const FILLERS = () => {
       weather: ['Got the forecast. Just putting it together.', 'I have the weather. One moment.'],
       crypto: ['Okay, I have the numbers. Just reading them.', 'Got the market data. One moment.'],
       lookup: ['Okay, I found something. Reading it now.', 'I have a few results. Picking the best one.'],
+      music: ['Connecting the speaker and lining up the music.', 'Almost there, getting the music started.'],
       action: ['Almost done with that.', 'That is going through. One moment.']
     },
     still: {

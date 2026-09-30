@@ -350,6 +350,7 @@
   // What kind of command is this? Chat and remarks get NO filler; requests get lines that fit the topic.
   const REQUEST = /(\?\s*$|^(what|whats|what's|how|when|where|who|why|which|can|could|will|would|do|does|is|are|tell|give|show|find|check|look|search|read|list|add|create|schedule|set|change|update|move|reschedule|cancel|remind|send|call|open|get|pull|calculate|convert|translate|remember|brief|learn|save|remove|delete|put|make|start|play)\b|\b(can you|could you|would you|i need|i want|tell me|let me know|go ahead and)\b)/i;
   const TOPICS = [
+    ['music', /\b(music|tunes|songs?|spotify|playlist|speaker|bluetooth|volume|pause|resume|skip|play)\b/i],
     ['action', /\b(add|create|change|move|reschedule|cancel|remind|save|remove|delete|update|book)\b/i],
     ['calendar', /\b(calendar|appointments?|schedule|jobs?|booked|meetings?|agenda|colou?rs?)\b|what'?s on\b/i],
     ['weather', /\b(weather|forecast|rain|raining|snow|temperature|jacket|umbrella|humid|windy)\b/i],
@@ -362,9 +363,7 @@
     const words = t.split(/\s+/).filter(Boolean).length;
     const request = REQUEST.test(t);
     for (const [g, re] of TOPICS) if (re.test(t) && (request || words > 3)) return g;
-    if (request) return 'generic';
-    if (CHAT.test(t) || words <= 3) return null;    // clear chit-chat or a very short remark: say nothing extra
-    return 'generic';                               // anything longer is probably something to work on
+    return null;   // no topic match: stay quiet. A canned line that does not fit what he said feels wrong; the real answer is the acknowledgement.
   }
   function pickFiller(kind, group) {
     const l = (filler[kind][group] && filler[kind][group].length ? filler[kind][group] : filler[kind].generic) || [];
