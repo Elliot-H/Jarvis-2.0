@@ -65,6 +65,7 @@
       case 'log': addLog(m.role === 'user' ? 'user' : 'system', m.text); break;
       case 'activity': addActivity(m.text); ticker(m.text); break;
       case 'say':
+        if (m.memo) saveMemo(m.memo);
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (m.speak && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
@@ -281,6 +282,10 @@
     if (speaking) { speaking = false; if (resume) { setState('idle'); resumeListening(); } }
   }
 
+  // What the greeting needs to remember lives on the phone (the server's disk is wiped on every deploy).
+  function readMemo() { try { return JSON.parse(localStorage.getItem('jarvis.memo') || 'null') || {}; } catch { return {}; } }
+  function saveMemo(m) { try { localStorage.setItem('jarvis.memo', JSON.stringify(m)); } catch {} }
+
   // ======================= filler lines (ack + "still working") =======================
   // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
   const filler = { ack: [], still: [], cur: null, timer: null, lastIdx: {}, wasListening: false };
@@ -455,7 +460,7 @@
     if (p.wakeOnly) return goActive();
     const text = p.text.replace(/^[\s,.!?]+/, '').trim();
     if (!text || text.length < 2) return goActive();
-    if (p.fromWake && WAKE_UP.test(text)) { chime(true); addLog('user', 'Jarvis, ' + text); send({ type: 'wake' }); setState('thinking'); return; }
+    if (p.fromWake && WAKE_UP.test(text)) { chime(true); addLog('user', 'Jarvis, ' + text); send({ type: 'wake', memo: readMemo() }); setState('thinking'); return; }
     submit(text);
   }
   function onSpeech(e) {
@@ -538,7 +543,7 @@
     chime(true);
     // "wake up" on start → greeting from the server-side briefing
     // Share the phone's position first (for weather wherever he is), then greet. Never blocks longer than 4s.
-    const wake = () => setTimeout(() => send({ type: 'wake' }), 600);
+    const wake = () => setTimeout(() => send({ type: 'wake', memo: readMemo() }), 600);
     if (navigator.geolocation) navigator.geolocation.getCurrentPosition(
       p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); wake(); },
       () => wake(), { timeout: 4000, maximumAge: 600000 });

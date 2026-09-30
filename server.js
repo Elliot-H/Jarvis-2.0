@@ -37,7 +37,8 @@ for (const [k, v] of Object.entries({
 })) process.env[k] ??= v;
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || '0.0.0.0';
-const DATA_DIR = path.join(__dirname, 'data');
+// Railway wipes the app folder on every deploy. If a Railway Volume is attached, keep data there so it survives.
+const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 const CONFIG_DIR = path.join(__dirname, 'config');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const WORKSPACE = process.env.JARVIS_WORKSPACE || path.join(__dirname, 'workspace');
@@ -599,7 +600,10 @@ async function weatherLine(today) {
     return line;
   } catch { return ''; }
 }
-async function localGreeting() {
+async function localGreeting(memo) {
+  // The phone remembers when he was last greeted and the last weather, so redeploys can't make Jarvis repeat himself.
+  if (memo?.greetedDay) state.greetedDay = memo.greetedDay;
+  if (memo?.wx?.day) state.weather = memo.wx;
   const tz = state.location?.tz || process.env.TZ || 'America/New_York';
   const now = new Date();
   const h = Number(now.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
@@ -616,8 +620,8 @@ async function localGreeting() {
   if (first) return `${part}${day}${wx} All systems online.${ctx}${open}`;
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${ctx}${open}`.trim() || 'At your service, sir.';
 }
-async function briefing(reason = 'scheduled') {
-  if (reason === 'wake') { broadcast({ type: 'say', text: await localGreeting(), speak: true }); return; }
+async function briefing(reason = 'scheduled', memo) {
+  if (reason === 'wake') { const text = await localGreeting(memo); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
@@ -1049,7 +1053,7 @@ wss.on('connection', ws => {
       if (moved) state.weather = undefined; // new place: report its weather fresh
       saveState();
     }
-    if (msg.type === 'wake') briefing('wake');
+    if (msg.type === 'wake') briefing('wake', msg.memo);
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
     if (msg.type === 'new_session') {
       state.sessionId = null; state.workSessionId = null; state.history = []; saveState();

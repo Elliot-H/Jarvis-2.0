@@ -110,3 +110,7 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - Arrival remark ("I see you're at Brenda's this morning, sir.") only when the place differs from `state.lastPlace`; nothing for home.
 - Reminder bucket `state.reminders` {id,text,place,time(morning|afternoon|evening|night),days,chance%,cooldownHours,lastShown}; tools reminder_add/list/remove. `pickReminder()` filters by triggers + cooldown, then rolls chance; max one per check. Checked on app open (appended to greeting) and every 25 min while the app is open (35% roll, only when idle, spoken). Seeded once with the dogs-food reminder (home, morning, 45%).
 - Not built: notifications when the app is closed (a web app cannot see location in the background).
+
+## Redeploys wipe data/ (important)
+- Every push to main redeploys and erases `data/` (stats.json: places, reminders, calendar colour meanings, watchlist, location...). Fix = attach a Railway Volume; server now uses `DATA_DIR` or `RAILWAY_VOLUME_MOUNT_PATH` automatically (no code change needed after the volume is added).
+- Until then the greeting memory (`greetedDay`, last weather) is kept on the phone (localStorage `jarvis.memo`) and sent with `wake`; the server echoes it back in the `say` message's `memo`.
