@@ -47,6 +47,7 @@ public class DeviceBridge {
       else if ("bt_paired".equals(action)) btPaired(id);
       else if ("spotify_resume".equals(action)) spotifyResume(id);
       else if ("spotify_search".equals(action)) spotifySearch(id, o.optString("query"), o.optString("kind"));
+      else if ("close_app".equals(action)) { String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
       else if ("media_key".equals(action)) { mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
