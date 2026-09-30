@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Copy Google key</title>
+<style>body{margin:0;padding:18px;background:#02060c;color:#cfefff;font-family:system-ui,sans-serif;max-width:640px}
+h1{font-size:18px;letter-spacing:.2em;color:#3fe0ff}p{color:#8fb5c8;line-height:1.4}
+button,.pick{display:block;width:100%;box-sizing:border-box;margin:12px 0;padding:16px;font-size:16px;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff;text-align:center;border-radius:6px}
+input[type=file]{display:none}pre{white-space:pre-wrap;word-break:break-all;background:#041422;border:1px solid #14405a;padding:10px;font-size:12px;border-radius:6px}
+.ok{color:#5dff9a}.bad{color:#ff6b7a}small{color:#6f95a8}</style></head><body>
+<h1>COPY GOOGLE KEY</h1>
+<p>Pick the downloaded key file (.json). It is read on this phone only and is not uploaded anywhere.</p>
+<label class="pick">Choose key file<input id="f" type="file" accept=".json,application/json,text/plain,*/*"></label>
+<div id="out"></div>
+<script>
+const out=document.getElementById('out');
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function copy(text,btn,label){
+  try{await navigator.clipboard.writeText(text);btn.textContent='Copied ✓ '+label;}
+  catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();try{document.execCommand('copy');btn.textContent='Copied ✓ '+label}catch{btn.textContent='Copy failed: press and hold the box below and choose Copy'}t.remove();}
+}
+document.getElementById('f').addEventListener('change',async e=>{
+  const file=e.target.files[0]; if(!file)return;
+  let k; try{k=JSON.parse(await file.text());}catch{out.innerHTML='<p class="bad">That file is not readable JSON. Pick the key file that Google downloaded.</p>';return;}
+  if(!k.client_email||!k.private_key||k.type!=='service_account'){out.innerHTML='<p class="bad">That is not a Google service account key. Pick the .json that Google downloaded when you created the key.</p>';return;}
+  const one=JSON.stringify(k);
+  out.innerHTML='<p class="ok">Key file looks right.</p><p><b>1.</b> Share your Google Calendar with this email (Make changes to events):</p><pre id="em">'+esc(k.client_email)+'</pre><button id="b1">Copy the email</button><p><b>2.</b> In Railway, add a variable named <b>GOOGLE_CALENDAR_KEY</b> and paste this as its value:</p><button id="b2">Copy the key</button><small>Nothing is shown on screen on purpose. Never paste the key into a chat.</small>';
+  document.getElementById('b1').onclick=ev=>copy(k.client_email,ev.target,'email');
+  document.getElementById('b2').onclick=ev=>copy(one,ev.target,'key');
+});
+</script></body></html>
