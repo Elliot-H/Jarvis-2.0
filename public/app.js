@@ -474,7 +474,23 @@
   let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
   // Every mic start goes through here so a cooldown is honoured no matter who asks (the phone's recognizer refuses
   // requests that come too fast, and hammering it makes it refuse for longer).
-  function startMic() { const now = Date.now(); if (!rec || now < micNotBefore || now - lastMicStart < 600) return; lastMicStart = now; try { rec.start(); } catch {} }
+  // While music is playing the speech recognizer keeps pausing it (Android hands the recognizer audio focus), so the always-on
+  // listening stands down and the mic button becomes push-to-talk. Questions from Jarvis still open the mic. Add ?musicmic=on to keep listening anyway.
+  const MUSIC_QUIET = params.get('musicmic') !== 'on';
+  let manualMicUntil = 0, musicHeld = false;
+  const musicPlaying = () => { try { return MUSIC_QUIET && !!window.AndroidPhoneAudio && window.AndroidPhoneAudio.musicActive(); } catch { return false; } };
+  function startMic() {
+    const now = Date.now();
+    if (!rec || now < micNotBefore || now - lastMicStart < 600) return;
+    if (now > manualMicUntil && musicPlaying()) {
+      if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Music is playing: listening is off so it does not cut out. Tap the mic button to talk.'); }
+      return;
+    }
+    if (musicHeld) { musicHeld = false; chip('#chipMic', 'ok', 'MIC'); }
+    lastMicStart = now; try { rec.start(); } catch {}
+  }
+  // Pick listening back up by itself once the music stops.
+  setInterval(() => { if (rec && recWanted && !recOn && musicHeld && !musicPlaying()) startMic(); }, 4000);
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
     return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves'] : [w];
@@ -539,7 +555,7 @@
     return ASKING.test(t.slice(-220));
   }
   function afterReply(text) {
-    if (isQuestion(text)) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 20000 }); }, 250);
+    if (isQuestion(text)) setTimeout(() => { if (!speaking && state !== 'thinking') { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } }, 250);
     else if (FOLLOW_UP) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 6000, quiet: true }); }, 250);
     else resumeListening();
   }
@@ -668,7 +684,7 @@
     if (!booted) boot();
     submit(v);
   });
-  $('#micBtn').onclick = () => { if (!booted) return boot(); state === 'listening' ? (mode = 'passive', setState('idle')) : goActive(); };
+  $('#micBtn').onclick = () => { if (!booted) return boot(); if (state === 'listening') { mode = 'passive'; setState('idle'); } else { manualMicUntil = Date.now() + 15000; goActive(); } };
   $('#reactor').onclick = () => { if (!booted) return boot(); if (speaking) stopSpeaking(); else goActive(); };
   $('#newSess').onclick = () => { send({ type: 'new_session' }); $('#log').innerHTML = ''; };
   document.addEventListener('keydown', e => {

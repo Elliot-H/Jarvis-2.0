@@ -29,6 +29,7 @@ public class SttBridge {
   private SpeechRecognizer sr;
   private boolean running = false;
   private boolean muted = false;
+  private final java.util.ArrayList<Integer> mutedStreams = new java.util.ArrayList<>();
   // The phone's own recognizer beeps on the notification/system streams, Google's on music: quiet all three while listening.
   private static final int[] BEEP_STREAMS = {AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM};
   private boolean useDefault = false;   // switch to the phone's default recognizer if Google's own can't be used
@@ -109,7 +110,9 @@ public class SttBridge {
   private void hush(long ms) {
     try {
       if (!muted) {
-        for (int st : BEEP_STREAMS) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); } catch (Exception ignored) {} }
+        // Never mute the music stream while music is playing (that silenced Spotify and Jarvis's own voice).
+        boolean music = false; try { music = am.isMusicActive(); } catch (Exception ignored) {}
+        for (int st : BEEP_STREAMS) { if (music && st == AudioManager.STREAM_MUSIC) continue; try { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); mutedStreams.add(st); } catch (Exception ignored) {} }
         muted = true;
       }
     } catch (Exception ignored) {}
@@ -117,7 +120,7 @@ public class SttBridge {
     ui.postDelayed(unhush, ms);
   }
   private void doUnhush() {
-    if (muted) for (int st : BEEP_STREAMS) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception ignored) {} }
+    if (muted) { for (int st : mutedStreams) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception ignored) {} } mutedStreams.clear(); }
     muted = false;
   }
   private final Runnable unhush = this::doUnhush;

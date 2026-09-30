@@ -40,6 +40,9 @@ public class PhoneAudio {
   /** True when a Bluetooth speaker/headset is taking the phone's media audio right now. */
   @JavascriptInterface public boolean btActive() { return find(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) != null; }
 
+  /** True while any app (Spotify) is playing music. The page stops listening in the background then, because the speech recognizer interrupts music. */
+  @JavascriptInterface public boolean musicActive() { try { return am.isMusicActive(); } catch (Exception e) { return false; } }
+
   @JavascriptInterface public void play(final String id, final String base64) { ui.post(() -> start(id, base64)); }
   @JavascriptInterface public void stop(final String id) { ui.post(() -> release(id)); }
 
