@@ -99,7 +99,7 @@ public class DeviceBridge {
                 ctx.sendBroadcast(t);
               }
             }
-            if (System.currentTimeMillis() > deadline) { reply(id, false, "The speaker did not connect. Check that Tasker has a task named " + task + " and external access is on, and that the speaker is on and in range."); return; }
+            if (System.currentTimeMillis() > deadline) { reply(id, false, "The speaker did not connect. " + taskerReport(name, task)); return; }
             ui.postDelayed(poll[0], 1500);
           }
           @Override public void onServiceDisconnected(int profile) {}
@@ -107,6 +107,28 @@ public class DeviceBridge {
       } catch (SecurityException e) { reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); }
     };
     poll[0].run();
+  }
+
+  /** What the phone can tell us about why Tasker did not connect the speaker. */
+  private String taskerReport(String name, String task) {
+    StringBuilder sb = new StringBuilder();
+    String found = "none";
+    for (String pkg : new String[]{"net.dinglisch.android.taskerm", "net.dinglisch.android.tasker"}) {
+      try { ctx.getPackageManager().getPackageInfo(pkg, 0); found = pkg; break; } catch (Exception ignored) {}
+    }
+    sb.append("Tasker app installed: ").append(found).append(". ");
+    boolean perm = ctx.checkSelfPermission("net.dinglisch.android.tasker.PERMISSION_RUN_TASKS") == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    sb.append("Jarvis allowed to run Tasker tasks: ").append(perm ? "yes" : "NO (Android Settings > Apps > Jarvis > Permissions)").append(". ");
+    try {
+      BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+      BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+      sb.append("Bluetooth on: ").append(ad != null && ad.isEnabled()).append(". ");
+      boolean paired = false; StringBuilder names = new StringBuilder();
+      if (ad != null) for (BluetoothDevice d : ad.getBondedDevices()) { String n = d.getName(); if (names.length() > 0) names.append(", "); names.append(n); if (n != null && n.toLowerCase().contains(name.toLowerCase())) paired = true; }
+      sb.append("Paired device matching \"").append(name).append("\": ").append(paired ? "yes" : "NO. Paired devices are: " + names).append(". ");
+    } catch (SecurityException e) { sb.append("Jarvis lacks the Nearby devices permission. "); }
+    sb.append("Tasker task name sent: ").append(task).append(".");
+    return sb.toString();
   }
 
   // ---- Spotify without the Web API: drive the Spotify app like a remote ----
