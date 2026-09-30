@@ -5,9 +5,37 @@
  * URL flags:  ?display=1  → display-only screen (no mic, no voice, no boot) for Pi kiosks / extra monitors
  */
 (() => {
+  // Inside the Android app: use the phone's own speech engine (WebView has none). Installed here so it is
+  // in place before the page looks for SpeechRecognition, whatever the app did or did not inject.
+  if (window.AndroidSTT && !window.__sttShim) {
+    window.__sttShim = true;
+    let cur = null;
+    function SR() { this.continuous = false; this.interimResults = false; this.lang = 'en-US'; this.maxAlternatives = 1; this._on = false; }
+    SR.prototype.start = function () { if (this._on) throw new Error('InvalidStateError'); cur = this; this._on = true; window.AndroidSTT.start(this.lang || 'en-US'); };
+    SR.prototype.stop = function () { window.AndroidSTT.stop(); };
+    SR.prototype.abort = function () { window.AndroidSTT.abort(); };
+    window.__stt = {
+      ev: function (t, d) {
+        if (t === 'diag') { window.__sttDiag && window.__sttDiag(d); return; }
+        const r = cur; if (!r) return;
+        if (t === 'start') r.onstart && r.onstart({});
+        else if (t === 'result') {
+          const res = [{ transcript: d.text, confidence: 0.9 }]; res.isFinal = !!d.final; res.item = function (i) { return this[i]; };
+          const list = [res]; list.item = function (i) { return this[i]; };
+          r.onresult && r.onresult({ resultIndex: 0, results: list });
+        }
+        else if (t === 'error') r.onerror && r.onerror({ error: d });
+        else if (t === 'end') { r._on = false; r.onend && r.onend({}); }
+      }
+    };
+    window.SpeechRecognition = SR; window.webkitSpeechRecognition = SR;
+  }
+})();
+(() => {
   const $ = s => document.querySelector(s);
   const params = new URLSearchParams(location.search);
   const DISPLAY_ONLY = params.get('display') === '1';
+  window.__sttDiag = t => { try { addActivity('Phone mic: ' + t); } catch {} };
 
   let cfg = { name: 'JARVIS', wakeWord: 'jarvis', userTitle: 'sir', elevenlabs: false };
   let ws, state = 'idle', level = 0, targetLevel = 0;
