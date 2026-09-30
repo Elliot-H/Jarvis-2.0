@@ -289,7 +289,7 @@
 
   // ======================= filler lines (ack + "still working") =======================
   // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
-  const filler = { ack: {}, progress: {}, still: {}, cur: null, timer: null, lastIdx: {} };
+  const filler = { ack: {}, progress: {}, still: {}, cur: null, curAt: 0, timer: null, lastIdx: {} };
   async function loadFillers() {
     try {
       const list = await (await fetch('/api/fillers')).json();
@@ -316,11 +316,15 @@
     ['crypto', /\b(crypto|bitcoin|btc|eth|ethereum|coins?|market|markets|solana)\b/i],
     ['lookup', /\b(search|look up|find out|who is|how much|cost|price|news|score|hours|near me|parts?|fit)\b/i]
   ];
+  const CHAT = /^(thanks|thank you|thx|good|great|nice|cool|ok|okay|perfect|awesome|excellent|i appreciate|appreciate|that (was|is|works|worked)|you('?re| are) (right|welcome)|never ?mind|sounds good|got it|yes|no|yeah|yep|nope|hello|hi|hey|alright|all right|understood|fair enough|makes sense|wow|lol|haha)\b/i;
   function fillerTopic(text) {
     const t = String(text || '').trim();
-    if (!REQUEST.test(t)) return null;              // chit-chat / remark: say nothing extra
-    for (const [g, re] of TOPICS) if (re.test(t)) return g;
-    return 'generic';
+    const words = t.split(/\s+/).filter(Boolean).length;
+    const request = REQUEST.test(t);
+    for (const [g, re] of TOPICS) if (re.test(t) && (request || words > 3)) return g;
+    if (request) return 'generic';
+    if (CHAT.test(t) || words <= 3) return null;    // clear chit-chat or a very short remark: say nothing extra
+    return 'generic';                               // anything longer is probably something to work on
   }
   function pickFiller(kind, group) {
     const l = (filler[kind][group] && filler[kind][group].length ? filler[kind][group] : filler[kind].generic) || [];
@@ -331,11 +335,13 @@
     filler.lastIdx[key] = i; return l[i];
   }
   function playFiller(kind, group) {
-    if (DISPLAY_ONLY || !booted || speaking || filler.cur) return;
+    if (DISPLAY_ONLY || !booted || speaking) return;
+    if (filler.cur) { if (Date.now() - filler.curAt < 6000) return; filler.cur = null; }   // a clip the phone paused must never block the next one
     const url = pickFiller(kind, group); if (!url) return;
-    const a = new Audio(url); filler.cur = a;
-    const end = () => { if (filler.cur !== a) return; filler.cur = null; };
-    a.onended = end; a.onerror = end;
+    const a = new Audio(url); filler.cur = a; filler.curAt = Date.now();
+    const end = () => { if (filler.cur === a) filler.cur = null; };
+    a.onended = end; a.onerror = end; a.onpause = end;
+    setTimeout(end, 7000);
     a.play().catch(end);
   }
   function stopFillers() {
@@ -344,6 +350,7 @@
   function startFillers(text) {
     stopFillers();
     const g = fillerTopic(text);
+    addActivity('Filler: ' + (g || 'none (chit-chat)'));
     if (!g) return;                                   // just chatting: no filler lines
     playFiller('ack', g);
     // ~4s after the ack: a progress line that fits the topic
