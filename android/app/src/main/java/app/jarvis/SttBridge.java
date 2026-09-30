@@ -37,6 +37,22 @@ public class SttBridge {
   private boolean ready = false;        // recognizer said it is actually hearing audio
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
+  private boolean musicBefore = false;   // music was playing when the mic opened (the recognizer pauses it)
+  private boolean wantPause = false;     // he just told Jarvis to pause/stop: do not resume
+  private final Runnable resume = () -> {
+    if (!musicBefore) return;
+    musicBefore = false;
+    try {
+      if (!wantPause && !am.isMusicActive()) {
+        long t = android.os.SystemClock.uptimeMillis();
+        am.dispatchMediaKeyEvent(new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, 0));
+        am.dispatchMediaKeyEvent(new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, 0));
+        emit("diag", "mic closed, resumed the music");
+      }
+    } catch (Exception ignored) {}
+    wantPause = false;
+  };
+  private void scheduleResume() { if (musicBefore) { ui.removeCallbacks(resume); ui.postDelayed(resume, 1500); } }
 
   /** Watchdog: the recognizer sometimes accepts startListening and then never answers (no ready, no error),
    *  which left the mic "on" with nothing listening. Tear it down so the page can start clean. */
@@ -97,6 +113,8 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
+    try { if (!musicBefore) musicBefore = am.isMusicActive(); } catch (Exception ignored) {}
+    ui.removeCallbacks(resume);
     running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
     try { sr.startListening(i); } catch (Exception e) { reset(); emit("error", "aborted"); emit("end", ""); return; }
@@ -168,16 +186,17 @@ public class SttBridge {
         try { sr.destroy(); } catch (Exception ignored) {} sr = null;
       }
       if (!e.equals("no-speech") && !e.equals("aborted")) emit("error", e);
-      emit("end", "");
+      emit("end", ""); scheduleResume();
     }
     @Override public void onPartialResults(Bundle b) { push(b, false); }
-    @Override public void onResults(Bundle b) { running = false; ready = false; ui.removeCallbacks(stall); push(b, true); emit("end", ""); }
+    @Override public void onResults(Bundle b) { running = false; ready = false; ui.removeCallbacks(stall); push(b, true); emit("end", ""); scheduleResume(); }
     @Override public void onEvent(int t, Bundle b) {}
   };
 
   private void push(Bundle b, boolean fin) {
     ArrayList<String> l = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
     if (l == null || l.isEmpty() || l.get(0) == null || l.get(0).isEmpty()) return;
+    if (fin && l.get(0).toLowerCase().matches(".*\\b(pause|stop|disconnect|turn off|shut)\\b.*")) wantPause = true;
     try {
       JSONObject o = new JSONObject();
       o.put("text", l.get(0)); o.put("final", fin);
