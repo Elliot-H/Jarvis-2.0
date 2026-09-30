@@ -145,6 +145,7 @@ public class SttBridge {
         default: e = "android-error-" + code;   // shows up on the HUD so it can be read off the screen
       }
       // Google's recognizer could not be used: rebuild with the phone's default one and carry on.
+      if (code == 10) { useDefault = !useDefault; emit("diag", "Too many requests, switching to " + (useDefault ? "the phone's default recognizer" : "Google's recognizer")); }
       if (!useDefault && (code == SpeechRecognizer.ERROR_CLIENT || code == 11 || code == 12 || code == 13)) {
         useDefault = true; emit("diag", "Google recognizer failed (" + code + "), trying the phone's default");
       }
