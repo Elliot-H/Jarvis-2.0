@@ -190,8 +190,10 @@
     ttsAnalyser = audioCtx.createAnalyser(); ttsAnalyser.fftSize = 256; ttsAnalyser.smoothingTimeConstant = .75;
     ttsAnalyser.connect(audioCtx.destination);
   }
+  // App dings are off by default (they piled up as the mic cycled). Add ?chime=1 to the address to bring them back.
+  const CHIMES = params.get('chime') === '1';
   function chime(up = true) {
-    if (!audioCtx) return;
+    if (!CHIMES || !audioCtx) return;
     const t = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
     o.type = 'sine';
     o.frequency.setValueAtTime(up ? 660 : 880, t); o.frequency.exponentialRampToValueAtTime(up ? 1320 : 440, t + .14);
