@@ -478,19 +478,52 @@ function prettyTool(name, input) {
 // ---------- greetings & briefings ----------
 // Opening the app or saying "wake up" costs nothing: a local greeting, no AI call.
 // The AI briefing (config/briefing.md) runs only on request ("brief me") or on the optional schedule.
-function localGreeting() {
+// Weather via Open-Meteo (free, no key). Default location Harrington, DE; override with WEATHER_LAT / WEATHER_LON.
+const WX_KINDS = c => c === 0 ? 'clear' : c <= 3 ? 'cloudy' : c <= 48 ? 'foggy' : c <= 57 ? 'drizzling' : c <= 67 ? 'raining' : c <= 77 ? 'snowing' : c <= 82 ? 'raining' : c <= 86 ? 'snowing' : 'stormy';
+const WX_NOW = { clear: 'clear', cloudy: 'cloudy', foggy: 'foggy', drizzling: 'drizzling', raining: 'raining', snowing: 'snowing', stormy: 'stormy' };
+async function currentWeather() {
+  const lat = process.env.WEATHER_LAT || '38.92', lon = process.env.WEATHER_LON || '-75.57';
+  const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`, { signal: AbortSignal.timeout(4000) });
+  if (!r.ok) throw new Error('weather ' + r.status);
+  const c = (await r.json()).current;
+  return { kind: WX_KINDS(c.weather_code), temp: Math.round(c.temperature_2m) };
+}
+// Weather is mentioned only on the first open of the day, or when it has changed since the last time it was mentioned/checked.
+async function weatherLine(today) {
+  try {
+    const w = await currentWeather();
+    const prev = state.weather;
+    let line = '';
+    if (!prev || prev.day !== today) line = ` It's ${w.temp} degrees and ${WX_NOW[w.kind]}.`;
+    else if (prev.kind !== w.kind) {
+      const wet = ['raining', 'drizzling', 'snowing', 'stormy'];
+      if (wet.includes(prev.kind) && !wet.includes(w.kind)) line = ` Just so you know, it has stopped ${prev.kind === 'stormy' ? 'storming' : prev.kind}.`;
+      else if (wet.includes(w.kind)) line = ` Heads up, it has started ${w.kind === 'stormy' ? 'storming' : w.kind}.`;
+      else line = ` The weather has changed: it's now ${WX_NOW[w.kind]}.`;
+    }
+    state.weather = { day: today, kind: w.kind, temp: w.temp };
+    saveState();
+    return line;
+  } catch { return ''; }
+}
+async function localGreeting() {
   const tz = process.env.TZ || 'America/New_York';
   const now = new Date();
   const h = Number(now.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
   const part = h < 5 ? 'Up late, sir.' : h < 12 ? 'Good morning, sir.' : h < 17 ? 'Good afternoon, sir.' : 'Good evening, sir.';
-  const day = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: tz });
+  const today = now.toLocaleDateString('en-CA', { timeZone: tz });
+  const first = state.greetedDay !== today;
+  const wx = await weatherLine(today);
+  state.greetedDay = today; saveState();
+  const day = first ? ` It's ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: tz })}.` : '';
   const n = state.failures.length;
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
-  const brief = state.panels?.crypto ? ' Your crypto watch is on screen.' : '';
-  return `${part} It's ${day}. All systems online.${brief}${open}`;
+  // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
+  if (first) return `${part}${day}${wx} All systems online.${open}`;
+  return `${wx || open ? '' : 'At your service, sir.'}${wx}${open}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled') {
-  if (reason === 'wake') { broadcast({ type: 'say', text: localGreeting(), speak: true }); return; }
+  if (reason === 'wake') { broadcast({ type: 'say', text: await localGreeting(), speak: true }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
