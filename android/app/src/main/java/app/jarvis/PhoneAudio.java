@@ -53,24 +53,45 @@ public class PhoneAudio {
   /** Stream a clip straight from the server (no base64 hop): it starts playing as soon as the first audio arrives. */
   @JavascriptInterface public void playUrl(final String id, final String url) { ui.post(() -> startUrl(id, url, true)); }
 
+  // While Bluetooth music plays, Android sends media-type audio to the Bluetooth speaker no matter the preferred device. Other usages
+  // (accessibility, notification, alarm) are routed differently, so try them in turn and keep the first one that lands on the phone speaker.
+  private static final int[] USAGES = { AudioAttributes.USAGE_MEDIA, AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY, AudioAttributes.USAGE_NOTIFICATION, AudioAttributes.USAGE_ALARM };
+  private int goodVariant = 0;
+  private static boolean isBtOut(AudioDeviceInfo d) {
+    if (d == null) return false;
+    int t = d.getType();
+    return t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLE_SPEAKER || t == AudioDeviceInfo.TYPE_BLE_BROADCAST || t == AudioDeviceInfo.TYPE_HEARING_AID;
+  }
+
   private void startUrl(String id, String url, boolean route) {
+    final boolean bt = btActive();
+    startUrlV(id, url, bt ? goodVariant : 0, bt);
+  }
+
+  private void startUrlV(final String id, final String url, final int v, final boolean bt) {
     try {
       MediaPlayer mp = new MediaPlayer();
-      mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+      mp.setAudioAttributes(new AudioAttributes.Builder().setUsage(USAGES[v]).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
       Map<String, String> h = new HashMap<>();
       String ck = android.webkit.CookieManager.getInstance().getCookie(url);
       if (ck != null) h.put("Cookie", ck);
       mp.setDataSource(ctx, android.net.Uri.parse(url), h);
-      final boolean bt = btActive();
-      if (route && bt) { AudioDeviceInfo spk = find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER); if (spk != null) mp.setPreferredDevice(spk); }
+      if (bt) { AudioDeviceInfo spk = find(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER); if (spk != null) mp.setPreferredDevice(spk); }
       mp.setOnPreparedListener(p -> {
         boost(id, p); p.start();
-        ui.postDelayed(() -> { try { if (players.get(id) == p) emit(id, "info:" + where(p, bt)); } catch (Exception ignored) {} }, 400);
+        ui.postDelayed(() -> {
+          try {
+            if (players.get(id) != p) return;
+            if (bt && isBtOut(p.getRoutedDevice()) && v < USAGES.length - 1) { release(id); goodVariant = v + 1; startUrlV(id, url, v + 1, true); return; }
+            if (bt && !isBtOut(p.getRoutedDevice())) goodVariant = v;
+            emit(id, "info:" + where(p, bt) + (bt ? ", route " + v : ""));
+          } catch (Exception ignored) {}
+        }, 250);
       });
       mp.setOnCompletionListener(p -> { release(id); emit(id, "ended"); });
       mp.setOnErrorListener((p, what, extra) -> {
         release(id);
-        if (route && bt) { startUrl(id, url, false); return true; } // the speaker route failed: try the normal route once
+        if (bt && v < USAGES.length - 1) { goodVariant = v + 1; startUrlV(id, url, v + 1, true); return true; }
         emit(id, "error:" + what + "/" + extra); return true;
       });
       players.put(id, mp);
