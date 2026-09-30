@@ -32,6 +32,8 @@ public class SttBridge {
   private boolean useDefault = false;   // switch to the phone's default recognizer if Google's own can't be used
   private boolean announced = false;
   private boolean ready = false;        // recognizer said it is actually hearing audio
+  private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
+  private long lastQuietDiag = 0;
 
   /** Watchdog: the recognizer sometimes accepts startListening and then never answers (no ready, no error),
    *  which left the mic "on" with nothing listening. Tear it down so the page can start clean. */
@@ -85,7 +87,7 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
-    running = true; ready = false;
+    running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
     try { sr.startListening(i); } catch (Exception e) { reset(); emit("error", "aborted"); emit("end", ""); return; }
     ui.removeCallbacks(stall); ui.postDelayed(stall, 5000);
@@ -120,12 +122,16 @@ public class SttBridge {
       ready = true; ui.removeCallbacks(stall); ui.postDelayed(stall, 60000);   // a live session never runs this long
       emit("start", ""); ui.removeCallbacks(unhush); ui.postDelayed(unhush, 450); }
     @Override public void onBeginningOfSpeech() {}
-    @Override public void onRmsChanged(float v) {}
+    @Override public void onRmsChanged(float v) { if (v > maxRms) maxRms = v; }
     @Override public void onBufferReceived(byte[] b) {}
     @Override public void onEndOfSpeech() { hush(500); }
     @Override public void onError(int code) {
       running = false; ready = false; ui.removeCallbacks(stall);
       if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) emit("diag", "speech engine error " + code);
+      else if (System.currentTimeMillis() - lastQuietDiag > 15000) {
+        lastQuietDiag = System.currentTimeMillis();
+        emit("diag", (code == SpeechRecognizer.ERROR_NO_MATCH ? "heard sound but no words" : "heard nothing") + ", loudest level " + (maxRms <= -100f ? "none (no audio reached the recognizer)" : String.valueOf(Math.round(maxRms))) + " (silence is about -2, talking is 5 or more)");
+      }
       String e;
       switch (code) {
         case SpeechRecognizer.ERROR_NO_MATCH:
