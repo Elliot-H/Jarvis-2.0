@@ -503,6 +503,75 @@ async function currentWeather() {
   if (j.timezone && state.location) state.location.tz = j.timezone;
   return { kind: WX_KINDS(j.current.weather_code), temp: Math.round(j.current.temperature_2m), unit: j.__f ? 'degrees' : 'degrees Celsius' };
 }
+// ---------- places & random contextual reminders ----------
+// Places are named by voice ("this is Brenda's") and stored with the phone's position. Reminders sit in a bucket, each tied
+// to optional triggers (place, time of day, weekdays). They are checked on app open and now and then while the app is open,
+// with a dice roll and a cooldown, so they never feel scheduled.
+state.places ||= []; state.reminders ||= [];
+const km = (a, b) => { const R = 6371, r = x => x * Math.PI / 180, dl = r(b.lat - a.lat), dn = r(b.lon - a.lon);
+  const h = Math.sin(dl / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+const nowCtx = () => {
+  const tz = state.location?.tz || process.env.TZ || 'America/New_York';
+  const d = new Date();
+  const h = Number(d.toLocaleString('en-US', { hour: 'numeric', hourCycle: 'h23', timeZone: tz }));
+  const wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: tz });
+  return { tod: h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night', weekend: wd === 'Sat' || wd === 'Sun', h };
+};
+const currentPlace = () => {
+  const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 6 * 3600e3) return null;
+  let best = null;
+  for (const p of state.places) { const d = km(L, p) * 1000; if (d <= (p.radius || 150) && (!best || d < best.d)) best = { ...p, d }; }
+  return best;
+};
+const placeKey = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function pickReminder(roll = Math.random) {
+  const pl = currentPlace(), c = nowCtx(), now = Date.now();
+  const ok = state.reminders.filter(r => r.on !== false
+    && (!r.place || (pl && placeKey(pl.name) === placeKey(r.place)))
+    && (!r.time || r.time === c.tod)
+    && (!r.days || (r.days === 'weekends') === c.weekend)
+    && (!r.lastShown || now - r.lastShown > (r.cooldownHours ?? 20) * 3600e3));
+  // contextual ones (tied to a place or time) get rolled by their own chance; one at most per check
+  for (const r of ok.sort(() => roll() - .5)) if (roll() * 100 < (r.chance ?? 40)) { r.lastShown = now; saveState(); return r; }
+  return null;
+}
+// Arrival remark only when the place changed since the last check, so it is news and not a habit.
+function placeNote() {
+  const pl = currentPlace(), key = pl ? placeKey(pl.name) : '';
+  if (key === (state.lastPlace || '')) return '';
+  state.lastPlace = key; saveState();
+  if (!pl) return '';
+  const c = nowCtx();
+  if (pl.kind === 'home') return '';
+  return ` I see you're at ${pl.name} ${c.tod === 'night' ? 'tonight' : 'this ' + c.tod}, sir.`;
+}
+function contextNote() { const r = pickReminder(); return placeNote() + (r ? ' ' + r.text : ''); }
+handlers.place_save = async ({ name, radius_m, home }) => {
+  const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 15 * 60e3) return 'I do not have a fresh location from the phone. Tell the Owner to allow location for the app, then try again.';
+  const key = placeKey(name);
+  state.places = state.places.filter(p => placeKey(p.name) !== key);
+  state.places.push({ name, lat: L.lat, lon: L.lon, radius: radius_m || 150, kind: home || /^home$/i.test(name) ? 'home' : 'place' });
+  state.lastPlace = key; saveState();
+  return `Saved "${name}" at his current position (within ${radius_m || 150} m).`;
+};
+handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now.` : '. He is not at any saved place now.') : 'No places saved yet.';
+handlers.reminder_add = async a => {
+  const id = Math.random().toString(36).slice(2, 7);
+  state.reminders.push({ id, text: a.text, place: a.place, time: a.time, days: a.days, chance: a.chance ?? 40, cooldownHours: a.cooldown_hours ?? 20 });
+  saveState(); return `Added reminder ${id}. It will come up at random when it fits (chance ${a.chance ?? 40}% per check).`;
+};
+handlers.reminder_list = async () => state.reminders.length ? state.reminders.map(r => `${r.id}: "${r.text}"${r.place ? ' @' + r.place : ''}${r.time ? ' ' + r.time : ''}${r.days ? ' ' + r.days : ''} ${r.chance}%`).join('\n') : 'The reminder bucket is empty.';
+handlers.reminder_remove = async ({ id }) => { const n = state.reminders.length; state.reminders = state.reminders.filter(r => r.id !== id); saveState(); return n === state.reminders.length ? 'No reminder with that id.' : 'Removed.'; };
+if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
+  state.reminders.push({ id: 'dogs', text: "Do you have the dogs with you? Don't forget to check that they have food.", place: 'home', time: 'morning', chance: 45, cooldownHours: 22 });
+  state.seededReminders = true;
+}
+// While the app is open, now and then, a reminder can come up on its own (only when Jarvis is idle).
+if (!process.env.JARVIS_SMOKE) setInterval(() => {
+  if (busy || !clients.size || Math.random() > .35) return;
+  const r = pickReminder(); if (r) broadcast({ type: 'say', text: r.text, speak: true });
+}, 25 * 60_000);
+
 handlers.weather = async ({ days } = {}) => {
   try {
     const j = await wxFetch(days || 3);
@@ -543,8 +612,9 @@ async function localGreeting() {
   const n = state.failures.length;
   const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
   // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
-  if (first) return `${part}${day}${wx} All systems online.${open}`;
-  return `${wx || open ? '' : 'At your service, sir.'}${wx}${open}`.trim() || 'At your service, sir.';
+  const ctx = contextNote();
+  if (first) return `${part}${day}${wx} All systems online.${ctx}${open}`;
+  return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${ctx}${open}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled') {
   if (reason === 'wake') { broadcast({ type: 'say', text: await localGreeting(), speak: true }); return; }

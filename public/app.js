@@ -494,10 +494,19 @@
     if (!text) return;
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
     stopSpeaking(false);
-    send({ type: 'ask', text });
     setState('thinking');
     startFillers();
+    sendLocation(() => send({ type: 'ask', text }));
   }
+
+  // Fresh phone position (cached up to 2 min, never waits more than 1.2s) so places and weather follow him.
+  function sendLocation(then) {
+    let done = false; const fin = () => { if (done) return; done = true; then && then(); };
+    if (!navigator.geolocation) return fin();
+    setTimeout(fin, 1300);
+    navigator.geolocation.getCurrentPosition(p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); fin(); }, fin, { timeout: 1200, maximumAge: 120000 });
+  }
+  setInterval(() => { if (booted) sendLocation(); }, 600000);
 
   // ======================= controls =======================
   $('#cmd').addEventListener('submit', e => {

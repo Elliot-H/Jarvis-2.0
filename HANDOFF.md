@@ -104,3 +104,9 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 - App asks the browser for location on open (one-time permission) and sends `{type:'location',lat,lon}` before `wake`. Server keeps it in `state.location` (+ timezone). Moving >~35 miles resets the weather memory, so the new place is reported fresh. Greeting date/time uses the phone's timezone.
 - Units: F/mph for US timezones, otherwise C/km/h. `WEATHER_LAT/LON` are only the fallback if location is never granted.
 - New `weather` tool (tools.js PHONE_TOOLS, `handlers.weather`): now + up to 7-day forecast at the phone's location. Persona has a Weather section.
+
+## Places + random contextual reminders (server.js "places & random contextual reminders")
+- Places: `place_save` stores the phone's current position under a name (radius default 150 m; "home" gets kind home). `state.places`, matched by distance to `state.location` (must be under 6h old). App sends location on open, before every command, and every 10 min.
+- Arrival remark ("I see you're at Brenda's this morning, sir.") only when the place differs from `state.lastPlace`; nothing for home.
+- Reminder bucket `state.reminders` {id,text,place,time(morning|afternoon|evening|night),days,chance%,cooldownHours,lastShown}; tools reminder_add/list/remove. `pickReminder()` filters by triggers + cooldown, then rolls chance; max one per check. Checked on app open (appended to greeting) and every 25 min while the app is open (35% roll, only when idle, spoken). Seeded once with the dogs-food reminder (home, morning, 45%).
+- Not built: notifications when the app is closed (a web app cannot see location in the background).

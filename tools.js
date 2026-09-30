@@ -64,6 +64,11 @@ export const PHONE_TOOLS = [
     description: 'Send a short notification to the Owner\'s phone (through the ntfy app). Use when he asks for a test alert or asks you to notify or ping his phone. Keep the message under 200 characters.',
     shape: { title: z.string().describe('a few words'), message: z.string() }
   },
+  { name: 'place_save', description: 'Save the Owner\'s current phone location as a named place (e.g. "home", "Brenda\'s", "the shop"). Use when he says "this is home", "I\'m at Brenda\'s, remember this place". home=true for his home.', shape: { name: z.string(), radius_m: z.number().optional(), home: z.boolean().optional() } },
+  { name: 'place_list', description: 'List saved places and whether he is at one now.', shape: {} },
+  { name: 'reminder_add', description: 'Add a reminder to the random contextual bucket. It shows up at random (chance % per check, with a cooldown) when its triggers fit: place (saved place name), time (morning|afternoon|evening|night), days (weekdays|weekends). Write text as Jarvis would say it to the Owner.', shape: { text: z.string(), place: z.string().optional(), time: z.enum(['morning', 'afternoon', 'evening', 'night']).optional(), days: z.enum(['weekdays', 'weekends']).optional(), chance: z.number().optional(), cooldown_hours: z.number().optional() } },
+  { name: 'reminder_list', description: 'List the reminders in the bucket with their ids.', shape: {} },
+  { name: 'reminder_remove', description: 'Remove a reminder by id.', shape: { id: z.string() } },
   {
     name: 'weather',
     description: 'Current weather and forecast at the Owner\'s phone location (wherever he is, any country). Use for any weather, forecast, rain, temperature or "do I need a jacket" question. days = 1-7 (default 3).',
