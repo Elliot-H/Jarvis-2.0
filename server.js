@@ -405,6 +405,7 @@ Object.assign(handlers, {
   calendar_events: async a => {
     try {
       const r = await cal.list(a, state.calendarColors);
+      console.log(`calendar_events asked ${JSON.stringify(a)} -> ${r.from}..${r.to}, ${r.count} events`);
       const by = {};
       for (const e of r.events) { const k = e.meaning || `${e.color} (no meaning saved yet)`; by[k] = (by[k] || 0) + 1; }
       return JSON.stringify({ ...r, countsByMeaning: by });
@@ -672,6 +673,8 @@ app.get('/api/calendar-check', async (_req, res) => {
     `That ID works: ${r.idWorks === null ? 'not tested' : r.idWorks ? 'YES' : 'NO - ' + r.idError}`, '',
     `Calendars the robot can see (${r.visibleCalendars.length}):`,
     ...r.visibleCalendars.map(c => `  - ${c.name}  |  id: ${c.id}  |  access: ${c.access}`),
+    ...(r.eventsFound !== undefined ? ['', `Jarvis's clock says now: ${r.today} (${process.env.TZ || 'America/New_York'})`, `Events the robot sees from 14 days ago to 30 days ahead: ${r.eventsFound}`, ...(r.sample || []).map(x => '  ' + x)] : []),
+    ...(r.eventsError ? ['', 'Event listing failed: ' + r.eventsError] : []),
     ...(r.problem ? ['', 'PROBLEM: ' + r.problem] : [])
   ];
   res.type('text/plain').send(lines.join('\n'));

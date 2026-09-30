@@ -196,6 +196,18 @@ export async function check() {
   if (out.configuredId) {
     try { await call('GET', '/events?maxResults=1'); out.idWorks = true; } catch (e) { out.idWorks = false; out.idError = e.message; }
   }
+  if (out.idWorks) {
+    try {
+      const now = Date.now(), day = 86_400_000;
+      const q = new URLSearchParams({ timeMin: new Date(now - 14 * day).toISOString(), timeMax: new Date(now + 30 * day).toISOString(), singleEvents: 'true', orderBy: 'startTime', maxResults: '250', timeZone: TZ() });
+      const j = await call('GET', `/events?${q}`);
+      const ev = (j.items || []).filter(e => e.status !== 'cancelled');
+      out.eventsFound = ev.length;
+      out.timeZoneOfCalendar = j.timeZone;
+      out.sample = ev.slice(-12).map(e => `${String(e.start?.dateTime || e.start?.date).slice(0, 16)} | ${colorName(e.colorId)} | ${e.summary || '(no title)'}`);
+      out.today = new Date().toLocaleString('en-US', { timeZone: TZ() });
+    } catch (e) { out.eventsError = e.message; }
+  }
   if (!out.problem && out.idWorks === false && !out.visibleCalendars.length) out.problem = 'The robot account cannot see any calendar. The share to its email did not save, or went to a different email. Share the calendar with exactly: ' + out.robotEmail;
   return out;
 }
