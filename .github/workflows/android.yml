@@ -22,7 +22,7 @@ jobs:
         run: set -o pipefail; gradle -p android assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
       - name: Show errors
         if: failure()
-        run: echo "::error::$(grep -E 'error:|wrong|FAILED|Exception|Caused by|not found|Could not' build.log | head -25 | cut -c1-300 | sed ':a;N;$!ba;s/\n/%0A/g')"
+        run: echo "::error::$(grep -E 'error:|wrong|FAILED|Exception|Caused by|not found|Could not|build.gradle|jarvis' build.log | head -30 | cut -c1-300 | sed ':a;N;$!ba;s/\n/%0A/g')"
       - run: cp android/app/build/outputs/apk/release/app-release.apk jarvis.apk
       - uses: softprops/action-gh-release@v2
         with:
