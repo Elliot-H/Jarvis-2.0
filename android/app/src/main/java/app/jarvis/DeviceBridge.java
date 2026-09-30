@@ -43,6 +43,7 @@ public class DeviceBridge {
       String action = o.optString("action");
       if ("open_app".equals(action)) openApp(id, o.optString("package"));
       else if ("bt_connect".equals(action)) btConnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBT"));
+      else if ("bt_disconnect".equals(action)) btDisconnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBTOff"), o.optBoolean("off", true));
       else if ("bt_paired".equals(action)) btPaired(id);
       else if ("spotify_resume".equals(action)) spotifyResume(id);
       else if ("spotify_search".equals(action)) spotifySearch(id, o.optString("query"), o.optString("kind"));
@@ -107,6 +108,44 @@ public class DeviceBridge {
             }
             if (System.currentTimeMillis() > deadline) { reply(id, false, "The speaker did not connect. " + taskerReport(name, task)); return; }
             ui.postDelayed(poll[0], 1500);
+          }
+          @Override public void onServiceDisconnected(int profile) {}
+        }, BluetoothProfile.A2DP);
+      } catch (SecurityException e) { reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); }
+    };
+    poll[0].run();
+  }
+
+  /** Hand the disconnect (and optionally Bluetooth-off) to Tasker, then watch until it has really happened. */
+  private void btDisconnect(final String id, final String name, final String task, final boolean off) {
+    final BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+    final BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+    if (ad == null) { reply(id, false, "This phone has no Bluetooth."); return; }
+    final long deadline = System.currentTimeMillis() + 18000;
+    final boolean[] sent = {false};
+    final Runnable[] poll = new Runnable[1];
+    poll[0] = () -> {
+      try {
+        if (!ad.isEnabled()) { reply(id, true, "Bluetooth is off"); return; }
+        ad.getProfileProxy(ctx, new BluetoothProfile.ServiceListener() {
+          @Override public void onServiceConnected(int profile, BluetoothProfile p) {
+            boolean still = false;
+            try { for (BluetoothDevice d : p.getConnectedDevices()) { String n = d.getName(); if (n != null && n.toLowerCase().contains(name.toLowerCase())) still = true; } }
+            catch (SecurityException e) { ad.closeProfileProxy(profile, p); reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); return; }
+            ad.closeProfileProxy(profile, p);
+            if (!sent[0]) {
+              sent[0] = true;
+              if (!still && !off) { reply(id, true, "already disconnected"); return; }
+              for (String pkg : new String[]{"net.dinglisch.android.taskerm", "net.dinglisch.android.tasker"}) {
+                Intent t = new Intent("net.dinglisch.android.tasker.ACTION_TASK");
+                t.setPackage(pkg);
+                t.putExtra("version_number", "1.0");
+                t.putExtra("task_name", task);
+                ctx.sendBroadcast(t);
+              }
+            } else if (!still && !off) { reply(id, true, "disconnected"); return; }
+            if (System.currentTimeMillis() > deadline) { reply(id, false, "It did not finish. Check that Tasker has a task named " + task + " (Bluetooth Connection: Disconnect, then Net > Bluetooth Off). Still connected: " + still + "."); return; }
+            ui.postDelayed(poll[0], 1200);
           }
           @Override public void onServiceDisconnected(int profile) {}
         }, BluetoothProfile.A2DP);

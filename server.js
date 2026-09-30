@@ -1266,6 +1266,15 @@ handlers.speaker_save = async ({ name, alias, area, volume }) => {
 };
 handlers.speaker_list = async () => state.speakers.length ? state.speakers.map(x => `${x.alias} = Bluetooth "${x.name}"${x.area ? ', area ' + x.area : ''}, volume ${x.volume ?? DEFAULT_VOLUME}%`).join('\n') : 'No speakers taught yet (default: Rockville).';
 handlers.speaker_remove = async ({ alias }) => { const n = state.speakers.length; state.speakers = state.speakers.filter(x => norm(x.alias) !== norm(alias) && norm(x.name) !== norm(alias)); saveState(); return n === state.speakers.length ? 'No such speaker.' : 'Removed.'; };
+handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
+  const sp = pickSpeaker(device) || state.speakers[0] || { name: process.env.BT_SPEAKER_NAME || 'Rockville' };
+  await deviceAction('media_key', { key: 'pause' }, 4000);   // stop the music first so it does not jump to the phone speaker
+  const off = !leave_bluetooth_on;
+  const task = off ? (process.env.TASKER_BT_OFF_TASK || 'JarvisBTOff') : (process.env.TASKER_BT_DISCONNECT_TASK || 'JarvisBTDisconnect');
+  const c = await deviceAction('bt_disconnect', { name: sp.name, task, off }, 25000);
+  broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
+  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. The music is paused. Tell the Owner.` : `Could not finish: ${c.detail}`;
+};
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
 // Without the Spotify Web API (Spotify limits who can create developer apps), the Android app drives the Spotify app directly.
