@@ -310,8 +310,7 @@
     if (DISPLAY_ONLY || !booted || speaking || filler.cur) return;
     const url = pickFiller(kind); if (!url) return;
     const a = new Audio(url); filler.cur = a;
-    filler.wasListening = recWanted; pauseListening();
-    const end = () => { if (filler.cur !== a) return; filler.cur = null; if (state === 'thinking' && filler.wasListening) resumeListening(); };
+    const end = () => { if (filler.cur !== a) return; filler.cur = null; };
     a.onended = end; a.onerror = end;
     a.play().catch(end);
   }
@@ -334,8 +333,8 @@
       filler.timer = setTimeout(function again() {
         if (state !== 'thinking') return;
         playFiller('still');
-        filler.timer = setTimeout(again, 16000);
-      }, 11000);
+        filler.timer = setTimeout(again, 25000);
+      }, 26000);
     };
     prog();
   }
