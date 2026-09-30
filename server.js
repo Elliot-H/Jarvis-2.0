@@ -1025,6 +1025,34 @@ app.get('/api/filler/:kind/:group/:n.mp3', async (req, res) => {
   } catch { res.status(500).end(); }
 });
 
+// Instant acknowledgement that repeats the gist of what he just said ("Connecting the speaker and getting your tunes going, sir.").
+// A tiny, cheap model call plus the JARVIS voice; the page plays it while the real answer is still being worked out.
+let ackDay = '', ackCount = 0;
+app.post('/api/ack', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!text || !process.env.FISH_API_KEY || !TALK.apiKey || overBudget('talk')) return res.status(204).end();
+    const day = new Date().toISOString().slice(0, 10);
+    if (ackDay !== day) { ackDay = day; ackCount = 0; }
+    if (++ackCount > Number(process.env.ACK_DAILY_MAX || 400)) return res.status(204).end();
+    const t = process.env.USER_TITLE || 'sir';
+    const r = await talk({
+      cfg: { ...TALK, model: process.env.ACK_MODEL || talkModel(), reasoning: 'none' },
+      system: `You are JARVIS. The Owner has just made a request and you are about to start on it. Say ONE short spoken acknowledgement, 6 to 14 words, that repeats the gist of what he asked in your own words, in a calm British butler tone, ending with "${t}" where it fits. Examples: "Connecting the speaker and getting your tunes going, ${t}." / "Checking tomorrow's forecast for Harrington now." / "Looking up Kicker twelve inch subs for you, ${t}." Rules: do not answer the request, do not state results, do not promise an outcome, do not ask a question, no links, plain words only. If the message is only chit-chat or a thank-you, reply with exactly: NONE`,
+      prompt: text, tools: [], webSearch: false, maxTokens: 60, budgetUsd: 0.01, maxRounds: 1,
+      run: async () => 'Done.'
+    });
+    addSpend(r.cost, 'talk');
+    const line = String(r.text || '').replace(/["\n]/g, ' ').trim();
+    if (r.error || !line || /^none\b/i.test(line) || line.split(/\s+/).length > 22) return res.status(204).end();
+    const out = await fishFetch(line);
+    if (!out.r) return res.status(502).end();
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Ack-Text', encodeURIComponent(line));
+    res.type('audio/mpeg').send(Buffer.from(await out.r.arrayBuffer()));
+  } catch { res.status(500).end(); }
+});
+
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   const text = String(req.body?.text || req.query?.text || '').slice(0, 2500);

@@ -383,15 +383,36 @@
     setTimeout(end, 7000);
     a.play().catch(end);
   }
+  // Spoken acknowledgement that repeats what he asked. Falls back to a topic line if it is slow or unavailable.
+  let ackSeq = 0;
+  async function playAck(text, group) {
+    const my = ++ackSeq;
+    const fallback = () => { if (my === ackSeq && state === 'thinking' && group) playFiller('ack', group); };
+    try {
+      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 3500);
+      const r = await fetch('/api/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: ctl.signal });
+      clearTimeout(to);
+      if (r.status !== 200) return fallback();
+      const blob = await r.blob(); if (blob.size < 500) return fallback();
+      if (my !== ackSeq || state !== 'thinking' || speaking || filler.cur) return;   // the real answer beat it
+      const a = new Audio(URL.createObjectURL(blob)); filler.cur = a; filler.curAt = Date.now();
+      const end = () => { if (filler.cur === a) filler.cur = null; };
+      a.onended = end; a.onerror = end; a.onpause = end; setTimeout(end, 9000);
+      a.play().catch(end);
+    } catch { fallback(); }
+  }
   function stopFillers() {
+    ackSeq++;
     clearTimeout(filler.timer); filler.timer = null;
   }
   function startFillers(text) {
     stopFillers();
     const g = fillerTopic(text);
-    addActivity('Filler: ' + (g || 'none (chit-chat)'));
-    if (!g) return;                                   // just chatting: no filler lines
-    playFiller('ack', g);
+    const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+    const wantAck = !DISPLAY_ONLY && booted && (g || (REQUEST.test(text) || (words > 3 && !CHAT.test(text))));
+    addActivity('Ack: ' + (wantAck ? 'echoing your request' : 'none (chit-chat)'));
+    if (wantAck) playAck(text, g);
+    if (!g) return;                                   // no topic: no progress lines either
     // ~4s after the ack: a progress line that fits the topic
     const prog = (tries = 0) => {
       filler.timer = setTimeout(() => {
