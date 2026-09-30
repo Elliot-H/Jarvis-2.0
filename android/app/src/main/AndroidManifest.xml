@@ -9,10 +9,13 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
   <queries>
     <intent><action android:name="android.speech.RecognitionService" /></intent>
     <package android:name="com.google.android.googlequicksearchbox" />
+    <package android:name="com.spotify.music" />
+    <package android:name="net.dinglisch.android.tasker" />
   </queries>
 
   <application

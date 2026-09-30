@@ -14,8 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS } from './tools.js';
 import * as cal from './calendar.js';
+import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
@@ -67,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
+const BACKUP_KEYS = ['spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -439,7 +440,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -582,7 +583,7 @@ if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
 // While the app is open, now and then, a reminder can come up on its own (only when Jarvis is idle).
 if (!process.env.JARVIS_SMOKE) setInterval(() => {
   if (busy || !clients.size || Math.random() > .35) return;
-  const r = pickReminder(); if (r) broadcast({ type: 'say', text: r.text, speak: true });
+  const r = pickReminder(); if (r) { remember('jarvis', r.text); broadcast({ type: 'say', text: r.text, speak: true }); }
 }, 25 * 60_000);
 
 handlers.weather = async ({ days } = {}) => {
@@ -633,7 +634,7 @@ async function localGreeting(memo) {
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${ctx}${open}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
-  if (reason === 'wake') { const text = await localGreeting(memo); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
+  if (reason === 'wake') { const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
@@ -1069,15 +1070,94 @@ wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
-  ws.on('close', () => clients.delete(ws));
+  ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'restore' && msg.data && Number(msg.data.stamp) > (state.backupStamp || 0)) {
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
-      state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
+      state.backupStamp = Number(msg.data.stamp); // ---------- music: Spotify + the phone (Android app) ----------
+// Device actions go to the Android app over the websocket (open Spotify, connect the Bluetooth speaker through Tasker)
+// and the app reports back, so Jarvis only says "connected" when it really is.
+const deviceClients = new Set(); const devWait = new Map();
+function deviceAction(action, args = {}, timeout = 20000) {
+  if (!deviceClients.size) return Promise.resolve({ ok: false, detail: 'The Jarvis Android app is not open on the phone, so I cannot reach the phone itself.' });
+  const id = Math.random().toString(36).slice(2, 9);
+  return new Promise(res => {
+    const t = setTimeout(() => { devWait.delete(id); res({ ok: false, detail: 'The phone did not answer in time.' }); }, timeout);
+    devWait.set(id, r => { clearTimeout(t); res(r); });
+    for (const c of deviceClients) if (c.readyState === 1) c.send(JSON.stringify({ type: 'device', id, action, ...args }));
+  });
+}
+const spoRef = () => state.spotifyRefresh || process.env.SPOTIFY_REFRESH_TOKEN || '';
+const spoFail = e => String(e.message || e) === 'NO_DEVICE'
+  ? 'Spotify has no player to use. Spotify must be open on the phone.'
+  : 'Spotify problem: ' + String(e.message || e);
+async function spotifyReady() {
+  const r = spoRef(); const dev = await spo.pickDevice(r, 0);
+  if (dev) return dev;
+  const opened = await deviceAction('open_app', { package: 'com.spotify.music' }, 8000);
+  const d2 = await spo.pickDevice(r, 15000);
+  if (!d2) throw new Error(opened.ok ? 'NO_DEVICE' : opened.detail);
+  return d2;
+}
+handlers.music_control = async ({ action, query, kind, volume }) => {
+  if (!spo.configured()) return 'Spotify is not set up yet: SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are missing in Railway.';
+  if (!spoRef()) return 'Spotify is not approved yet. The Owner must open /api/spotify/login on his phone once.';
+  const r = spoRef();
+  try {
+    if (action === 'status') { const st = await spo.status(r); return st ? `${st.playing ? 'Playing' : 'Paused'}: ${st.track} by ${st.artists} on ${st.device} (volume ${st.volume}%).` : 'Nothing is playing.'; }
+    if (action === 'pause') { await spo.pause(r); return 'Paused.'; }
+    if (action === 'next') { await spo.next(r); return 'Skipped to the next track.'; }
+    if (action === 'previous') { await spo.previous(r); return 'Back to the previous track.'; }
+    if (action === 'volume') { await spo.volume(r, Number(volume)); return `Volume set to ${volume}%.`; }
+    const notes = [];
+    if (action === 'start') { // connect the speaker first (if the Owner has it set up), then his latest playlist
+      const name = process.env.BT_SPEAKER_NAME || 'Rockville';
+      const c = await deviceAction('bt_connect', { name, task: process.env.TASKER_BT_TASK || 'JarvisBT' }, 25000);
+      notes.push(c.ok ? `Speaker connected (${c.detail}).` : `Could not confirm the speaker: ${c.detail}`);
+    }
+    const dev = await spotifyReady();
+    if (action === 'resume' && !query) { await spo.play(r, { deviceId: dev.id }); return 'Playing again.'; }
+    if (action === 'start' || (action === 'play' && !query)) {
+      const pl = await spo.latestPlaylist(r);
+      if (!pl) return notes.concat('I could not find a recent playlist.').join(' ');
+      await spo.play(r, { uri: pl.uri, context: true, deviceId: dev.id });
+      return notes.concat(`Playing your latest playlist, ${pl.name}, on ${dev.name}.`).join(' ');
+    }
+    if (action === 'play') {
+      const hit = await spo.find(r, query, kind || 'track');
+      if (!hit) return `Nothing on Spotify matched "${query}".`;
+      await spo.play(r, { uri: hit.uri, context: hit.context, deviceId: dev.id });
+      return `Playing ${hit.name} on ${dev.name}.`;
+    }
+    return 'Unknown music action.';
+  } catch (e) { return spoFail(e); }
+};
+const spoRedirect = req => `${process.env.PUBLIC_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`}/api/spotify/callback`;
+app.get('/api/spotify/login', (req, res) => {
+  if (!spo.configured()) return res.status(503).type('text/plain').send('Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in Railway first.');
+  res.redirect(spo.authUrl(spoRedirect(req), 'jarvis'));
+});
+app.get('/api/spotify/callback', async (req, res) => {
+  try {
+    if (!req.query.code) return res.status(400).type('text/plain').send('Spotify sent no code: ' + (req.query.error || 'cancelled'));
+    state.spotifyRefresh = await spo.exchange(String(req.query.code), spoRedirect(req));
+    saveState();
+    res.type('html').send('<meta name=viewport content="width=device-width"><body style="background:#03090d;color:#3fe0ff;font:20px sans-serif;padding:30px"><h2>Spotify connected.</h2><p>You can close this and tell Jarvis to play something.</p>');
+  } catch (e) { res.status(500).type('text/plain').send(String(e.message || e)); }
+});
+app.get('/api/spotify/status', async (req, res) => {
+  res.type('text/plain').send(!spo.configured() ? 'Not set up: missing SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET in Railway.'
+    : !spoRef() ? 'Set up but not approved yet. Open /api/spotify/login on the phone.'
+    : await spo.devices(spoRef()).then(d => 'Connected. Players: ' + (d.map(x => `${x.name} (${x.type}${x.is_active ? ', active' : ''})`).join(', ') || 'none open right now.')).catch(e => spoFail(e)));
+});
+
+lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
       console.log('  restored memory from the phone backup');
     }
+    if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
+    if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
     if (msg.type === 'ask' && msg.text?.trim()) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;

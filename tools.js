@@ -128,3 +128,16 @@ export function toFunctionTool({ name, description, shape }) {
   delete schema.$schema;
   return { type: 'function', function: { name, description, parameters: schema } };
 }
+
+export const MUSIC_TOOLS = [
+  {
+    name: 'music_control',
+    description: 'Control the Owner\'s Spotify and speaker. action: "start" = connect the Bluetooth speaker AND play his most recent playlist (use for "let\'s get some tunes going", "put some music on", or when he says yes to your offer of background music); "play" (with query: song/artist/album/playlist name, and kind) or without query = latest playlist; "pause"; "resume"; "next"; "previous"; "volume" (0-100); "status" (what is playing). Only report success if the result says so.',
+    shape: {
+      action: z.enum(['start', 'play', 'pause', 'resume', 'next', 'previous', 'volume', 'status']),
+      query: z.string().optional(),
+      kind: z.enum(['track', 'artist', 'album', 'playlist']).optional(),
+      volume: z.number().optional()
+    }
+  }
+];

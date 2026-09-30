@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
 
     stt = new SttBridge(this, web);
     web.addJavascriptInterface(stt, "AndroidSTT");
+    web.addJavascriptInterface(new DeviceBridge(this, web), "AndroidDevice");
 
     final String origin = BuildConfig.BASE_URL;
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) && !shim.isEmpty()) {
@@ -101,7 +102,9 @@ public class MainActivity extends Activity {
   private void askPermissions() {
     java.util.ArrayList<String> need = new java.util.ArrayList<>();
     String[] all = Build.VERSION.SDK_INT >= 33
-        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.POST_NOTIFICATIONS}
+        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.BLUETOOTH_CONNECT}
+        : Build.VERSION.SDK_INT >= 31
+        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.BLUETOOTH_CONNECT}
         : new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION};
     for (String p : all) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
     if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ);
@@ -125,6 +128,7 @@ public class MainActivity extends Activity {
   @Override protected void onNewIntent(Intent i) {
     super.onNewIntent(i);
     setIntent(i);
+    if (i.getBooleanExtra("silent", false)) return; // returning from another app: do not start listening
     if (web != null) web.evaluateJavascript("window.__jarvisWake&&window.__jarvisWake()", null);
   }
 

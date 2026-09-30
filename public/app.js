@@ -45,7 +45,7 @@
   // ======================= websocket =======================
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-    ws.onopen = () => { try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); if (state === 'offline') setState('idle', { echo: false }); };
+    ws.onopen = () => { if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); if (state === 'offline') setState('idle', { echo: false }); };
     ws.onclose = () => { chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); setTimeout(connect, 2000); };
     ws.onmessage = e => handle(JSON.parse(e.data));
   }
@@ -64,6 +64,9 @@
         break;
       case 'log': addLog(m.role === 'user' ? 'user' : 'system', m.text); break;
       case 'activity': addActivity(m.text); ticker(m.text); break;
+      case 'device':
+        if (window.AndroidDevice) { try { window.AndroidDevice.run(JSON.stringify(m)); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); } }
+        break;
       case 'backup': try { localStorage.setItem('jarvis.backup', JSON.stringify(m.data)); } catch {} break;
       case 'say':
         if (m.memo) saveMemo(m.memo);
@@ -282,6 +285,9 @@
     fakeLevel = false;
     if (speaking) { speaking = false; if (resume) { setState('idle'); resumeListening(); } }
   }
+
+  // The Android app reports back how a phone action went (connect speaker, open Spotify).
+  window.__deviceResult = (id, ok, detail) => send({ type: 'device_result', id, ok, detail });
 
   // What the greeting needs to remember lives on the phone (the server's disk is wiped on every deploy).
   function readMemo() { try { return JSON.parse(localStorage.getItem('jarvis.memo') || 'null') || {}; } catch { return {}; } }
