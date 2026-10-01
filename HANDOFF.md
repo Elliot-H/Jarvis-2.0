@@ -196,3 +196,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Voice-first replies (2026-10-01)
 - Owner is often voice-only. Spoken replies must carry the key numbers themselves and never say "on screen" / "on the HUD" unless he asks about the screen. HUD panels still get the detail. Rule lives in config/persona.md (Style) plus the guide strings in crypto.js, news.js, chart.js.
+
+## Market outlook (2026-10-01)
+- `outlook.js` + tool `market_outlook` (tools.js OUTLOOK_TOOLS, server.js handler, persona "Market outlook"). Reuses chart.read for 1w/1d/1h, adds frame `1d5y` in chart.js. `tagsAt()` detects setups on the last bar; `backtestSetups()` replays them over 5y daily (5-bar forward, non-overlapping) giving samples, win rate, avg move, avg drawdown. Only setups with 8+ samples, 55%+ win and positive avg move count toward the score/are presented. Score -100..100 -> bias (+-25), confidence capped 80 technical-only; `newsWeighting` tells the brain to adjust via ticker_news. Server-side only, no APK reinstall. Synthetic-candle tested only; Yahoo blocked from the build sandbox.

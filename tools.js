@@ -146,6 +146,10 @@ export const CHART_TOOLS = [
   { name: 'chart_read', description: 'Read a price chart for a stock (TSLA) or crypto (BTC, ETH): candlesticks, trend, moving averages, RSI, MACD, Bollinger, volume, support and resistance, breakouts and candle patterns, for a timeframe (5m, 15m, 1h, 1d default, 1w, 1mo). Use for "how does the chart look", "is TSLA breaking out", "where is support". Compare two timeframes when asked about short vs long term. Analysis only.', shape: { symbol: z.string(), timeframe: z.enum(['5m', '15m', '1h', '1d', '1w', '1mo']).optional() } }
 ];
 
+export const OUTLOOK_TOOLS = [
+  { name: 'market_outlook', description: 'Full predictive-style read of a stock or crypto: weekly + daily + hourly alignment, pattern and indicator signals, a back-test of every setup currently firing on THAT ticker\'s own 5-year history (win rate, average move, average drawdown, sample size; only setups with real history are presented), directional bias with confidence %, ATR stop/target, support/resistance, and what would invalidate it. Use for "what\'s your read on TSLA", "should I expect it up", "how reliable is this setup". Then call ticker_news and fold the catalyst into the confidence. Odds, not predictions; never promise returns; not advice; never trade from it alone.', shape: { symbol: z.string() } }
+];
+
 export const NEWS_TOOLS = [
   { name: 'ticker_news', description: 'Recent news for one stock or coin: top 3-5 headlines (filings, earnings, partnerships, listings, upgrades/downgrades, regulatory) with source and date, plus a one-line note on what it means for price. Returns a search plan: web-search it, then show_panel id "ticker_news". Call it for every symbol you name from signal_scan, chart_read or crypto_scan, and say whether the move has a confirmed catalyst or looks purely technical.', shape: { symbol: z.string(), kind: z.enum(['stock', 'crypto']).optional().describe('auto-detected if omitted') } }
 ];

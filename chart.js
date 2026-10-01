@@ -2,7 +2,7 @@
 // support/resistance, volume, candle patterns. Returns facts; the brain explains them. Analysis only, never trades.
 const FRAMES = {
   '5m': { interval: '5m', range: '5d' }, '15m': { interval: '15m', range: '5d' }, '1h': { interval: '60m', range: '1mo' },
-  '1d': { interval: '1d', range: '6mo' }, '1dlong': { interval: '1d', range: '2y' }, '1w': { interval: '1wk', range: '2y' }, '1mo': { interval: '1mo', range: '10y' }
+  '1d': { interval: '1d', range: '6mo' }, '1dlong': { interval: '1d', range: '2y' }, '1d5y': { interval: '1d', range: '5y' }, '1w': { interval: '1wk', range: '2y' }, '1mo': { interval: '1mo', range: '10y' }
 };
 const CRYPTO = { BTC: 1, ETH: 1, SOL: 1, DOGE: 1, XRP: 1, ADA: 1, AVAX: 1, LINK: 1, LTC: 1, DOT: 1, BNB: 1, SHIB: 1, MATIC: 1 };
 const r2 = v => (v == null || !Number.isFinite(v) ? null : Math.abs(v) >= 1 ? Number(v.toFixed(2)) : Number(v.toPrecision(3)));
