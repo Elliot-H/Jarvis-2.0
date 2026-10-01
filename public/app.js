@@ -749,9 +749,9 @@
     let done = false; const fin = () => { if (done) return; done = true; then && then(); };
     if (!navigator.geolocation) return fin();
     setTimeout(fin, 1300);
-    navigator.geolocation.getCurrentPosition(p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); fin(); }, fin, { timeout: 1200, maximumAge: 120000 });
+    navigator.geolocation.getCurrentPosition(p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); fin(); }, fin, { timeout: 1200, maximumAge: 30000 });
   }
-  setInterval(() => { if (booted) sendLocation(); }, 600000);
+  setInterval(() => { if (booted) sendLocation(); }, 60000); // once a minute so arrive/leave is noticed with the app open
 
   // ======================= controls =======================
   $('#cmd').addEventListener('submit', e => {

@@ -668,7 +668,7 @@ handlers.place_save = async ({ name, radius_m, home }) => {
   state.lastPlace = key; saveState();
   return `Saved "${name}" at his current position (within ${radius} m).`;
 };
-handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now.` : '. He is not at any saved place now.') : 'No places saved yet.';
+handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now (last phone position ${Math.round((Date.now() - Date.parse(state.location.at)) / 60000)} min ago).` : '. He is not at any saved place now.') : 'No places saved yet.';
 handlers.reminder_add = async a => {
   const id = Math.random().toString(36).slice(2, 7);
   state.reminders.push(cleanItem({ ...a, id }));
@@ -831,18 +831,19 @@ function onMove() {
       const other = state.places.find(p => p.name !== prev.name && bringFor(p.name).length);
       if (other) parts.push(bringLine(other.name));
     }
+    if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
   }
   if (pl) { // arrived somewhere
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
     const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
-    if (firstToday && pl.kind !== 'home' && !parts.length) parts.push(`Welcome to ${pl.name}, sir.`);
     parts.push(...eventLines('arrive', pl.name));
+    if (!parts.length) parts.push(pl.kind === 'home' ? 'Welcome home, sir.' : firstToday ? `Welcome to ${pl.name}, sir.` : `Arrived at ${pl.name}, sir.`); // always one short line on an arrival
   }
   saveState();
   const text = parts.filter(Boolean).join(' ');
-  if (text && (remarkAllowed() || parts.some(t => /bring|remembered|grab/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
+  if (text && (!quietNow() || parts.some(t => /bring|remembered|grab/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
 }
 // Yes / no to "Headed home, sir?"
 async function destAnswer(q, text) {

@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-01T14:25:36Z
-REQUEST: Investment Watch: continuous near-instant monitoring, phone alerts, real broker stop-loss orders, tellable interval.
+STATUS: done
+TIME: 2026-10-01T15:26:29Z
+REQUEST: Fix comings and goings detection (arrive/leave remarks not spoken, stuck at Home)
 RESULT:
-Owner, the watch is built. Jarvis now checks every position and watch-list ticker every 60 seconds, stocks during market hours and crypto around the clock, and alerts your phone on a stop hit or a sudden drop of 3 percent in 15 minutes. Ask him how often he monitors and he will give you the real number. It goes live when Railway redeploys, no APK reinstall. I could not add the real resting stop orders at Alpaca: the safety system blocked order-placing code in an unattended run. So right now Jarvis alerts you, but nothing sells automatically. Tell me in a normal session and I will build it with your confirm step. This is untested against live Alpaca prices.
+Found the cause, Owner. Jarvis only spoke on arriving or leaving when a reminder matched, so Home and other places with no reminders were silent. Now every arrival and departure gets one short line, except in quiet hours. With the app open, location is now sent every minute instead of every ten. This goes live when Railway redeploys, and no APK reinstall is needed. I could not test the phone's background reports from here, so if he still reads as at Home after leaving with the app closed, check that Jarvis has location permission and unrestricted battery.
