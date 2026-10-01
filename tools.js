@@ -206,9 +206,3 @@ export const MUSIC_TOOLS = [
   { name: 'led_color', description: 'Control the Owner\'s Bluetooth LED strip controller (SP63XE). color = a name ("red", "warm white", "purple", "teal") or hex "#ff8800"; brightness 0-100 optional; power "on"/"off" optional (off alone turns the strip off). Only report success if the result says so.', shape: { color: z.string().optional(), brightness: z.number().optional(), power: z.enum(['on', 'off']).optional() } },
   { name: 'bluetooth_connect', description: 'Connect a taught speaker without playing music. device = alias or area (omit to use the one for where he is). Sets its default volume (65% unless changed).', shape: { device: z.string().optional() } }
 ];
-
-export const MEMORY_TOOLS = [
-  { name: 'memory_save', description: 'Save a lasting fact about the Owner for future conversations: names (people, pets, places), relationships, preferences, details, decisions. One short plain sentence, e.g. "The Queen is his dog, a lab" or "Prefers brief answers". Call it whenever he tells you something worth remembering, without being asked; do not save passing chatter, secrets or passwords.', shape: { fact: z.string() } },
-  { name: 'memory_list', description: 'List everything you remember about the Owner, numbered.', shape: {} },
-  { name: 'memory_forget', description: 'Forget a remembered fact: pass its number from memory_list, or a word that appears in it.', shape: { which: z.string() } }
-];

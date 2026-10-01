@@ -14,11 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-<<<<<<< HEAD
 import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS } from './tools.js';
-=======
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MEMORY_TOOLS } from './tools.js';
->>>>>>> e6863b4 (Long-term memory: memory_save/list/forget, facts loaded into every chat)
 import * as news from './news.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
@@ -225,30 +221,6 @@ const memoryContext = () => state.memory.length
   : '';
 const failuresServer = createSdkMcpServer({ alwaysLoad: true, name: 'failures', version: '1.0.0', tools: sdkTools(FAILURE_TOOLS) });
 
-
-// ---------- long-term memory: facts the Owner tells Jarvis, kept across conversations (backed up to the phone) ----------
-state.memory ||= [];
-const MEMORY_MAX = 60;           // oldest facts are dropped past this, so the digest stays small and cheap
-const memoryBlock = () => state.memory.length ? `\n\n# What you remember about the Owner (from past conversations; use naturally, never recite)\n${state.memory.map(m => `- ${m.fact}`).join('\n')}` : '';
-Object.assign(handlers, {
-  memory_save: async ({ fact }) => {
-    fact = String(fact || '').trim().slice(0, 300); if (!fact) return 'Nothing to save.';
-    const k = s => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    const dup = state.memory.find(m => k(m.fact) === k(fact));
-    if (dup) { dup.at = Date.now(); saveState(); return 'Already remembered.'; }
-    state.memory.push({ fact, at: Date.now() });
-    if (state.memory.length > MEMORY_MAX) state.memory = state.memory.slice(-MEMORY_MAX);
-    saveState(); return `Remembered: ${fact}`;
-  },
-  memory_list: async () => state.memory.length ? state.memory.map((m, i) => `${i + 1}. ${m.fact}`).join('\n') : 'I have nothing saved yet.',
-  memory_forget: async ({ which }) => {
-    const w = String(which || '').trim(), n = /^\d+$/.test(w) ? +w - 1 : -1;
-    const before = state.memory.length;
-    state.memory = n >= 0 ? state.memory.filter((_, i) => i !== n) : state.memory.filter(m => !m.fact.toLowerCase().includes(w.toLowerCase()));
-    saveState(); return before === state.memory.length ? 'Nothing matched.' : 'Forgotten.';
-  }
-});
-
 function setPanel(id, panel) {
   if (panel) state.panels[id] = { id, ...panel, updatedAt: new Date().toISOString() };
   else delete state.panels[id];
@@ -365,11 +337,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
     .map(h => `${h.role === 'user' ? 'Owner' : 'You'}: ${h.text}`).join('\n');
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
-<<<<<<< HEAD
   const live = (clock + hud + failed + memoryContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
-=======
-  const live = (clock + hud + failed + memoryBlock() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
->>>>>>> e6863b4 (Long-term memory: memory_save/list/forget, facts loaded into every chat)
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
   const chatPrompt = chatSystemPrompt(persona);
 
@@ -570,11 +538,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-<<<<<<< HEAD
 const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS];
-=======
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MEMORY_TOOLS];
->>>>>>> e6863b4 (Long-term memory: memory_save/list/forget, facts loaded into every chat)
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
