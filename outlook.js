@@ -2,6 +2,8 @@
 // (win rate, average move, average drawdown, sample size on the ticker's own 5y daily history) -> directional bias,
 // confidence, ATR stop/target, invalidation. Odds, not predictions. Analysis only, never trades.
 import { bars, read, ySymbol, sma, emaSeries, rsi, atr } from './chart.js';
+import { premarket } from './premarket.js';
+import * as trade from './trade.js';
 
 const r2 = v => (v == null || !Number.isFinite(v) ? null : Math.abs(v) >= 1 ? Number(v.toFixed(2)) : Number(v.toPrecision(3)));
 const HORIZON = 5, MIN_SAMPLES = 8;
@@ -77,6 +79,7 @@ export async function outlook({ symbol } = {}) {
     read({ symbol: sym, timeframe: '1w' }).catch(() => null), read({ symbol: sym, timeframe: '1d' }),
     read({ symbol: sym, timeframe: '1h' }).catch(() => null), bars(sym, '1d5y')
   ]);
+  const pre = await premarket(sym).catch(e => ({ available: false, why: e.message }));
   const price = dy.price, at = atr(long), bt = backtestSetups(long);
   const brief = r => r && { trend: r.trend, rsi: r.momentum.rsi14, macd: r.momentum.macdRead };
   const tfs = { weekly: brief(wk), daily: brief(dy), hourly: brief(hr) };
@@ -101,6 +104,14 @@ export async function outlook({ symbol } = {}) {
       score += t.dir * Math.min(15, (h.winRatePct - 50) * 0.6);
     } else unproven.push(h ? `${t.name} (${h.samples} past cases, ${h.winRatePct}% win: not enough edge)` : `${t.name} (no history)`);
   }
+  // Pre-market: the gap sets direction, pre-market volume sets how much to trust it (heavy = stronger, thin = ignore and lower confidence).
+  let preAdj = 0;
+  if (pre.available) {
+    const gs = Math.sign(pre.gapPct) * Math.min(1, Math.abs(pre.gapPct) / 3), w = pre.conviction === 'heavy' ? 20 : pre.conviction === 'normal' ? 10 : 2;
+    score += gs * w + (pre.aboveVwap == null ? 0 : pre.aboveVwap ? 2 : -2);
+    why.push(`pre-market ${pre.gapKind} ${pre.gapPct}% on ${pre.conviction} volume`);
+    preAdj = pre.conviction === 'heavy' ? 8 : pre.conviction === 'thin' ? -10 : 0;
+  } else if (!pre.why?.includes('stocks only')) why.push('no pre-market data (no conviction read)');
   score = Math.max(-100, Math.min(100, Math.round(score)));
   const bias = score >= 25 ? 'bullish' : score <= -25 ? 'bearish' : 'neutral';
 
@@ -108,6 +119,7 @@ export async function outlook({ symbol } = {}) {
   if (dirs.length && (up === dirs.length || down === dirs.length)) conf += 10; else if (up && down) conf -= 10;
   const backed = setups.filter(s => s.bias === bias);
   if (bias !== 'neutral' && backed.length) conf += Math.min(10, backed[0].samples / 3); else conf -= 5;
+  conf += preAdj;
   conf = Math.round(Math.max(10, Math.min(80, conf))); // technicals alone are capped at 80
 
   // ATR levels (daily): 1.5 ATR stop, or just past the nearest structure level if it sits between 1 and 1.5 ATR away.
@@ -127,12 +139,13 @@ export async function outlook({ symbol } = {}) {
 
   return {
     symbol: sym, price, bias, score, confidencePct: conf, confidenceNote: 'technical-only, capped at 80; adjust with news per newsWeighting',
+    tradingMode: trade.configured() ? trade.mode() : 'no trading account linked', premarket: pre,
     timeframes: tfs, alignment, levels: dy.levels, plan, invalidation,
     setupsBackedByHistory: setups, setupsFiringButUnproven: unproven.length ? unproven : undefined,
     historyBasis: `${long.length} daily bars (~5y) of ${sym}; ${HORIZON}-bar forward results, min ${MIN_SAMPLES} samples, non-overlapping`,
     signalsUsed: why, candlePatternsNow: dy.candlePatterns, patternsNow: dy.patterns, volume: dy.volume,
     newsWeighting: 'Call ticker_news. Confirmed catalyst in the same direction: raise confidence by up to 10 (stay under 90). Catalyst against the bias: cut confidence by 15 and say the news conflicts. No catalyst: say it looks purely technical and keep the number. Never raise a bias on unconfirmed rumour.',
     newsStep: 'Call ticker_news for this symbol, then say whether the move has a confirmed catalyst or looks purely technical, and fold it into the confidence.',
-    guide: 'Speak: bias, confidence %, the historical hit rate for the setup on THIS ticker (win rate, average move, average drawdown, sample size; if none is backed say there is no proven setup), key support/resistance, ATR stop and target, and what would invalidate it. Short, numbers aloud, never "on screen". Odds, not predictions; never promise returns; not financial advice; never trade from a chart read alone (trade_propose is separate).'
+    guide: 'Speak: bias, confidence %, PAPER or LIVE (tradingMode), pre-market read if available (gap vs prior close in price and percent, pre-market volume vs usual and what it means for conviction: heavy = stronger, thin = say confidence is low; pre-market high, low, VWAP, prints if any), the historical hit rate for the setup on THIS ticker (win rate, average move, average drawdown, sample size; if none is backed say there is no proven setup), key support/resistance, ATR stop and target, and what would invalidate it. Short, numbers aloud, never "on screen". Odds, not predictions; never promise returns; not financial advice; never trade from a chart read alone (trade_propose is separate).'
   };
 }

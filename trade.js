@@ -82,3 +82,10 @@ export async function trending(n = 15) {
   const gain = (m.gainers || []).filter(ok), act = (a.most_actives || []).filter(ok);
   return { gainers: gain.map(x => x.symbol), active: act.map(x => x.symbol), all: [...new Set([...gain, ...act].map(x => x.symbol))] };
 }
+
+// Premarket prints (IEX feed, partial but real): used by premarket.js. Read-only.
+export async function stockTrades(symbol, startISO, endISO, limit = 1000) {
+  const s = normSymbol(symbol); if (!s || isCrypto(s)) throw new Error("Stocks only.");
+  const j = await api(DATA, `/v2/stocks/${s}/trades?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}&limit=${limit}&feed=iex`);
+  return (j.trades || []).map(t => ({ t: t.t, p: t.p, s: t.s }));
+}

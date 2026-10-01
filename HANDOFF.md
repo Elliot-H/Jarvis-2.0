@@ -199,3 +199,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Market outlook (2026-10-01)
 - `outlook.js` + tool `market_outlook` (tools.js OUTLOOK_TOOLS, server.js handler, persona "Market outlook"). Reuses chart.read for 1w/1d/1h, adds frame `1d5y` in chart.js. `tagsAt()` detects setups on the last bar; `backtestSetups()` replays them over 5y daily (5-bar forward, non-overlapping) giving samples, win rate, avg move, avg drawdown. Only setups with 8+ samples, 55%+ win and positive avg move count toward the score/are presented. Score -100..100 -> bias (+-25), confidence capped 80 technical-only; `newsWeighting` tells the brain to adjust via ticker_news. Server-side only, no APK reinstall. Synthetic-candle tested only; Yahoo blocked from the build sandbox.
+
+## Pre-market in outlook (2026-10-01)
+- `premarket.js` (Yahoo 5m bars incl. pre/post, 4:00-9:30 ET): gap vs prior regular close, pre-market high/low/VWAP, volume vs same-time average of earlier days (heavy >=1.5x, thin <0.5x or <20k sh), optional Alpaca IEX prints via `trade.stockTrades`. `outlook.js` adds gap x conviction weight to the score, confidence +8 heavy / -10 thin, and returns `premarket` + `tradingMode`. Stocks only; mocked-data test only (Yahoo blocked in sandbox). Server-side, no APK reinstall.
