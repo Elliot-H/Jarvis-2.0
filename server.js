@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS } from './tools.js';
+import * as news from './news.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
@@ -401,7 +402,7 @@ Object.assign(handlers, {
   crypto_scan: async ({ top } = {}) => {
     try {
       const r = await crypto_.scan({ top, watch: state.watchlist });
-      return `${JSON.stringify(r)}\n\n${crypto_.PLAYBOOK}`;
+      return `${JSON.stringify(r)}\n\n${crypto_.PLAYBOOK}\n\n${news.AUTO_NEWS}`;
     } catch (e) { return `Could not get market data: ${e.message}. Tell the Owner plainly and call note_failure.`; }
   },
   crypto_trending: async () => {
@@ -418,8 +419,15 @@ Object.assign(handlers, {
 });
 
 Object.assign(handlers, {
+  ticker_news: async ({ symbol, kind }) => {
+    const p = news.plan(symbol, kind);
+    return p ? JSON.stringify(p) : 'Which ticker or coin?';
+  }
+});
+
+Object.assign(handlers, {
   chart_read: async ({ symbol, timeframe }) => {
-    try { return JSON.stringify(await chart.read({ symbol, timeframe })); }
+    try { return JSON.stringify({ ...(await chart.read({ symbol, timeframe })), newsStep: news.AUTO_NEWS }); }
     catch (e) { return `Could not read the chart: ${e.message} Tell the Owner plainly.`; }
   }
 });
@@ -492,7 +500,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -1046,7 +1054,7 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
       const t = await trade.trending(15); list = t.all.slice(0, 25); src = `Alpaca's top gainers and most active (${list.length} tickers)`;
     }
     const r = await sig.scan(list, Math.min(8, Math.max(1, top || 5)));
-    return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice.' });
+    return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {

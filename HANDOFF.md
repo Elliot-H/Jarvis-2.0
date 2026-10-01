@@ -190,3 +190,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Market scanner (A24)
 `signals.js` (setupScore, stopLevel, exitSignal, backtest, scan) on top of chart.js bars (Yahoo, '1dlong' = 2y daily). `trade.trending()` pulls Alpaca screener movers + most-actives. Tools `signal_scan`, `signal_watch` (tools.js SIGNAL_TOOLS). `sigTick` every 15 min in market hours -> sell-warning push for state.sigWatch + Alpaca positions, one alert per ticker per 4h. Untested against live data from the sandbox (Yahoo/Alpaca blocked here); logic tested on synthetic candles.
+
+## Ticker news (A25)
+- `news.js` builds a search plan; the model's own web search (WebSearch / OpenRouter web_search) does the searching. `ticker_news` is in `NEWS_TOOLS` (tools.js) and talk-mode `TALK_TOOLS`; signal_scan, chart_read and crypto_scan results carry `news.AUTO_NEWS` telling Jarvis to call it per named symbol. HUD panel id `ticker_news`.
