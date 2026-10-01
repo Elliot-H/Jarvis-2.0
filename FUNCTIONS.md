@@ -41,3 +41,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A16 | Stores on the way | 💡 | "When I'm near Lowe's, remind me..." |
 | A17 | Vehicles: truck + R8 via Bluetooth OBD dongles | ✅ | Free (one-time dongle). Phone reads it when near: battery volts, check engine light, trouble + pending codes (explained), inspection readiness, fuel trims, freeze frame, fuel, coolant. Alerts on new/pending codes, low resting battery, battery drain trend (parasitic draw), low fuel. Clears codes only on request. |
 | A18 | Lights, compressor, bay door, heat (Shelly relays) | 💡 | Compressor through a motor contactor (electrician). Off freely, on only after confirmation. |
+| A19 | Extra wake phrases: "Yo Jarvis", "Jarvis bro", "Jarvis homie" | 💡 | Today: "Hey Jarvis" only (openWakeWord hey_jarvis model). Test scores in ACTIVITY first; train a small model per phrase on Colab if needed. |
