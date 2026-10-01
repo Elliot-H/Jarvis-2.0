@@ -178,3 +178,6 @@ Ran via GitHub Action `bench.yml` (push to `bench-trigger.txt`; needs repo secre
 
 ## Maintenance mode (A22)
 Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.anthropic.com/v1/claude_code/routines/{MAINT_ROUTINE_ID}/fire with bearer MAINT_ROUTINE_TOKEN (Railway) -> routine "Jarvis maintenance" (trig_017yUMN1pQPd3PtArSRC2bzh, runs on the Owner's Claude plan) edits repo, pushes, writes `maintenance/last.md` (STATUS/TIME/REQUEST/RESULT). `maintenance_status` reads that file via GitHub API. The routine's sandbox cannot reach Railway, so no callback; status is polled. Routine needs the repo attached and an API trigger token generated in its settings on claude.ai/code. Plan caps routine runs per day.
+
+## Music off = close (2026-10-01)
+- `music_control` has `close` (alias `stop`): runs `bluetooth_disconnect` (pause+stop keys, force-close Spotify via `close_app`, drop the speaker, re-check up to 3 times). Persona maps "Spotify off / turn off the music / stop the music / shut it off" to it; pause stays for "pause". Server-side only, no APK reinstall.

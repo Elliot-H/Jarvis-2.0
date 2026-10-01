@@ -1864,6 +1864,7 @@ async function musicViaPhone({ action, query, kind, volume, speaker }) {
   return 'Unknown music action.';
 }
 handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
+  if (action === 'close' || action === 'stop') return handlers.bluetooth_disconnect({ device: speaker });   // stop, force-close Spotify, drop the speaker
   if (!spo.configured() || !spoRef()) return musicViaPhone({ action, query, kind, volume, speaker });
   const r = spoRef();
   try {

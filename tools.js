@@ -160,9 +160,9 @@ export function toFunctionTool({ name, description, shape }) {
 export const MUSIC_TOOLS = [
   {
     name: 'music_control',
-    description: 'Control the Owner\'s Spotify and speaker (NOT for "god mode": that has its own tool, god_mode). action: "start" = connect the Bluetooth speaker AND play his most recent playlist (use for "let\'s get some tunes going", "put some music on", or when he says yes to your offer of background music); "play" (with query: song/artist/album/playlist name, and kind) or without query = latest playlist; "pause"; "resume"; "next"; "previous"; "volume" (0-100); "status" (what is playing). Only report success if the result says so.',
+    description: 'Control the Owner\'s Spotify and speaker (NOT for "god mode": that has its own tool, god_mode). action: "start" = connect the Bluetooth speaker AND play his most recent playlist (use for "let\'s get some tunes going", "put some music on", or when he says yes to your offer of background music); "play" (with query: song/artist/album/playlist name, and kind) or without query = latest playlist; "pause"; "resume"; "next"; "previous"; "volume" (0-100); "status" (what is playing); "close" (alias "stop") = FULLY CLOSE the Spotify app (force-stop) and disconnect the Bluetooth speaker. This is the DEFAULT for "Spotify off", "turn off the music", "stop the music", "shut it off", "music off"; use "pause" only when he literally says pause. Only report success if the result says so.',
     shape: {
-      action: z.enum(['start', 'play', 'pause', 'resume', 'next', 'previous', 'volume', 'status']),
+      action: z.enum(['start', 'play', 'pause', 'resume', 'next', 'previous', 'volume', 'status', 'close', 'stop']),
       query: z.string().optional(),
       kind: z.enum(['track', 'artist', 'album', 'playlist']).optional(),
       volume: z.number().optional(),
