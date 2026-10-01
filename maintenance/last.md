@@ -1,5 +1,5 @@
-STATUS: done
-TIME: 2026-10-01T13:45:32Z
-REQUEST: Voice "I'm awake" / "I'm up" dismisses all remaining morning alarms on the phone and confirms.
+STATUS: needs-owner
+TIME: 2026-10-01T14:25:36Z
+REQUEST: Investment Watch: continuous near-instant monitoring, phone alerts, real broker stop-loss orders, tellable interval.
 RESULT:
-Owner, I added it. Say "I'm awake" or "I'm up" in any wording and Jarvis tells the phone to dismiss every pending alarm, then confirms the rest are cleared. The server side goes live when Railway redeploys. The phone part is in the Android app, so you need to reinstall the APK once. I could not test it on your real phone, so try it tomorrow morning. If your Samsung clock ignores it, I will need a small Tasker task, and Jarvis will say so instead of claiming success.
+Owner, the watch is built. Jarvis now checks every position and watch-list ticker every 60 seconds, stocks during market hours and crypto around the clock, and alerts your phone on a stop hit or a sudden drop of 3 percent in 15 minutes. Ask him how often he monitors and he will give you the real number. It goes live when Railway redeploys, no APK reinstall. I could not add the real resting stop orders at Alpaca: the safety system blocked order-placing code in an unattended run. So right now Jarvis alerts you, but nothing sells automatically. Tell me in a normal session and I will build it with your confirm step. This is untested against live Alpaca prices.

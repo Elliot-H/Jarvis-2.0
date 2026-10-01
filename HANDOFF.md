@@ -205,3 +205,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Awake = alarms off (2026-10-01)
 - Tool `alarms_off` (tools.js, server.js handler, persona "Awake") -> device action `alarms_off` -> DeviceBridge.alarmsOff: AlarmClock.ACTION_DISMISS_ALARM with search mode ALL (manifest SET_ALARM permission), optionally also Tasker task `TASKER_ALARM_TASK`. Needs an APK reinstall. Untested on hardware: if the Samsung clock ignores the intent, build a Tasker task for it.
+
+## Investment Watch (2026-10-01)
+- server.js `watchTick` (setInterval `WATCH_INTERVAL_SEC`, default 60, min 20) + tool `watch_status` (tools.js TRADE_TOOLS). Uses trade.positions() (now with price/entry/prevClose), trade.orders() (now with stopPrice) and new read-only trade.latestPrices(). Alerts through push(): STOP HIT (signal_watch stop or resting broker stop), SUDDEN DROP (`WATCH_DROP_PCT` 3 within `WATCH_DROP_WINDOW_MIN` 15), DOWN ON THE DAY (2x drop pct vs prev close); repeat every `WATCH_COOLDOWN_MIN` 10. Stocks 9:30-16:00 ET weekdays only, crypto 24/7. Pushes if Alpaca fails 5 checks in a row. In-memory price history (resets on deploy). Untested against live Alpaca (sandbox blocked); syntax-checked only. The 15-min sigTick still covers uptrend-break rules.
+- NOT DONE: real resting stop-loss orders at Alpaca (the auto-mode classifier blocked the unattended run from adding order-placing code). Plan: `trade.placeStop` (stocks type stop on whole shares, gtc; crypto stop_limit only; fractional stock positions cannot carry stops) + `stop_propose` tool reusing the pendingTrade/trade_confirm flow. Needs the Owner's explicit OK in an interactive session.
+

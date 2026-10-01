@@ -1098,6 +1098,61 @@ async function sigTick() {
   }
 }
 if (!process.env.JARVIS_SMOKE) setInterval(() => sigTick().catch(e => console.warn('sigTick', e.message)), 15 * 60_000);
+// ---------- Investment Watch: fixed-interval price monitor for Alpaca positions + signal_watch list ----------
+// Every WATCH_INTERVAL_SEC (default 60, min 20): one positions call (+ one price call for watch-only tickers). Stocks only during
+// 9:30-16:00 ET weekdays, crypto 24/7. Alerts via push(): stop hit (stop from signal_watch or a resting broker stop order),
+// sudden drop (>= WATCH_DROP_PCT within WATCH_DROP_WINDOW_MIN), repeated by cooldown. Read-only: it never places orders.
+const WATCH_SEC = Math.max(20, Number(process.env.WATCH_INTERVAL_SEC || 60));
+const WATCH_DROP_PCT = Number(process.env.WATCH_DROP_PCT || 3), WATCH_DROP_MIN = Number(process.env.WATCH_DROP_WINDOW_MIN || 15), WATCH_COOL_MIN = Number(process.env.WATCH_COOLDOWN_MIN || 10);
+const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0 };
+const isCryptoSym = s => /\/USD$/.test(s);
+const marketOpenNow = () => { const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); const m = ny.getHours() * 60 + ny.getMinutes(); return ny.getDay() > 0 && ny.getDay() < 6 && m >= 570 && m < 960; };
+const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
+async function watchAlert(key, title, msg) {
+  if (Date.now() - (watch.alerted.get(key) || 0) < WATCH_COOL_MIN * 60e3) return;
+  watch.alerted.set(key, Date.now());
+  const full = `${msg} ${trade.mode()}. Not financial advice.`;
+  broadcast({ type: 'activity', text: 'WATCH: ' + full });
+  const err = await push(title, full); if (err) console.warn('watch push failed', err);
+}
+async function watchTick() {
+  if (!trade.configured()) return;
+  watch.lastRun = Date.now();
+  try {
+    const open = marketOpenNow();
+    const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
+    const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
+    const items = new Map();   // key = Alpaca symbol form
+    for (const p of pos) items.set(p.symbol, { sym: p.symbol, price: p.price, prevClose: p.prevClose, held: true, stop: restStop.get(p.symbol) ?? null });
+    const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
+    if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
+    for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it && w.stop && (it.stop == null || w.stop > it.stop)) it.stop = w.stop; }
+    const now = Date.now(), seen = [];
+    for (const it of items.values()) {
+      const crypto = isCryptoSym(it.sym) || /USD$/.test(it.sym) && it.sym.length > 5;
+      if (!crypto && !open) continue;
+      seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
+      const h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= WATCH_DROP_MIN * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
+      const stopTxt = it.stop ? `Stop ${fmtP(it.stop)}.` : 'No stop set.';
+      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `${it.sym} is ${fmtP(it.price)}, at or under your stop ${fmtP(it.stop)}.${it.held ? '' : ' (watch list)'}`);
+      const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
+      if (drop >= WATCH_DROP_PCT && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `${it.sym} fell ${drop.toFixed(1)}% in the last ${Math.round((now - h[0].t) / 60e3)} min: ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt}`);
+      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -2 * WATCH_DROP_PCT) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `${it.sym} is ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt}`);
+    }
+    for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
+    watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
+  } catch (e) {
+    watch.error = e.message; watch.fails++;
+    console.warn('watchTick', e.message);
+    if (watch.fails >= 5 && Date.now() - watch.failAlerted > 3600e3) { watch.failAlerted = Date.now(); await push('Investment Watch is blind', `The price check has failed ${watch.fails} times in a row: ${e.message.slice(0, 150)}. You are not being watched until this clears.`); }
+  }
+}
+handlers.watch_status = async () => {
+  if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
+  const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, mode: trade.mode(), lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${WATCH_DROP_PCT}% fall within ${WATCH_DROP_MIN} minutes`, downOnDay: `${2 * WATCH_DROP_PCT}% under yesterday's close`, repeatEveryMinutes: WATCH_COOL_MIN }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
+};
+if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');
   if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }

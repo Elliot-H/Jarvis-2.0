@@ -164,6 +164,7 @@ export const TRADE_TOOLS = [
   { name: 'trade_quote', description: 'Latest price of a stock (e.g. TSLA) or crypto (e.g. BTC, ETH, SOL).', shape: { symbol: z.string() } },
   { name: 'trade_propose', description: 'Step 1 of a buy or sell. Only when the Owner asked for a trade. Creates a PENDING order for a dollar amount and does NOT place it. Read it back to him (symbol, side, dollars, price, PAPER or LIVE) and ask "Say confirm to place it." Never call trade_confirm in the same turn.', shape: { symbol: z.string(), side: z.enum(['buy', 'sell']), dollars: z.number().positive() } },
   { name: 'trade_confirm', description: 'Step 2. Places the pending order ONLY after the Owner clearly said yes/confirm in his latest message (a later turn than the proposal). Refused by the server otherwise.', shape: {} },
+  { name: 'watch_status', description: 'Investment Watch status: the fixed check interval in seconds, whether it is running, last check time, what it is watching (Alpaca positions + signal_watch list), the stop each has, and the alert thresholds. Use for "how often do you monitor", "are you watching my positions", "is the watch on".', shape: {} },
   { name: 'trade_cancel', description: 'Cancel the pending proposal, or with all=true cancel every open order at the broker. Also the "stop everything" kill switch.', shape: { all: z.boolean().optional() } }
 ];
 

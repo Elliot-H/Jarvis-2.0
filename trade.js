@@ -48,7 +48,7 @@ export async function account() {
 }
 export async function positions() {
   const p = await api(BASE, '/v2/positions');
-  return p.map(x => ({ symbol: x.symbol, qty: +x.qty, value: +x.market_value, costBasis: +x.cost_basis, pnl: +x.unrealized_pl, pnlPct: +(x.unrealized_plpc * 100).toFixed(2) }));
+  return p.map(x => ({ symbol: x.symbol, qty: +x.qty, value: +x.market_value, costBasis: +x.cost_basis, pnl: +x.unrealized_pl, pnlPct: +(x.unrealized_plpc * 100).toFixed(2), price: +x.current_price, entry: +x.avg_entry_price, prevClose: +x.lastday_price }));
 }
 export async function quote(symbol) {
   const s = normSymbol(symbol); if (!s) throw new Error('Unrecognised symbol.');
@@ -60,8 +60,8 @@ export async function quote(symbol) {
   return { symbol: s, price: j.trade?.p };
 }
 export async function orders() {
-  const o = await api(BASE, '/v2/orders?status=open&limit=20');
-  return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, notional: x.notional, qty: x.qty, status: x.status }));
+  const o = await api(BASE, '/v2/orders?status=open&limit=100');
+  return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, status: x.status }));
 }
 export async function cancelAll() { await api(BASE, '/v2/orders', { method: 'DELETE' }); return 'All open orders cancelled.'; }
 
@@ -70,6 +70,15 @@ export async function place({ symbol, side, dollars }) {
   const body = { symbol: s, side, type: 'market', notional: String(dollars), time_in_force: isCrypto(s) ? 'gtc' : 'day' };
   const o = await api(BASE, '/v2/orders', { method: 'POST', body: JSON.stringify(body) });
   return { id: o.id, status: o.status, symbol: o.symbol, side: o.side, notional: o.notional };
+}
+
+// Read-only latest prices for a mixed list of stocks and crypto (used by the Investment Watch).
+export async function latestPrices(symbols) {
+  const out = {}, st = [], cr = [];
+  for (const x of symbols) { const s = normSymbol(x); if (s) (isCrypto(s) ? cr : st).push(s); }
+  if (st.length) { const j = await api(DATA, `/v2/stocks/trades/latest?symbols=${st.join(',')}`); for (const s of st) if (j.trades?.[s]?.p) out[s] = j.trades[s].p; }
+  if (cr.length) { const j = await api(DATA, `/v1beta3/crypto/us/latest/trades?symbols=${encodeURIComponent(cr.join(','))}`); for (const s of cr) if (j.trades?.[s]?.p) out[s] = j.trades[s].p; }
+  return out;
 }
 
 // Trending stocks from Alpaca's screener: today's biggest gainers plus most active by volume.
