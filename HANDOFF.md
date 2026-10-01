@@ -217,3 +217,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Long-term memory (A29)
 - `state.memory` = [{id, fact, topic, at}], tools `remember_fact` / `list_memory` / `forget_fact` (MEMORY_TOOLS in tools.js, handlers + `memoryServer` + `memoryContext()` in server.js). `memory` is in BACKUP_KEYS (phone backup restores it after a wipe; a Railway volume is still better). Injected into the `<context>` block of every chat/work request (latest 60). Persona section "Long-term memory" tells Jarvis when to save. Short-term `state.history` (12 lines, 6 h) is unchanged.
+
+## Photo analysis (2026-10-01)
+- `vision.js` + `POST /api/photo` (server.js, own 12mb JSON limit, PIN cookie auth). HUD camera button (`#camBtn`, hidden `#camInput` capture=environment), client shrinks to 1600px JPEG. Voice trigger regex `LOOK_RE` in app.js `submit()` opens the camera; because browsers need a tap, a "TAP TO OPEN CAMERA" button appears. Result: `say` (spoken) + panel `image_analysis` (shown directly, not held, since he asked for it). Failures call `recordFailure` and are spoken. Env: `VISION_MODEL` (optional, must support images; defaults to `TALK_MODEL`). Costs counted via `addSpend`. APK: `MainActivity.onShowFileChooser` added (reinstall needed); not compiled or run from the maintenance sandbox.

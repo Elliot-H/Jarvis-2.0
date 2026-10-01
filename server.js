@@ -23,6 +23,7 @@ import * as trade from './trade.js';
 import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
+import { analyzePhoto, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -1293,7 +1294,8 @@ Object.assign(handlers, {
 // ---------- HTTP ----------
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '1mb' }));
+const json1mb = express.json({ limit: '1mb' });
+app.use((req, res, next) => req.path === '/api/photo' ? next() : json1mb(req, res, next)); // the photo route has its own bigger limit
 app.use(express.urlencoded({ extended: false }));
 
 // ---------- PIN lock (set JARVIS_PIN when Jarvis is on the internet) ----------
@@ -1360,6 +1362,38 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+// Photo analysis: the HUD camera button posts a JPEG (data URL) here; the answer is spoken and shown as the "image_analysis" panel.
+app.post('/api/photo', express.json({ limit: '12mb' }), async (req, res) => {
+  const question = String(req.body?.question || '').trim().slice(0, 500);
+  const cmd = question ? `look at this photo: ${question}` : 'look at this photo';
+  const fail = (code, msg) => {
+    recordFailure(cmd, msg);
+    broadcast({ type: 'log', role: 'system', text: 'Photo analysis failed: ' + msg });
+    broadcast({ type: 'say', text: msg, speak: true });
+    res.status(code).json({ error: msg });
+  };
+  const ce = String(req.body?.clientError || '').trim().slice(0, 300);
+  if (ce) return fail(400, ce.replace(/\.?$/, ', sir.'));
+  const img = parseDataUrl(req.body?.image);
+  if (!img) return fail(400, 'I did not receive a usable photo, sir. Please try again.');
+  if (img.bytes > MAX_IMAGE_BYTES) return fail(413, 'That photo is too large to send, sir. Try again.');
+  const block = overBudget('talk'); if (block) return fail(429, block);
+  broadcast({ type: 'state', state: 'thinking' });
+  broadcast({ type: 'log', role: 'user', text: question ? `[photo] ${question}` : '[photo]' });
+  try {
+    const r = await analyzePhoto({ image: req.body.image, question });
+    const s2 = addSpend(r.cost, 'talk');
+    state.panels.image_analysis = { id: 'image_analysis', title: r.title, body: r.details || r.spoken, updatedAt: new Date().toISOString() };
+    saveState();
+    broadcast({ type: 'panels', panels: state.panels });
+    broadcast({ type: 'spend', turn: r.cost, today: s2.usd, limit: DAILY_BUDGET });
+    remember('user', '[sent a photo]' + (question ? ' ' + question : '')); remember('jarvis', r.spoken);
+    broadcast({ type: 'say', text: r.spoken, speak: true });
+    res.json({ ok: true, spoken: r.spoken, title: r.title });
+  } catch (e) {
+    fail(502, /^[A-Z]/.test(e.message) ? e.message.replace(/\.?$/, ', sir.') : 'The photo analysis failed, sir.');
+  }
+});
 // Plain text ask (used by the safe-mode page)
 app.post('/api/ask', async (req, res) => {
   const t = String(req.body?.text || '').trim().slice(0, 4000);

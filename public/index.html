@@ -101,6 +101,10 @@
   <form id="cmd" class="cmd" autocomplete="off">
     <span class="prompt">&gt;&gt;</span>
     <input id="cmdInput" placeholder="Type a command, or just talk…" spellcheck="false">
+    <button type="button" id="camBtn" class="mic" title="Take a photo for Jarvis to analyze">
+      <svg viewBox="0 0 24 24"><path d="M9 3 7.2 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9Zm3 5.5A4.5 4.5 0 1 1 12 17.5 4.5 4.5 0 0 1 12 8.5Zm0 2A2.5 2.5 0 1 0 12 15.5 2.5 2.5 0 0 0 12 10.5Z"/></svg>
+    </button>
+    <input id="camInput" type="file" accept="image/*" capture="environment" hidden>
     <button type="button" id="micBtn" class="mic" title="Push to talk (SPACE)">
       <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
     </button>

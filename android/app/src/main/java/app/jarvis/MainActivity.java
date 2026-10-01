@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.ValueCallback;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -34,6 +35,8 @@ public class MainActivity extends Activity {
   private String shim = "";
   private final Handler ui = new Handler(Looper.getMainLooper());
   private static final int REQ = 7;
+  private static final int PICK = 8;
+  private ValueCallback<Uri[]> picker;
 
   @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
   @Override protected void onCreate(Bundle b) {
@@ -77,6 +80,19 @@ public class MainActivity extends Activity {
       @Override public void onPermissionRequest(final PermissionRequest r) {
         ui.post(() -> r.grant(r.getResources()));
       }
+      // Photo button: lets the file input open the phone's camera / photo picker
+      @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+        if (picker != null) picker.onReceiveValue(null);
+        picker = cb;
+        try {
+          Intent cam = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+          Intent pick = p.createIntent();
+          Intent chooser = Intent.createChooser(pick, "Photo for Jarvis");
+          if (cam.resolveActivity(getPackageManager()) != null) chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
+          startActivityForResult(chooser, PICK);
+        } catch (Exception e) { picker = null; cb.onReceiveValue(null); return false; }
+        return true;
+      }
       @Override public void onGeolocationPermissionsShowPrompt(String o, GeolocationPermissions.Callback cb) {
         cb.invoke(o, checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED, false);
       }
@@ -113,6 +129,25 @@ public class MainActivity extends Activity {
     want.add("net.dinglisch.android.tasker.PERMISSION_RUN_TASKS"); // lets Jarvis start the Tasker Bluetooth task
     for (String p : want) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
     if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ);
+  }
+
+  @Override protected void onActivityResult(int code, int result, Intent data) {
+    super.onActivityResult(code, result, data);
+    if (code != PICK || picker == null) return;
+    Uri[] out = null;
+    if (result == RESULT_OK && data != null) {
+      if (data.getData() != null) out = new Uri[]{data.getData()};
+      else if (data.getExtras() != null && data.getExtras().get("data") instanceof android.graphics.Bitmap) {
+        try {
+          android.graphics.Bitmap b = (android.graphics.Bitmap) data.getExtras().get("data");
+          java.io.File f = java.io.File.createTempFile("cam", ".jpg", getCacheDir());
+          java.io.FileOutputStream o = new java.io.FileOutputStream(f);
+          b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, o); o.close();
+          out = new Uri[]{Uri.fromFile(f)};
+        } catch (Exception ignored) {}
+      }
+    }
+    picker.onReceiveValue(out); picker = null;
   }
 
   @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {

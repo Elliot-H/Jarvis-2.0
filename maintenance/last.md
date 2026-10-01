@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-01T15:33:42Z
-REQUEST: Fix Jarvis replying only "Done, sir." to questions instead of the real answer
+TIME: 2026-10-01T17:42:01Z
+REQUEST: Add photo capture and analysis (camera button, voice trigger, vision model, image_analysis panel, failure handling)
 RESULT:
-Found it, Owner. When the model came back with an empty reply after a web search or tools, Jarvis fell back to a bare "Done, sir." Now, if the reply is empty, he is asked once more for the real answer with a bigger word allowance, and the persona says never to answer a question with just "Done". If it still fails he says he got no answer and asks you to repeat. It goes live when Railway redeploys, and no APK reinstall is needed. I only syntax-checked it from here, so ask the automation tools question again to confirm.
+Done, Owner. There is a new camera button next to the mic on the HUD, and saying "look at this" or "take a picture and analyze it" brings up a tap-to-open-camera button. The photo is shrunk, sent to a vision model through OpenRouter, then Jarvis speaks the answer and the key details appear in the image analysis panel. Camera, upload and model failures are spoken and saved as failures. It goes live when Railway redeploys; set VISION_MODEL in Railway only if your talk model cannot read images. I could only syntax-check it from here, not run it against the live model. The camera inside the Android app needs an APK reinstall, while the browser version works without one.

@@ -738,6 +738,7 @@
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
+    if (LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);
     setState('thinking');
     startFillers(text);
@@ -752,6 +753,55 @@
     navigator.geolocation.getCurrentPosition(p => { send({ type: 'location', lat: p.coords.latitude, lon: p.coords.longitude }); fin(); }, fin, { timeout: 1200, maximumAge: 30000 });
   }
   setInterval(() => { if (booted) sendLocation(); }, 60000); // once a minute so arrive/leave is noticed with the app open
+
+
+  // ======================= camera: photo analysis =======================
+  const camInput = $('#camInput'), camBtn = $('#camBtn');
+  const LOOK_RE = /\b(look at (this|that|it)|take (a )?(picture|photo|pic)|(analy[sz]e|scan|read) (this|that) (picture|photo|pic|label|gauge|receipt)|use the camera|open the camera)\b/i;
+  function openCamera(question) {
+    camInput.dataset.q = question || '';
+    try { camInput.click(); } catch {}
+    // Browsers only open the camera from a tap; when this came from voice, leave one big button to tap.
+    if (!navigator.userActivation?.isActive) showCamPrompt();
+  }
+  function showCamPrompt() {
+    if ($('#camPrompt')) return;
+    const b = document.createElement('button'); b.id = 'camPrompt'; b.textContent = 'TAP TO OPEN CAMERA';
+    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;padding:22px 30px;font:700 16px Orbitron,sans-serif;letter-spacing:.2em;background:#041422;color:#3fe0ff;border:2px solid #3fe0ff;box-shadow:0 0 24px rgba(63,224,255,.5)';
+    b.onclick = () => { b.remove(); camInput.click(); };
+    document.body.appendChild(b); setTimeout(() => b.remove(), 20000);
+  }
+  // Shrink to <=1600px JPEG so the upload is quick on mobile data.
+  function shrink(file) {
+    return new Promise((ok, bad) => {
+      const url = URL.createObjectURL(file), im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(im.width, im.height)), c = document.createElement('canvas');
+        c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        ok(c.toDataURL('image/jpeg', 0.85));
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); bad(new Error('could not read the photo')); };
+      im.src = url;
+    });
+  }
+  camBtn.addEventListener('click', () => { camInput.dataset.q = ''; camInput.click(); });
+  camInput.addEventListener('change', async () => {
+    const f = camInput.files?.[0], q = camInput.dataset.q || ''; camInput.value = ''; $('#camPrompt')?.remove();
+    if (!f) return photoFail('No photo was taken, or camera permission was denied. Allow camera access for Jarvis in the phone settings.', q);
+    setState('thinking'); addActivity('Photo sent for analysis');
+    try {
+      const image = await shrink(f);
+      const r = await fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, question: q }) });
+      if (!r.ok && r.status === 401) location.reload();
+      // success and server-side failures are spoken by the server over the socket
+    } catch (e) { photoFail('The photo upload failed: ' + e.message, q); }
+  });
+  // Client-only failures (no photo, permission, upload) are reported to the server so Jarvis speaks them and notes the failure.
+  function photoFail(msg, q) {
+    setState('idle');
+    fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '', question: q || '', clientError: msg }) }).catch(() => { addLog('system', msg); caption(msg); });
+  }
 
   // ======================= controls =======================
   $('#cmd').addEventListener('submit', e => {
