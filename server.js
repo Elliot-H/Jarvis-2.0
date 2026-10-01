@@ -272,7 +272,9 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : talkLocal ? talkModel() : CHAT_MODEL})`);
   escalate = false;
   const now = new Date();
-  const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}.`;
+  // Always the Owner's own time zone (his phone's, else TZ, else Eastern): the server itself runs on UTC.
+  const ownerTz = state.location?.tz || process.env.TZ || 'America/New_York';
+  const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: ownerTz })} (${ownerTz}).`;
   const hud = `\nOn the HUD: ${Object.values(state.stats).map(s => `${s.label}=${s.value}${s.delta ? ` (${s.delta})` : ''}`).join('; ') || 'nothing yet'}.`;
   pruneFailures();
   const failed = state.failures.length
