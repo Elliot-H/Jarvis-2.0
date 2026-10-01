@@ -343,7 +343,8 @@ public class DeviceBridge {
           android.bluetooth.BluetoothClass bc = d.getBluetoothClass();
           j.put("audio", bc != null && bc.getMajorDeviceClass() == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO);
           int mc = bc == null ? 0 : bc.getDeviceClass();
-          j.put("speaker", mc == 0x414 || mc == 0x41C || mc == 0x420 || mc == 0x428 || mc == 0x418);
+          j.put("speaker", mc == 0x414 || mc == 0x41C || mc == 0x420 || mc == 0x428 || mc == 0x418 || mc == 0x42C);
+          j.put("tv", mc == 0x42C);
           j.put("bonded", d.getBondState() == BluetoothDevice.BOND_BONDED);
           found.put(d.getAddress(), j);
         } catch (Exception ignored) {}

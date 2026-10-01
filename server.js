@@ -1746,7 +1746,7 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   let list = []; try { list = JSON.parse(sc.detail); } catch {}
   const h = norm(speaker_name);
   const named = list.filter(d => d.name);
-  // Named: just that one. Otherwise every real speaker/soundbar/headphone in range (TVs and other gear are left alone).
+  // Named: just that one. Otherwise every real speaker/soundbar/headphone in range (TVs included; other gear is left alone).
   const pick = (h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(d => d.speaker)).sort((a, b) => b.rssi - a.rssi);
   const seen = named.slice(0, 12).map(d => `${d.name}${d.speaker ? '' : ' (not a speaker)'} ${d.rssi}dBm`).join('; ') || 'nothing';
   say('saw: ' + seen);
@@ -1755,8 +1755,8 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   const ok = [], skipped = [];
   for (const d of pick) {
     if (!d.bonded) {
-      say(`pairing ${d.name}`);
-      const pr = await deviceAction('bt_pair', { mac: d.mac, seconds: h ? 45 : 12 }, h ? 55000 : 20000);   // short: devices that need a button press are skipped, not forced
+      say(d.tv ? `pairing ${d.name}: press OK on the TV now` : `pairing ${d.name}`);
+      const pr = await deviceAction('bt_pair', { mac: d.mac, seconds: (h || d.tv) ? 45 : 12 }, (h || d.tv) ? 55000 : 20000);   // short: devices that need a button press are skipped, not forced
       if (!pr.ok) { skipped.push(`${d.name} (${pr.detail.split('(')[0].trim()})`); continue; }
     }
     if (!state.speakers.some(x => norm(x.name) === norm(d.name))) await handlers.speaker_save({ name: d.name, alias: d.name, area: area || '' });
