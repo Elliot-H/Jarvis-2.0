@@ -3,7 +3,18 @@
 const LIVE = process.env.ALPACA_LIVE === '1';
 const BASE = LIVE ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
 const DATA = 'https://data.alpaca.markets';
-const KEY = () => process.env.ALPACA_KEY_ID, SEC = () => process.env.ALPACA_SECRET;
+const clean = v => String(v || '').trim().replace(/^["']|["']$/g, '').trim();
+const KEY = () => clean(process.env.ALPACA_KEY_ID), SEC = () => clean(process.env.ALPACA_SECRET);
+// Safe hint for a 401: never reveals the secret.
+export function keyHint() {
+  const k = KEY(), s = SEC();
+  const bits = [`mode ${mode()}`, `key id ${k ? k.slice(0, 2) + '… (' + k.length + ' chars)' : 'MISSING'}`, `secret ${s ? s.length + ' chars' : 'MISSING'}`];
+  if (k && !/^(PK|AK)/.test(k)) bits.push('key id should start with PK (paper) or AK (live)');
+  if (k && /^AK/.test(k) && !LIVE) bits.push('this is a LIVE key but the app is in paper mode');
+  if (k && /^PK/.test(k) && LIVE) bits.push('this is a PAPER key but ALPACA_LIVE=1');
+  if (s && s.length < 30) bits.push('secret looks too short; it may be the key id pasted twice');
+  return bits.join('; ');
+}
 export const MAX_ORDER = Number(process.env.TRADE_MAX_ORDER || 50);   // dollars per order
 export const MAX_DAY = Number(process.env.TRADE_MAX_DAY || 150);      // dollars per day
 export const configured = () => !!(KEY() && SEC());
@@ -18,7 +29,7 @@ async function api(base, path, opts = {}) {
   });
   const t = await r.text();
   let j; try { j = JSON.parse(t); } catch { j = t; }
-  if (!r.ok) throw new Error(`Alpaca ${r.status}: ${j?.message || t}`.slice(0, 300));
+  if (!r.ok) throw new Error(`Alpaca ${r.status}: ${j?.message || t}${r.status === 401 || r.status === 403 ? ' [' + keyHint() + ']' : ''}`.slice(0, 450));
   return j;
 }
 
