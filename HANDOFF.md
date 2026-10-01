@@ -172,3 +172,6 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 
 ## Remote model test
 Set `BENCH_TOKEN` (16+ chars) in Railway. Then `POST /api/bench?token=...` starts the test (body `{"ids":[...]}` optional), `GET /api/bench?token=...` returns progress/report/text, `POST /api/talk-model?token=...` sets the winner. Only those two routes accept the token.
+
+## Model test result (2026-09-30)
+Ran via GitHub Action `bench.yml` (push to `bench-trigger.txt`; needs repo secret OPENROUTER_API_KEY; results in `bench-results/`). Winner: deepseek/deepseek-v4.1-flash (21-23/24, ~$1-2.4/mo at 100 q/day). Owner set `TALK_MODEL` to it in Railway. Gemini Flash, GPT Luna, Haiku and Mistral hit 429s (likely provider throttling at concurrency 3), so their scores are understated; rerun at concurrency 1 if a fair comparison is wanted. Workshop (self-repair) model not yet tested.
