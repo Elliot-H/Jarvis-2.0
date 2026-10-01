@@ -181,3 +181,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Music off = close (2026-10-01)
 - `music_control` has `close` (alias `stop`): runs `bluetooth_disconnect` (pause+stop keys, force-close Spotify via `close_app`, drop the speaker, re-check up to 3 times). Persona maps "Spotify off / turn off the music / stop the music / shut it off" to it; pause stays for "pause". Server-side only, no APK reinstall.
+
+## Music never restarts by itself (2026-10-01)
+- Bug: music came back on after "Spotify off". Cause (Android app only; server never auto-starts music and maintenance_status/redeploy touch nothing): SttBridge auto-resumes music after the mic closes, and the "do not resume" window after a deliberate stop was only 120 s. Now `noResumeUntil` is sticky (Long.MAX_VALUE) after pause/stop/close_app/bt_disconnect and cleared only by an explicit start/resume/play/search; a stale `musicBefore` (older than 60 s) never resumes. Needs an APK reinstall.

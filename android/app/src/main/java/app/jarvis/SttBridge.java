@@ -77,12 +77,14 @@ public class SttBridge {
     feedRead = null; feedWrite = null;
   }
   static volatile long noResumeUntil = 0;   // set when the server deliberately paused/stopped/closed the music: never auto-resume then
+  private long musicBeforeAt = 0;   // when musicBefore was set; a stale flag never resumes
   private boolean musicBefore = false;   // music was playing when the mic opened (the recognizer pauses it)
   private boolean wantPause = false;     // he just told Jarvis to pause/stop: do not resume
   private final Runnable resume = this::doResume;
   private void doResume() {
     if (!musicBefore) return;
     musicBefore = false;
+    if (System.currentTimeMillis() - musicBeforeAt > 60000) return;
     try {
       if (System.currentTimeMillis() < noResumeUntil) wantPause = true;
       if (!wantPause && !am.isMusicActive()) {
@@ -156,7 +158,7 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L);
-    try { if (!musicBefore) musicBefore = am.isMusicActive() && System.currentTimeMillis() >= noResumeUntil; } catch (Exception ignored) {}
+    try { if (!musicBefore) { musicBefore = am.isMusicActive() && System.currentTimeMillis() >= noResumeUntil; musicBeforeAt = System.currentTimeMillis(); } } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;
     try { if (FEED_ENABLED && !feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
