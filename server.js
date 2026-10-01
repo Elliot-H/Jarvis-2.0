@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
@@ -73,7 +73,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -189,6 +189,36 @@ Object.assign(handlers, {
     return 'Resolved.';
   }
 });
+// ---------- long-term memory: durable facts that carry across separate conversations (in BACKUP_KEYS, so redeploys keep them) ----------
+state.memory ||= [];
+const MEMORY_MAX = 200;
+const normFact = t => String(t).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+Object.assign(handlers, {
+  remember_fact: async ({ fact, topic }) => {
+    const f = String(fact || '').trim().slice(0, 300); if (!f) return 'Nothing to remember.';
+    const dup = state.memory.find(m => normFact(m.fact) === normFact(f));
+    if (dup) { dup.at = new Date().toISOString(); saveState(); return `Already remembered (${dup.id}).`; }
+    const m = { id: crypto.randomUUID().slice(0, 6), fact: f, topic: topic ? String(topic).slice(0, 30) : undefined, at: new Date().toISOString() };
+    state.memory.push(m);
+    if (state.memory.length > MEMORY_MAX) state.memory.shift();
+    saveState();
+    return `Remembered (${m.id}).`;
+  },
+  list_memory: async ({ search } = {}) => {
+    const q = search ? normFact(search) : '';
+    const rows = state.memory.filter(m => !q || normFact(m.fact + ' ' + (m.topic || '')).includes(q));
+    return rows.length ? rows.map(m => `${m.id} · ${m.at.slice(0, 10)} · ${m.fact}`).join('\n') : 'Nothing in long-term memory.';
+  },
+  forget_fact: async ({ id }) => {
+    state.memory = id === '*' ? [] : state.memory.filter(m => m.id !== id);
+    saveState();
+    return 'Forgotten.';
+  }
+});
+const memoryServer = createSdkMcpServer({ alwaysLoad: true, name: 'memory', version: '1.0.0', tools: sdkTools(MEMORY_TOOLS) });
+const memoryContext = () => state.memory.length
+  ? `\nLong-term memory (facts from earlier conversations; trust them, use them naturally, don't recite unprompted): ${state.memory.slice(-60).map(m => `[${m.id}] ${m.fact}`).join(' | ')}`
+  : '';
 const failuresServer = createSdkMcpServer({ alwaysLoad: true, name: 'failures', version: '1.0.0', tools: sdkTools(FAILURE_TOOLS) });
 
 function setPanel(id, panel) {
@@ -288,11 +318,11 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 
   const external = loadMcp();
   const mcpServers = mode === 'work'
-    ? { dashboard, self: selfServer, failures: failuresServer, ...external }
-    : { dashboard, failures: failuresServer, mode: modeServer, ...external };
+    ? { dashboard, self: selfServer, failures: failuresServer, memory: memoryServer, ...external }
+    : { dashboard, failures: failuresServer, memory: memoryServer, mode: modeServer, ...external };
   const persona = readText('persona.md');
   const allowed = [
-    'mcp__dashboard', 'mcp__failures',
+    'mcp__dashboard', 'mcp__failures', 'mcp__memory',
     ...Object.keys(external).map(n => `mcp__${n}`),
     'WebSearch', 'WebFetch',
     ...(mode === 'work'
@@ -307,7 +337,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
     .map(h => `${h.role === 'user' ? 'Owner' : 'You'}: ${h.text}`).join('\n');
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
-  const live = (clock + hud + failed + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
+  const live = (clock + hud + failed + memoryContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
   const chatPrompt = chatSystemPrompt(persona);
 
@@ -508,7 +538,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 

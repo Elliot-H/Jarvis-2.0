@@ -36,6 +36,15 @@ export const HUD_TOOLS = [
   }
 ];
 
+export const MEMORY_TOOLS = [
+  {
+    name: 'remember_fact',
+    description: 'Save a durable long-term memory that survives across separate conversations: names, people, the Owner\'s preferences, saved info, ongoing topics, answers you gave that he may ask about later. Call it when he says "remember...", and on your own for any lasting fact worth keeping. One short self-contained sentence per fact. Does not duplicate: an identical fact is only refreshed.',
+    shape: { fact: z.string().describe('one short, self-contained sentence'), topic: z.string().optional().describe('one or two words, e.g. person, preference, project') }
+  },
+  { name: 'list_memory', description: 'List everything in long-term memory, optionally filtered by a search word.', shape: { search: z.string().optional() } },
+  { name: 'forget_fact', description: 'Delete a long-term memory by id, or "*" to wipe all. Only when the Owner asks to forget.', shape: { id: z.string() } }
+];
 export const FAILURE_TOOLS = [
   {
     name: 'note_failure',

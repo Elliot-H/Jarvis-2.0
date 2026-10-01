@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-01T15:26:29Z
-REQUEST: Fix comings and goings detection (arrive/leave remarks not spoken, stuck at Home)
+TIME: 2026-10-01T15:29:31Z
+REQUEST: Add persistent long-term memory across separate conversations
 RESULT:
-Found the cause, Owner. Jarvis only spoke on arriving or leaving when a reminder matched, so Home and other places with no reminders were silent. Now every arrival and departure gets one short line, except in quiet hours. With the app open, location is now sent every minute instead of every ten. This goes live when Railway redeploys, and no APK reinstall is needed. I could not test the phone's background reports from here, so if he still reads as at Home after leaving with the app closed, check that Jarvis has location permission and unrestricted battery.
+Owner, Jarvis now has a durable memory store. Say "remember that..." and he saves it, and he also saves names, your info, preferences and ongoing topics on his own. The saved facts are loaded into every new conversation automatically, so he can pick up where you left off. They are also backed up on your phone, so a redeploy won't wipe them. It goes live when Railway finishes deploying; no APK reinstall needed. Facts told before this change were never saved, so he will need telling the Queen's name once more.
