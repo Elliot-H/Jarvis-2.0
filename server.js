@@ -1900,6 +1900,24 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
     return 'Unknown music action.';
   } catch (e) { return spoFail(e); }
 };
+// Music only starts when the Owner actually asked for it in this turn. Pause/next/volume/status are always allowed.
+{
+  const _music = handlers.music_control;
+  const WANTS_MUSIC = /\b(music|tunes?|songs?|spotify|playlist|play|put on|turn on|start|resume|speaker|bluetooth|god ?mode|take over|queue|album|artist|radio)\b/i;
+  handlers.music_control = async a => {
+    const starts = ['start', 'play', 'resume'].includes(a?.action);
+    if (starts) {
+      const said = turn?.text || '';
+      if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said)) {
+        broadcast({ type: 'activity', text: `Blocked music ${a.action}: you did not ask for music (heard: "${said.slice(0, 60)}")` });
+        console.log(`music ${a.action} BLOCKED, origin=${turn?.origin}, text="${said.slice(0, 80)}"`);
+        return 'Refused: the Owner did not ask for music in this request. Do NOT start music. Just answer what he said.';
+      }
+      broadcast({ type: 'activity', text: `Music ${a.action} because you said: "${said.slice(0, 60)}"` });
+    }
+    return _music(a);
+  };
+}
 const spoRedirect = req => `${process.env.PUBLIC_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`}/api/spotify/callback`;
 app.get('/api/spotify/login', (req, res) => {
   if (!spo.configured()) return res.status(503).type('text/plain').send('Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in Railway first.');
