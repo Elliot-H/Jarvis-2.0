@@ -1756,7 +1756,7 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   for (const d of pick) {
     if (!d.bonded) {
       say(`pairing ${d.name}`);
-      const pr = await deviceAction('bt_pair', { mac: d.mac, seconds: 12 }, 20000);   // short: devices that need a button press are skipped, not forced
+      const pr = await deviceAction('bt_pair', { mac: d.mac, seconds: h ? 45 : 12 }, h ? 55000 : 20000);   // short: devices that need a button press are skipped, not forced
       if (!pr.ok) { skipped.push(`${d.name} (${pr.detail.split('(')[0].trim()})`); continue; }
     }
     if (!state.speakers.some(x => norm(x.name) === norm(d.name))) await handlers.speaker_save({ name: d.name, alias: d.name, area: area || '' });
