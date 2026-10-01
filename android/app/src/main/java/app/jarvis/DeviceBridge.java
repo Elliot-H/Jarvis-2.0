@@ -54,7 +54,7 @@ public class DeviceBridge {
       else if ("media_key".equals(action)) { if ("pause".equals(o.optString("key")) || "stop".equals(o.optString("key"))) SttBridge.noResumeUntil = Long.MAX_VALUE; else if ("play".equals(o.optString("key"))) SttBridge.noResumeUntil = 0; mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
       else if ("bt_scan".equals(action)) btScan(id, o.optInt("seconds", 9));
       else if ("bt_pair".equals(action)) btPair(id, o.optString("mac"), o.optInt("seconds", 30));
-      else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"));
+      else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"), o.optBoolean("verify", true));
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
     } catch (Exception e) { reply(id, false, String.valueOf(e.getMessage())); }
@@ -281,15 +281,16 @@ public class DeviceBridge {
 
   // ---- BanlanX/SPLED BLE LED controller (SP63xE): scan, connect, write packets to ffe1, disconnect ----
   private boolean ledBusy = false;
-  private void ledWrite(final String id, String macIn, final org.json.JSONArray pk) {
+  private void ledWrite(final String id, String macIn, org.json.JSONArray pkIn, final boolean verify) {
     if (ledBusy) { reply(id, false, "LED controller busy"); return; }
-    if (pk == null || pk.length() == 0) { reply(id, false, "no packets"); return; }
+    final org.json.JSONArray pk = pkIn == null ? new org.json.JSONArray() : pkIn;
+    if (pk.length() == 0 && !verify) { reply(id, false, "no packets"); return; }
     final BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
     if (ad == null || !ad.isEnabled()) { reply(id, false, "Bluetooth is off"); return; }
     ledBusy = true;
     final android.content.SharedPreferences sp = ctx.getSharedPreferences("led", Context.MODE_PRIVATE);
     String mac = macIn.isEmpty() ? sp.getString("mac", "") : macIn;
-    if (!mac.isEmpty()) { ledConnect(id, ad.getRemoteDevice(mac), pk, sp); return; }
+    if (!mac.isEmpty()) { ledConnect(id, ad.getRemoteDevice(mac), pk, verify, sp); return; }
     final android.bluetooth.le.BluetoothLeScanner sc = ad.getBluetoothLeScanner();
     if (sc == null) { ledBusy = false; reply(id, false, "no BLE scanner"); return; }
     final BluetoothDevice[] best = new BluetoothDevice[1];
@@ -306,45 +307,125 @@ public class DeviceBridge {
       try { sc.stopScan(cb); } catch (Exception ignored) {}
       if (best[0] == null) { ledBusy = false; reply(id, false, "LED controller not found. Power it on, stay close, and check Nearby devices permission."); return; }
       sp.edit().putString("mac", best[0].getAddress()).apply();
-      ledConnect(id, best[0], pk, sp);
+      ledConnect(id, best[0], pk, verify, sp);
     }, 5000);
   }
 
-  private void ledConnect(final String id, BluetoothDevice dev, final org.json.JSONArray pk, final android.content.SharedPreferences sp) {
+  /** Status frame (message type 0x02) to compact JSON. Offsets follow the SP63xE status layout (UniLED reference). */
+  private static String ledStatusJson(byte[] f) {
+    try {
+      org.json.JSONObject o = new org.json.JSONObject();
+      o.put("n", f.length);
+      if (f.length > 52) {
+        o.put("t", f[19] & 0xFF); o.put("o", f[31] & 0xFF); o.put("p", (f[29] & 0xFF) > 0 ? 1 : 0);
+        o.put("m", f[32] & 0xFF); o.put("e", f[33] & 0xFF); o.put("lv", f[35] & 0xFF); o.put("wl", f[36] & 0xFF);
+        o.put("sp", f[42] & 0xFF);
+        o.put("rgb", (f[37] & 0xFF) + "," + (f[38] & 0xFF) + "," + (f[39] & 0xFF));
+        o.put("drgb", (f[47] & 0xFF) + "," + (f[48] & 0xFF) + "," + (f[49] & 0xFF));
+      }
+      return o.toString();
+    } catch (Exception e) { return "{}"; }
+  }
+
+  private void ledConnect(final String id, BluetoothDevice dev, final org.json.JSONArray pk, final boolean verify, final android.content.SharedPreferences sp) {
     final int[] idx = {0};
     final boolean[] done = {false};
+    final boolean[] queryWriting = {false};   // the state query packet is being written
+    final boolean[] queried = {false};        // query written, waiting for the status frame
+    final boolean[] gotStatus = {false};
+    final String[] last = {null};
+    final java.io.ByteArrayOutputStream rx = new java.io.ByteArrayOutputStream();
     final android.bluetooth.BluetoothGatt[] g = new android.bluetooth.BluetoothGatt[1];
-    final Runnable finish = () -> {};
+    final java.util.UUID SVC = java.util.UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb");
+    final java.util.UUID CHR = java.util.UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb");
+    final java.util.UUID CCC = java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     final android.bluetooth.BluetoothGattCallback cb = new android.bluetooth.BluetoothGattCallback() {
       void end(boolean ok, String msg) {
         if (done[0]) return; done[0] = true;
         try { g[0].disconnect(); g[0].close(); } catch (Exception ignored) {}
         ui.post(() -> { ledBusy = false; if (!ok) sp.edit().remove("mac").apply(); reply(id, ok, msg); });
       }
+      byte[] hex(String h) {
+        byte[] b = new byte[h.length() / 2];
+        for (int i = 0; i < b.length; i++) b[i] = (byte) Integer.parseInt(h.substring(2 * i, 2 * i + 2), 16);
+        return b;
+      }
+      android.bluetooth.BluetoothGattCharacteristic chr(android.bluetooth.BluetoothGatt gt) {
+        android.bluetooth.BluetoothGattService sv = gt.getService(SVC);
+        return sv == null ? null : sv.getCharacteristic(CHR);
+      }
+      boolean put(android.bluetooth.BluetoothGatt gt, byte[] b) {
+        android.bluetooth.BluetoothGattCharacteristic ch = chr(gt);
+        if (ch == null) { end(false, "controller service ffe0/ffe1 missing"); return false; }
+        ch.setWriteType(android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        ch.setValue(b);
+        return gt.writeCharacteristic(ch);
+      }
       void next(android.bluetooth.BluetoothGatt gt) {
         try {
-          if (idx[0] >= pk.length()) { end(true, "sent"); return; }
-          String hex = pk.getString(idx[0]++);
-          byte[] b = new byte[hex.length() / 2];
-          for (int i = 0; i < b.length; i++) b[i] = (byte) Integer.parseInt(hex.substring(2 * i, 2 * i + 2), 16);
-          android.bluetooth.BluetoothGattService sv = gt.getService(java.util.UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb"));
-          android.bluetooth.BluetoothGattCharacteristic ch = sv == null ? null : sv.getCharacteristic(java.util.UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb"));
-          if (ch == null) { end(false, "controller service ffe0/ffe1 missing"); return; }
-          ch.setWriteType(android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
-          ch.setValue(b);
-          if (!gt.writeCharacteristic(ch)) end(false, "write refused");
+          if (idx[0] >= pk.length()) {
+            if (!verify) { end(true, "sent"); return; }
+            if (queryWriting[0] || queried[0]) return;
+            queryWriting[0] = true;   // 53 02 00 01 00 01 01 = "send me your state"
+            if (!put(gt, new byte[]{0x53, 0x02, 0x00, 0x01, 0x00, 0x01, 0x01})) end(true, "sent (status query refused)");
+            return;
+          }
+          if (!put(gt, hex(pk.getString(idx[0]++)))) end(false, "write refused");
         } catch (Exception e) { end(false, String.valueOf(e.getMessage())); }
+      }
+      void enableNotify(android.bluetooth.BluetoothGatt gt) {
+        try {
+          android.bluetooth.BluetoothGattCharacteristic ch = chr(gt);
+          if (ch != null && gt.setCharacteristicNotification(ch, true)) {
+            android.bluetooth.BluetoothGattDescriptor d = ch.getDescriptor(CCC);
+            if (d != null) {
+              d.setValue(android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+              if (gt.writeDescriptor(d)) return;
+            }
+          }
+        } catch (Exception ignored) {}
+        next(gt);
       }
       @Override public void onConnectionStateChange(android.bluetooth.BluetoothGatt gt, int st, int ns) {
         if (ns == BluetoothProfile.STATE_CONNECTED) gt.discoverServices();
         else if (ns == BluetoothProfile.STATE_DISCONNECTED) end(false, "disconnected early (status " + st + ")");
       }
-      @Override public void onServicesDiscovered(android.bluetooth.BluetoothGatt gt, int st) { next(gt); }
+      @Override public void onServicesDiscovered(android.bluetooth.BluetoothGatt gt, int st) {
+        if (!verify) { next(gt); return; }
+        try { if (gt.requestMtu(185)) return; } catch (Exception ignored) {}   // status frame is ~60 bytes
+        enableNotify(gt);
+      }
+      @Override public void onMtuChanged(android.bluetooth.BluetoothGatt gt, int mtu, int st) { enableNotify(gt); }
+      @Override public void onDescriptorWrite(android.bluetooth.BluetoothGatt gt, android.bluetooth.BluetoothGattDescriptor d, int st) { next(gt); }
       @Override public void onCharacteristicWrite(android.bluetooth.BluetoothGatt gt, android.bluetooth.BluetoothGattCharacteristic c, int st) {
-        if (st != android.bluetooth.BluetoothGatt.GATT_SUCCESS) end(false, "write failed " + st); else next(gt);
+        if (st != android.bluetooth.BluetoothGatt.GATT_SUCCESS) { end(false, "write failed " + st); return; }
+        if (queryWriting[0]) {
+          queryWriting[0] = false; queried[0] = true;
+          ui.postDelayed(() -> end(true, last[0] != null ? last[0] : "sent (no status reply)"), 2500);
+        } else next(gt);
+      }
+      @Override public void onCharacteristicChanged(android.bluetooth.BluetoothGatt gt, android.bluetooth.BluetoothGattCharacteristic c) {
+        try {
+          byte[] v = c.getValue();
+          if (v == null) return;
+          rx.write(v, 0, v.length);
+          byte[] all = rx.toByteArray();
+          while (all.length >= 6) {
+            if ((all[0] & 0xFF) != 0x53) { rx.reset(); return; }
+            int need = 6 + (all[5] & 0xFF);
+            if (all.length < need) return;
+            byte[] f = java.util.Arrays.copyOfRange(all, 0, need);
+            all = java.util.Arrays.copyOfRange(all, need, all.length);
+            rx.reset(); rx.write(all, 0, all.length);
+            if ((f[1] & 0xFF) == 0x02) {
+              last[0] = ledStatusJson(f);
+              if (queried[0] && !gotStatus[0]) { gotStatus[0] = true; ui.postDelayed(() -> end(true, last[0]), 250); }
+            }
+          }
+        } catch (Exception ignored) {}
       }
     };
-    ui.postDelayed(() -> { if (ledBusy) { ledBusy = false; try { if (g[0] != null) { g[0].disconnect(); g[0].close(); } } catch (Exception ignored) {} if (!done[0]) { done[0] = true; sp.edit().remove("mac").apply(); reply(id, false, "LED controller timed out"); } } }, 12000);
+    ui.postDelayed(() -> { if (ledBusy) { ledBusy = false; try { if (g[0] != null) { g[0].disconnect(); g[0].close(); } } catch (Exception ignored) {} if (!done[0]) { done[0] = true; sp.edit().remove("mac").apply(); reply(id, false, "LED controller timed out"); } } }, 16000);
     g[0] = Build.VERSION.SDK_INT >= 23 ? dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) : dev.connectGatt(ctx, false, cb);
   }
 

@@ -170,6 +170,13 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 ## LED strip (A20)
 `led_color` tool (tools.js) -> `handlers.led_color` (server.js) builds BanlanX packets `53 cmd 00 01 00 len data` (power 50, mode 53, color 52 r g b level, brightness 51) -> device action `led` -> `DeviceBridge.ledWrite` scans mfr id 20563 (data[1]==0x10), caches MAC in prefs "led", writes ffe1, disconnects. Needs BLUETOOTH_SCAN. Untested on hardware; if it fails, check ACTIVITY for the detail text.
 
+### LED rework (2026-10-01, untested on hardware)
+Owner report: asked green got red, purple got red, control only returned after asking blue; pulling a remote's battery fixed it once. Causes unconfirmed (candidates: RF remote overriding, wrong chip order/light type, old brightness scale).
+- Fixed: level/brightness now 0-255 (was 100). `ledSend(packets)` in server.js reads state back (APK subscribes to ffe1 notifications, MTU 185, sends query `53 02 00 01 00 01 01`, parses frame -> JSON n,t,o,p,m,e,lv,wl,sp,rgb,drgb). Verify + 2 retries; honest FAILED text. Old APKs return plain 'sent' -> 'SUCCESS (unconfirmed)'.
+- Effects: config/ledfx.json (SPI dynamic 141, SPI sound 18, PWM dynamic 12, PWM sound 3) generated from the uniled reference. `led_color` takes effect, speed 1-10, music. Mode 3 = effect (53 03 id), mode 5 = sound, speed cmd 54. SPI has no true strobe; party = Rainbow Jump (SPI) / Seven Color Strobe (PWM, via alias). Sound party = mode 5 effect 18.
+- New tools: led_status, led_test (R,G,B 3 s each, then ask Owner what he saw), led_setup (chip order cmd 6B index RGB,RBG,GRB,GBR,BRG,BGR from seen colors; light_type cmd 6A only if explicitly asked; SPI RGB 0x86, workaround SPI RGB+1CH PWM 0x89).
+- Light type codes: PWM 81,83,85,87,8A; SPI 82,84,8D,86,88,8B,8E,89,8C.
+
 ## Remote model test
 Set `BENCH_TOKEN` (16+ chars) in Railway. Then `POST /api/bench?token=...` starts the test (body `{"ids":[...]}` optional), `GET /api/bench?token=...` returns progress/report/text, `POST /api/talk-model?token=...` sets the winner. Only those two routes accept the token.
 

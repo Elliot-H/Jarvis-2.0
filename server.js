@@ -1970,24 +1970,119 @@ handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
 };
 // ---------- LED strip (A20): BanlanX/SPLED SP63xE over BLE, packets built here, phone writes them ----------
 const LED_COLORS = { red: '255,0,0', green: '0,255,0', blue: '0,0,255', white: '255,255,255', 'warm white': '255,170,70', yellow: '255,200,0', orange: '255,90,0', purple: '150,0,255', violet: '150,0,255', pink: '255,40,140', magenta: '255,0,255', cyan: '0,255,255', teal: '0,200,160', aqua: '0,255,200', lime: '120,255,0', gold: '255,160,0', 'ice blue': '120,180,255', indigo: '60,0,255' };
+const LED_FX = (() => { try { return JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'ledfx.json'), 'utf8')); } catch { return { spi_dyn: {}, spi_snd: {}, pwm_dyn: {}, pwm_snd: {} }; } })();
+const LED_ORDERS = ['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR'];
+const LED_PWM_TYPES = new Set([0x81, 0x83, 0x85, 0x87, 0x8A]); // PWM light types (SP630E); the rest are SPI pixel strips
 const ledPkt = (cmd, ...d) => Buffer.from([0x53, cmd, 0, 1, 0, d.length, ...d]).toString('hex');
-handlers.led_color = async ({ color, brightness, power }) => {
-  const pk = [];
-  if (power === 'off' && !color) pk.push(ledPkt(0x50, 0));
-  else {
-    pk.push(ledPkt(0x50, 1));
-    if (color) {
-      const c = norm(color); let rgb = LED_COLORS[c] || LED_COLORS[Object.keys(LED_COLORS).find(k => c.includes(k)) || ''];
-      const hx = String(color).match(/#?([0-9a-f]{6})\b/i);
-      if (!rgb && hx) rgb = [0, 2, 4].map(i => parseInt(hx[1].slice(i, i + 2), 16)).join(',');
-      if (!rgb) return `Unknown color "${color}". Ask for a common color name or hex.`;
-      const [r, g, b] = rgb.split(',').map(Number);
-      pk.push(ledPkt(0x53, 1, 1), ledPkt(0x52, r, g, b, 100));
-    }
-    if (brightness != null) pk.push(ledPkt(0x51, 0, Math.max(1, Math.min(100, Math.round(brightness)))));
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v))));
+// Send packets and read the controller's own state back (new APK). Old APKs only say "sent": then st is null.
+async function ledSend(packets, verify = true) {
+  const r = await deviceAction('led', { packets, verify }, 30000);
+  let st = null; try { const j = JSON.parse(r.detail); if (j && typeof j === 'object' && 'm' in j) st = j; } catch {}
+  if (st) state.ledLast = { ...st, at: Date.now() };
+  return { ok: r.ok, detail: r.detail, st };
+}
+const ledDescribe = st => {
+  if (!st) return 'no state reported';
+  const modes = { 1: 'static color', 2: 'static white', 3: 'effect', 4: 'white effect', 5: 'sound reactive', 6: 'sound white', 7: 'custom' };
+  const order = LED_ORDERS[st.o] || `#${st.o}`;
+  return `power ${st.p ? 'on' : 'off'}, mode ${modes[st.m] || st.m}, effect #${st.e}, color ${st.rgb || '?'}, level ${st.lv}, speed ${st.sp}, light type 0x${Number(st.t).toString(16)}, chip order ${order}`;
+};
+const ledTables = st => {
+  const pwm = !!(st && LED_PWM_TYPES.has(st.t));
+  return pwm ? { dyn: LED_FX.pwm_dyn, snd: LED_FX.pwm_snd, pwm: true } : { dyn: LED_FX.spi_dyn, snd: LED_FX.spi_snd, pwm: false };
+};
+const LED_ALIASES = { party: ['rainbow jump', 'seven color strobe'], disco: ['rainbow jump', 'seven color jump'], strobe: ['seven color strobe', 'rainbow stars'], flash: ['seven color strobe', 'rainbow stars'], rainbow: ['rainbow', 'seven color jump'], fire: ['red/yellow fire', 'seven color breath'], gradient: ['rainbow wave', 'seven color gradient'], fade: ['rainbow wave', 'seven color gradient'], breathe: ['breath', 'seven color breath'], pulse: ['breath', 'seven color breath'], heartbeat: ['rainbow stars', 'seven color heartbeat'], comet: ['rainbow comet', 'seven color jump'], twinkle: ['rainbow stars', 'seven color jump'], stars: ['rainbow stars', 'seven color jump'] };
+function ledFindEffect(name, tbl, pwm) {
+  const q = norm(name).replace(/[^a-z0-9/ ]/g, ' ').trim(); const ents = Object.entries(tbl).map(([k, v]) => [Number(k), v, norm(v)]);
+  if (/^#?\d+$/.test(q)) { const n = Number(q.replace('#', '')); const e = ents.find(x => x[0] === n); if (e) return e; }
+  let e = ents.find(x => x[2] === q); if (e) return e;
+  const al = LED_ALIASES[q]; if (al) { const w = al[pwm ? 1 : 0]; e = ents.find(x => x[2] === w); if (e) return e; }
+  e = ents.find(x => x[2].includes(q)); if (e) return e;
+  const words = q.split(/\s+/).filter(Boolean); e = ents.find(x => words.every(w => x[2].includes(w)));
+  return e || null;
+}
+handlers.led_color = async ({ color, brightness, power, effect, speed, music }) => {
+  if (power === 'off' && !color && !effect && !music) {
+    let r = await ledSend([ledPkt(0x50, 0)]);
+    if (r.st && r.st.p) r = await ledSend([ledPkt(0x50, 0)]);
+    broadcast({ type: 'activity', text: `LED off: ${r.ok ? ledDescribe(r.st) : r.detail}`.slice(0, 300) });
+    if (!r.ok) return `LED failed: ${r.detail}`;
+    return r.st && r.st.p ? 'FAILED: the controller says it is still on after 2 tries. Say so plainly.' : `SUCCESS: LED off${r.st ? ' (controller confirmed).' : ' (sent; this app version cannot confirm).'}`;
   }
-  const r = await deviceAction('led', { packets: pk }, 25000);
-  return r.ok ? `SUCCESS: LED ${power === 'off' && !color ? 'off' : (color || 'on') + (brightness != null ? ' at ' + brightness + '%' : '')}.` : `LED failed: ${r.detail}`;
+  const lvl = brightness != null ? clamp(brightness * 2.55, 1, 255) : null;
+  const pk = [ledPkt(0x50, 1)]; let want = null, label = '', note = '';
+  if (music || effect) {
+    // current tables: ask the controller first, since SPI and PWM strips have different effect lists
+    const cur = await ledSend([]).catch(() => ({ st: null }));
+    const T = ledTables(cur.st);
+    if (music) {
+      const hit = Object.entries(T.snd); const pick = T.pwm ? hit.find(([, v]) => /jump/i.test(v)) : hit.find(([, v]) => /party/i.test(v));
+      const e = (effect && ledFindEffect(effect, T.snd, T.pwm)) || (pick ? [Number(pick[0]), pick[1]] : null);
+      if (!e) return 'No sound effect table available.';
+      pk.push(ledPkt(0x53, 5, e[0])); label = `sound mode "${e[1]}" (uses the controller's own microphone, not the phone)`; want = { m: 5, e: e[0] };
+    } else {
+      const e = ledFindEffect(effect, T.dyn, T.pwm);
+      if (!e) return `No effect called "${effect}". Try rainbow, party, fire, comet, stars, breath, gradient or an effect number; there are ${Object.keys(T.dyn).length}.`;
+      pk.push(ledPkt(0x53, 3, e[0])); label = `effect "${e[1]}"`; want = { m: 3, e: e[0] };
+      if (/^(strobe|flash|party)$/.test(norm(effect)) && !T.pwm) note = ' Note for the Owner: this strip type has no true strobe; I used the closest party effect.';
+    }
+    if (speed != null) pk.push(ledPkt(0x54, clamp(speed, 1, 10)));
+  } else if (color) {
+    const c = norm(color); let rgb = LED_COLORS[c] || LED_COLORS[Object.keys(LED_COLORS).find(k => c.includes(k)) || ''];
+    const hx = String(color).match(/#?([0-9a-f]{6})\b/i);
+    if (!rgb && hx) rgb = [0, 2, 4].map(i => parseInt(hx[1].slice(i, i + 2), 16)).join(',');
+    if (!rgb) return `Unknown color "${color}". Ask for a common color name or hex.`;
+    const [r, g, b] = rgb.split(',').map(Number);
+    pk.push(ledPkt(0x53, 1, 1), ledPkt(0x52, r, g, b, lvl ?? 255)); label = `${color}`; want = { m: 1, rgb: `${r},${g},${b}` };
+  } else if (lvl != null) { label = `brightness ${brightness}%`; }
+  if (lvl != null && (effect || music)) pk.push(ledPkt(0x51, 0, lvl));
+  if (lvl != null && !effect && !music && !color) pk.push(ledPkt(0x51, 0, lvl));
+  if (speed != null && !effect && !music) pk.push(ledPkt(0x54, clamp(speed, 1, 10)));
+  const ok = st => st && st.p && (!want || ((want.m == null || st.m === want.m) && (want.e == null || st.e === want.e) && (!want.rgb || (st.rgb && st.rgb.split(',').every((v, i) => Math.abs(Number(v) - Number(want.rgb.split(',')[i])) <= 12)))));
+  let r = await ledSend(pk);
+  for (let i = 0; i < 2 && r.ok && r.st && !ok(r.st); i++) r = await ledSend(pk);
+  broadcast({ type: 'activity', text: `LED ${label || 'update'}: ${r.ok ? ledDescribe(r.st) : r.detail}`.slice(0, 300) });
+  if (!r.ok) return `LED failed: ${r.detail}`;
+  if (!r.st) return `SUCCESS (unconfirmed): sent ${label || 'the change'} to the controller; this app version cannot read back. Tell the Owner to reinstall the latest app for confirmed control.${note}`;
+  if (!ok(r.st)) return `FAILED: after 3 tries the controller reports: ${ledDescribe(r.st)}. It did not accept the change. Say that plainly. Possible causes: a nearby RF remote overriding, the SP63XE phone app still connected, or wrong light type. Offer to run the LED test.`;
+  return `SUCCESS (controller confirmed): ${label || 'updated'}; ${ledDescribe(r.st)}. If the Owner sees a different color than that, the chip order is wrong: offer the LED test.${note}`;
+};
+handlers.led_status = async () => {
+  const r = await ledSend([]);
+  if (!r.ok) return `LED unreachable: ${r.detail}`;
+  return r.st ? `LED controller reports: ${ledDescribe(r.st)}. Level is 0-255, speed 1-10.` : `Reached the controller but this app version cannot read its state (${r.detail}). Reinstall the latest app.`;
+};
+handlers.led_test = async () => {
+  const seq = [['red', '255,0,0'], ['green', '0,255,0'], ['blue', '0,0,255']]; const out = [];
+  for (const [n, rgb] of seq) {
+    const [r, g, b] = rgb.split(',').map(Number);
+    const x = await ledSend([ledPkt(0x50, 1), ledPkt(0x53, 1, 1), ledPkt(0x52, r, g, b, 255)]);
+    if (!x.ok) return `LED test stopped at ${n}: ${x.detail}`;
+    out.push(`${n}: controller says ${x.st ? x.st.rgb : 'unconfirmed'}`);
+    await new Promise(res => setTimeout(res, 3500));
+  }
+  return `Test done (sent pure red, green, blue, 3 s each; ${out.join('; ')}). Now ask the Owner what colors he actually SAW in order. If they differ from red, green, blue, call led_setup with seen_red, seen_green, seen_blue. If they match, the order is fine and any earlier red was likely a remote or other app overriding.`;
+};
+handlers.led_setup = async ({ seen_red, seen_green, seen_blue, chip_order, light_type }) => {
+  const cur = await ledSend([]);
+  if (!cur.st) return 'Cannot read the controller, so I will not change its setup. Reinstall the latest app first.';
+  let order = null;
+  if (chip_order) order = LED_ORDERS.indexOf(String(chip_order).toUpperCase());
+  else if (seen_red && seen_green && seen_blue) {
+    const L = s => ({ red: 'R', green: 'G', blue: 'B' }[norm(s)] || String(s).toUpperCase()[0]);
+    const seen = { R: L(seen_red), G: L(seen_green), B: L(seen_blue) }; const c = LED_ORDERS[cur.st.o];
+    if (!c || ![seen.R, seen.G, seen.B].every(x => 'RGB'.includes(x)) || new Set(Object.values(seen)).size !== 3) return 'Those colors do not make a valid set. Ask the Owner again.';
+    const n = [...c].map(ch => seen[ch]).join(''); order = LED_ORDERS.indexOf(n);
+  }
+  const pk = [];
+  if (light_type != null) pk.push(ledPkt(0x50, 0), ledPkt(0x6A, 1, Number(light_type) & 0x7F));
+  if (order != null && order >= 0) pk.push(ledPkt(0x6B, order));
+  if (!pk.length) return 'Nothing to change: give seen colors, a chip_order, or a light_type.';
+  pk.push(ledPkt(0x50, 1), ledPkt(0x53, 1, 1), ledPkt(0x52, 255, 0, 0, 255));
+  const r = await ledSend(pk);
+  broadcast({ type: 'activity', text: `LED setup: ${r.ok ? ledDescribe(r.st) : r.detail}`.slice(0, 300) });
+  return r.ok ? `Setup written; now showing red. ${r.st ? 'Controller: ' + ledDescribe(r.st) + '. ' : ''}Ask the Owner if it is truly red; if not, run led_test again.` : `LED setup failed: ${r.detail}`;
 };
 // ---------- Awake: "I'm awake" dismisses every pending alarm on the phone ----------
 handlers.alarms_off = async () => {
