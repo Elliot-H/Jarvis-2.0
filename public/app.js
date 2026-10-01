@@ -385,7 +385,7 @@
 
   // ======================= filler lines (ack + "still working") =======================
   // Short Jarvis clips: one plays the instant a command is sent, more play if the job runs long.
-  const filler = { ack: {}, progress: {}, still: {}, cur: null, curAt: 0, timer: null, lastIdx: {} };
+  const filler = { wake: {}, ack: {}, progress: {}, still: {}, cur: null, curAt: 0, timer: null, lastIdx: {} };
   async function loadFillers() {
     try {
       const list = await (await fetch('/api/fillers')).json();
@@ -532,7 +532,7 @@
     else if (type === 'stopped') { wakeOn = false; }
     else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data + ' (back to speech listening)'); } setTimeout(() => { if (recWanted && !recOn) startMic(); }, 500); }
     else if (type === 'near') addActivity('Wake word almost (' + data + ')');
-    else if (type === 'hit') { if (speaking) return; addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; try { chime(true); } catch {} goActive(); }
+    else if (type === 'hit') { if (speaking) return; addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; answerWake(); }
   };
   function syncWake() {
     if (!window.AndroidWake || !booted) return;
@@ -627,6 +627,20 @@
     startMic();
     if (tries > 0) setTimeout(() => ensureMic(tries - 1), 700);
   }
+  // "Hey Jarvis" on its own: he answers "Yes, sir?" (cached clip, on the phone's own route), THEN the mic opens for the command,
+  // so the recognizer never hears his reply. No clip available: the old chime.
+  let wakeAnswering = false;
+  function answerWake() {
+    const url = !DISPLAY_ONLY && booted ? pickFiller('wake', 'generic') : null;
+    if (!url || wakeAnswering) return goActive();
+    wakeAnswering = true;
+    try { pauseListening(); } catch {}
+    setState('speaking', { echo: false });
+    let done = false; const go = () => { if (done) return; done = true; wakeAnswering = false; goActive({ quiet: true }); };
+    const a = newClip(url); a.onended = go; a.onerror = go; a.onpause = go;
+    setTimeout(go, 2500);
+    a.play().catch(go);
+  }
   function goActive(o = {}) {
     stopSpeaking(false);
     mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
@@ -680,7 +694,7 @@
     carry = ''; lastHeard = '';
     uttStart = lastLen;
     if (!p) return;
-    if (p.wakeOnly) return goActive();
+    if (p.wakeOnly) return answerWake();
     const text = p.text.replace(/^[\s,.!?]+/, '').trim();
     if (!text || text.length < 2) return goActive();
     if (p.fromWake && WAKE_UP.test(text)) { chime(true); addLog('user', 'Jarvis, ' + text); send({ type: 'wake', memo: readMemo() }); setState('thinking'); return; }

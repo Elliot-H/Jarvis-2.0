@@ -1396,6 +1396,7 @@ app.get('/api/alert-sound.mp3', async (req, res) => {
 const FILLERS = () => {
   const t = process.env.USER_TITLE || 'sir';
   return {
+    wake: { generic: [`Yes, ${t}?`] }, // instant answer to "Hey Jarvis" so he knows Jarvis is listening
     ack: {
       generic: [`Right away, ${t}.`, 'Give me just one moment.', 'Okay, let me find out.', 'Give me just a minute.', "I'm working on it right now.",
         'Just one second, please.', `On it, ${t}.`, 'Certainly. One moment.', 'Let me take a look.', `Very good, ${t}. Give me a second.`],
