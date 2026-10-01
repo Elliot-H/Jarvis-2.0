@@ -14,10 +14,11 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS } from './tools.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
+import * as trade from './trade.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -68,7 +69,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -413,6 +414,46 @@ Object.assign(handlers, {
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
   }
 });
+
+// Trading (Alpaca). Guardrails: propose -> Owner confirms in a LATER user turn; per-order and per-day caps; PAPER unless ALPACA_LIVE=1.
+state.tradeLog ||= [];
+let pendingTrade = null;
+const tradeFail = e => `Trading problem: ${e.message} Tell the Owner plainly.`;
+const spentToday = () => { const d = new Date().toDateString(); return state.tradeLog.filter(t => new Date(t.at).toDateString() === d && t.side === 'buy').reduce((a, t) => a + t.dollars, 0); };
+Object.assign(handlers, {
+  trade_status: async () => {
+    try { return JSON.stringify({ account: await trade.account(), positions: await trade.positions(), openOrders: await trade.orders(), spentTodayOnBuys: spentToday(), limits: { perOrder: trade.MAX_ORDER, perDay: trade.MAX_DAY } }); }
+    catch (e) { return tradeFail(e); }
+  },
+  trade_quote: async ({ symbol }) => { try { return JSON.stringify(await trade.quote(symbol)); } catch (e) { return tradeFail(e); } },
+  trade_propose: async ({ symbol, side, dollars }) => {
+    if (!turn || turn.origin !== 'user') return 'Refused: trades can only be proposed when the Owner asks, never from a scheduled or system task.';
+    const s = trade.normSymbol(symbol); if (!s) return 'Unrecognised symbol.';
+    dollars = Math.round(dollars * 100) / 100;
+    if (dollars > trade.MAX_ORDER) return `Refused: over the $${trade.MAX_ORDER} per-order limit. Tell the Owner; the limit is TRADE_MAX_ORDER.`;
+    if (side === 'buy' && spentToday() + dollars > trade.MAX_DAY) return `Refused: would pass the $${trade.MAX_DAY} daily buy limit ($${spentToday()} used).`;
+    try {
+      const q = await trade.quote(s);
+      pendingTrade = { symbol: s, side, dollars, price: q.price, turnId: turn.id, at: Date.now() };
+      return `PENDING (not placed): ${side} $${dollars} of ${s} at about $${q.price}, ${trade.mode()}. Read it back and ask him to say confirm.`;
+    } catch (e) { return tradeFail(e); }
+  },
+  trade_confirm: async () => {
+    if (!pendingTrade) return 'Nothing pending.';
+    if (!turn || turn.origin !== 'user' || turn.id <= pendingTrade.turnId) return 'Refused: he has not confirmed yet. Ask him to say confirm.';
+    if (Date.now() - pendingTrade.at > 120000) { pendingTrade = null; return 'That proposal expired (2 minutes). Propose again.'; }
+    const t = pendingTrade; pendingTrade = null;
+    try {
+      const o = await trade.place(t);
+      state.tradeLog.push({ ...t, orderId: o.id, status: o.status, mode: trade.mode(), at: new Date().toISOString() }); state.tradeLog = state.tradeLog.slice(-200); saveState();
+      return `Placed (${trade.mode()}): ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
+    } catch (e) { return tradeFail(e); }
+  },
+  trade_cancel: async ({ all } = {}) => {
+    pendingTrade = null;
+    try { return all ? await trade.cancelAll() : 'Pending trade cancelled.'; } catch (e) { return tradeFail(e); }
+  }
+});
 // Calendar: what each colour means is saved in state.calendarColors ({ "6": "install job", "default": "personal" }).
 state.calendarColors ||= {};
 try { if (!Object.keys(state.calendarColors).length && process.env.CALENDAR_COLOR_MEANINGS) state.calendarColors = JSON.parse(process.env.CALENDAR_COLOR_MEANINGS); } catch {}
@@ -442,7 +483,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
