@@ -105,9 +105,9 @@ public class MainActivity extends Activity {
   private void askPermissions() {
     java.util.ArrayList<String> need = new java.util.ArrayList<>();
     String[] all = Build.VERSION.SDK_INT >= 33
-        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.BLUETOOTH_CONNECT}
+        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN}
         : Build.VERSION.SDK_INT >= 31
-        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.BLUETOOTH_CONNECT}
+        ? new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN}
         : new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION};
     java.util.ArrayList<String> want = new java.util.ArrayList<>(java.util.Arrays.asList(all));
     want.add("net.dinglisch.android.tasker.PERMISSION_RUN_TASKS"); // lets Jarvis start the Tasker Bluetooth task

@@ -1716,6 +1716,27 @@ handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
   return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. ${still === 'playing' ? 'BUT music is STILL playing on the phone after 3 tries: say so plainly.' : 'The music is stopped and Spotify closed. Tell the Owner.'}` : `Could not finish: ${c.detail}`;
 };
+// ---------- LED strip (A20): BanlanX/SPLED SP63xE over BLE, packets built here, phone writes them ----------
+const LED_COLORS = { red: '255,0,0', green: '0,255,0', blue: '0,0,255', white: '255,255,255', 'warm white': '255,170,70', yellow: '255,200,0', orange: '255,90,0', purple: '150,0,255', violet: '150,0,255', pink: '255,40,140', magenta: '255,0,255', cyan: '0,255,255', teal: '0,200,160', aqua: '0,255,200', lime: '120,255,0', gold: '255,160,0', 'ice blue': '120,180,255', indigo: '60,0,255' };
+const ledPkt = (cmd, ...d) => Buffer.from([0x53, cmd, 0, 1, 0, d.length, ...d]).toString('hex');
+handlers.led_color = async ({ color, brightness, power }) => {
+  const pk = [];
+  if (power === 'off' && !color) pk.push(ledPkt(0x50, 0));
+  else {
+    pk.push(ledPkt(0x50, 1));
+    if (color) {
+      const c = norm(color); let rgb = LED_COLORS[c] || LED_COLORS[Object.keys(LED_COLORS).find(k => c.includes(k)) || ''];
+      const hx = String(color).match(/#?([0-9a-f]{6})\b/i);
+      if (!rgb && hx) rgb = [0, 2, 4].map(i => parseInt(hx[1].slice(i, i + 2), 16)).join(',');
+      if (!rgb) return `Unknown color "${color}". Ask for a common color name or hex.`;
+      const [r, g, b] = rgb.split(',').map(Number);
+      pk.push(ledPkt(0x53, 1, 1), ledPkt(0x52, r, g, b, 100));
+    }
+    if (brightness != null) pk.push(ledPkt(0x51, 0, Math.max(1, Math.min(100, Math.round(brightness)))));
+  }
+  const r = await deviceAction('led', { packets: pk }, 25000);
+  return r.ok ? `SUCCESS: LED ${power === 'off' && !color ? 'off' : (color || 'on') + (brightness != null ? ' at ' + brightness + '%' : '')}.` : `LED failed: ${r.detail}`;
+};
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
 // Without the Spotify Web API (Spotify limits who can create developer apps), the Android app drives the Spotify app directly.

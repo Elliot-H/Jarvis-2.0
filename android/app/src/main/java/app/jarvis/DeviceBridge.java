@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.media.AudioManager;
 import android.provider.MediaStore;
 import android.view.KeyEvent;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.JavascriptInterface;
@@ -50,6 +51,7 @@ public class DeviceBridge {
       else if ("music_active".equals(action)) { boolean a = ((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)).isMusicActive(); reply(id, true, a ? "playing" : "silent"); }
       else if ("close_app".equals(action)) { SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
       else if ("media_key".equals(action)) { if ("pause".equals(o.optString("key")) || "stop".equals(o.optString("key"))) SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; else if ("play".equals(o.optString("key"))) SttBridge.noResumeUntil = 0; mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
+      else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"));
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
     } catch (Exception e) { reply(id, false, String.valueOf(e.getMessage())); }
@@ -247,5 +249,74 @@ public class DeviceBridge {
       for (BluetoothDevice d : ad.getBondedDevices()) { if (sb.length() > 0) sb.append(" | "); sb.append(d.getName()); }
       reply(id, true, sb.length() == 0 ? "(no paired devices)" : sb.toString());
     } catch (SecurityException e) { reply(id, false, "Bluetooth permission was not granted to the Jarvis app."); }
+  }
+
+  // ---- BanlanX/SPLED BLE LED controller (SP63xE): scan, connect, write packets to ffe1, disconnect ----
+  private boolean ledBusy = false;
+  private void ledWrite(final String id, String macIn, final org.json.JSONArray pk) {
+    if (ledBusy) { reply(id, false, "LED controller busy"); return; }
+    if (pk == null || pk.length() == 0) { reply(id, false, "no packets"); return; }
+    final BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
+    if (ad == null || !ad.isEnabled()) { reply(id, false, "Bluetooth is off"); return; }
+    ledBusy = true;
+    final android.content.SharedPreferences sp = ctx.getSharedPreferences("led", Context.MODE_PRIVATE);
+    String mac = macIn.isEmpty() ? sp.getString("mac", "") : macIn;
+    if (!mac.isEmpty()) { ledConnect(id, ad.getRemoteDevice(mac), pk, sp); return; }
+    final android.bluetooth.le.BluetoothLeScanner sc = ad.getBluetoothLeScanner();
+    if (sc == null) { ledBusy = false; reply(id, false, "no BLE scanner"); return; }
+    final BluetoothDevice[] best = new BluetoothDevice[1];
+    final int[] bestRssi = {-999};
+    final android.bluetooth.le.ScanCallback cb = new android.bluetooth.le.ScanCallback() {
+      @Override public void onScanResult(int t, android.bluetooth.le.ScanResult r) {
+        android.bluetooth.le.ScanRecord rec = r.getScanRecord();
+        byte[] d = rec == null ? null : rec.getManufacturerSpecificData(20563);
+        if (d != null && d.length > 1 && d[1] == 0x10 && r.getRssi() > bestRssi[0]) { bestRssi[0] = r.getRssi(); best[0] = r.getDevice(); }
+      }
+    };
+    try { sc.startScan(cb); } catch (Exception e) { ledBusy = false; reply(id, false, "scan failed: " + e.getMessage()); return; }
+    ui.postDelayed(() -> {
+      try { sc.stopScan(cb); } catch (Exception ignored) {}
+      if (best[0] == null) { ledBusy = false; reply(id, false, "LED controller not found. Power it on, stay close, and check Nearby devices permission."); return; }
+      sp.edit().putString("mac", best[0].getAddress()).apply();
+      ledConnect(id, best[0], pk, sp);
+    }, 5000);
+  }
+
+  private void ledConnect(final String id, BluetoothDevice dev, final org.json.JSONArray pk, final android.content.SharedPreferences sp) {
+    final int[] idx = {0};
+    final boolean[] done = {false};
+    final android.bluetooth.BluetoothGatt[] g = new android.bluetooth.BluetoothGatt[1];
+    final Runnable finish = () -> {};
+    final android.bluetooth.BluetoothGattCallback cb = new android.bluetooth.BluetoothGattCallback() {
+      void end(boolean ok, String msg) {
+        if (done[0]) return; done[0] = true;
+        try { g[0].disconnect(); g[0].close(); } catch (Exception ignored) {}
+        ui.post(() -> { ledBusy = false; if (!ok) sp.edit().remove("mac").apply(); reply(id, ok, msg); });
+      }
+      void next(android.bluetooth.BluetoothGatt gt) {
+        try {
+          if (idx[0] >= pk.length()) { end(true, "sent"); return; }
+          String hex = pk.getString(idx[0]++);
+          byte[] b = new byte[hex.length() / 2];
+          for (int i = 0; i < b.length; i++) b[i] = (byte) Integer.parseInt(hex.substring(2 * i, 2 * i + 2), 16);
+          android.bluetooth.BluetoothGattService sv = gt.getService(java.util.UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb"));
+          android.bluetooth.BluetoothGattCharacteristic ch = sv == null ? null : sv.getCharacteristic(java.util.UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb"));
+          if (ch == null) { end(false, "controller service ffe0/ffe1 missing"); return; }
+          ch.setWriteType(android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+          ch.setValue(b);
+          if (!gt.writeCharacteristic(ch)) end(false, "write refused");
+        } catch (Exception e) { end(false, String.valueOf(e.getMessage())); }
+      }
+      @Override public void onConnectionStateChange(android.bluetooth.BluetoothGatt gt, int st, int ns) {
+        if (ns == BluetoothProfile.STATE_CONNECTED) gt.discoverServices();
+        else if (ns == BluetoothProfile.STATE_DISCONNECTED) end(false, "disconnected early (status " + st + ")");
+      }
+      @Override public void onServicesDiscovered(android.bluetooth.BluetoothGatt gt, int st) { next(gt); }
+      @Override public void onCharacteristicWrite(android.bluetooth.BluetoothGatt gt, android.bluetooth.BluetoothGattCharacteristic c, int st) {
+        if (st != android.bluetooth.BluetoothGatt.GATT_SUCCESS) end(false, "write failed " + st); else next(gt);
+      }
+    };
+    ui.postDelayed(() -> { if (ledBusy) { ledBusy = false; try { if (g[0] != null) { g[0].disconnect(); g[0].close(); } } catch (Exception ignored) {} if (!done[0]) { done[0] = true; sp.edit().remove("mac").apply(); reply(id, false, "LED controller timed out"); } } }, 12000);
+    g[0] = Build.VERSION.SDK_INT >= 23 ? dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) : dev.connectGatt(ctx, false, cb);
   }
 }
