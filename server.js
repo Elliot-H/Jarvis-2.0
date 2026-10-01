@@ -1741,16 +1741,18 @@ handlers.led_color = async ({ color, brightness, power }) => {
 handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   const say = t => broadcast({ type: 'activity', text: 'God Mode: ' + t });
   say('scanning for speakers');
-  const sc = await deviceAction('bt_scan', { seconds: 9 }, 25000);
+  const sc = await deviceAction('bt_scan', { seconds: 14 }, 30000);
   if (!sc.ok) return `God Mode scan failed: ${sc.detail}`;
   let list = []; try { list = JSON.parse(sc.detail); } catch {}
   const h = norm(speaker_name);
   const named = list.filter(d => d.name);
+  const looksAV = d => d.speaker || /tv|vizio|soundbar|sound bar|speaker|bar\b|roku|samsung|lg\b|sony|jbl|bose|sonos|rockville|\bv\d\d\b/i.test(d.name);
+  for (const d of named) if (!d.speaker && looksAV(d) && /tv|samsung|lg\b|sony|roku|vizio/i.test(d.name) && !/soundbar|sound bar/i.test(d.name)) d.tv = true;
   // Named: just that one. Otherwise every real speaker/soundbar/headphone in range (TVs included; other gear is left alone).
-  const pick = (h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(d => d.speaker)).sort((a, b) => b.rssi - a.rssi);
-  const seen = named.slice(0, 12).map(d => `${d.name}${d.speaker ? '' : ' (not a speaker)'} ${d.rssi}dBm`).join('; ') || 'nothing';
+  const pick = (h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(looksAV)).sort((a, b) => b.rssi - a.rssi);
+  const seen = list.slice(0, 20).map(d => `${d.name || d.mac}${d.speaker ? '' : ' (not a speaker, class ' + d.cod + ')'} ${d.rssi}dBm`).join('; ') || 'nothing';
   say('saw: ' + seen);
-  if (!pick.length) return `No ${speaker_name || 'speaker'} found in pairing range. Saw: ${seen}. Put the speaker in pairing mode (hold its Bluetooth button) and try again.`;
+  if (!pick.length) return `No ${speaker_name || 'speaker'} found in range. Bluetooth reaches about 30 feet, and a speaker only shows up while in pairing mode. Saw: ${seen}. Do not start music; tell the Owner exactly this.`;
   if (!state.speakers.length) state.speakers.push({ name: process.env.BT_SPEAKER_NAME || 'Rockville', alias: 'Rockville', area: '' });
   const ok = [], skipped = [];
   for (const d of pick) {

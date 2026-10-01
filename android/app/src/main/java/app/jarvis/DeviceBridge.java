@@ -345,6 +345,7 @@ public class DeviceBridge {
           int mc = bc == null ? 0 : bc.getDeviceClass();
           j.put("speaker", mc == 0x414 || mc == 0x41C || mc == 0x420 || mc == 0x428 || mc == 0x418 || mc == 0x42C);
           j.put("tv", mc == 0x42C);
+          j.put("cod", Integer.toHexString(mc));
           j.put("bonded", d.getBondState() == BluetoothDevice.BOND_BONDED);
           found.put(d.getAddress(), j);
         } catch (Exception ignored) {}
@@ -362,7 +363,7 @@ public class DeviceBridge {
       org.json.JSONArray a = new org.json.JSONArray();
       for (JSONObject j : found.values()) a.put(j);
       reply(id, true, a.toString());
-    }, Math.max(5, Math.min(15, seconds)) * 1000L);
+    }, Math.max(5, Math.min(20, seconds)) * 1000L);
   }
 
   private void btPair(final String id, final String mac, final int secs) {
