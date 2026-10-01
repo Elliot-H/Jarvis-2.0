@@ -63,11 +63,11 @@ export async function trending() {
 }
 
 // What the brain is told to do with the numbers. Lives in the tool result so it costs nothing on ordinary questions.
-export const PLAYBOOK = `How to use this (spoken reply must stay short; detail goes on screen):
+export const PLAYBOOK = `How to use this (spoken reply must stay short and stand on its own; fuller detail also goes on the HUD):
 1. Web-search news for the biggest movers and anything on the watchlist (at most 3 searches; prefer one search per story, recent days only).
 2. For each coin you can say something about: what happened, whether that is likely positive, negative or noise for the price, how confident you are (low/medium/high), and what would change your mind.
 3. show_panel id "crypto" with title "Crypto watch": one bullet per coin, ranked by how much the news matters. Add update_stats tiles only for the few coins the Owner follows.
-4. Say only the headline aloud, e.g. "Bitcoin steady, two stories worth your eye, on screen."
+4. Speak the headline and the key numbers aloud (price, 24h move, the one or two stories that matter), e.g. "Bitcoin steady near sixty-four thousand, up one percent. Ether down three on a staking story." Never say "on screen" or "on the HUD".
 Ground rules: this is analysis, not financial advice, and you are not a licensed advisor. News moves prices unpredictably and often the move happened before the story; say so when it applies. Never promise a direction. Never place, suggest placing, or offer to place a trade; if asked to, say the Owner must do it himself. If the news search returns nothing solid for a coin, say "no clear news" rather than guessing.`;
 
 /** Which coins moved enough today to be worth a midday look. Watched coins need a smaller move. */

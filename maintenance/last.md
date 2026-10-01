@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-01T04:53:24Z
-REQUEST: Add ticker_news tool and auto-run it for signal_scan, chart_read, crypto_scan movers.
+TIME: 2026-10-01T05:00:00Z
+REQUEST: Stop saying "it's on the screen" in spoken replies; speak the key numbers instead.
 RESULT:
-Owner, I added a ticker_news tool that takes a symbol and stock or crypto, auto-detected if you skip it. It uses Jarvis's existing web search to pull the top three to five dated headlines with sources and a one-line price note, and puts them on the HUD panel called ticker_news. Signal scans, chart reads and crypto scans now tell Jarvis to run it for each symbol he names and say whether the move has a confirmed catalyst or looks purely technical. He speaks only the headline and direction. It goes live when Railway redeploys; no APK reinstall needed.
+Owner, I changed Jarvis's rules so he speaks the numbers that matter out loud and no longer says things like on the screen or on the HUD. He still puts the full detail on the HUD for when you look. The change covers his general style, crypto briefs, chart reads and news checks. It goes live when Railway redeploys; no APK reinstall needed.

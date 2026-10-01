@@ -10,7 +10,7 @@ export function detectKind(sym, kind) {
   return CRYPTO.has(normSymbol(sym)) || /[-\/]USD/.test(raw) ? 'crypto' : 'stock';
 }
 
-export const NEWS_GUIDE = `How to use this (spoken reply stays short; headlines go on the HUD):
+export const NEWS_GUIDE = `How to use this (spoken reply stays short and stands on its own; headlines also go on the HUD):
 1. Web-search recent news (last few days; one or two searches) using the queries listed. Keep only real, dated stories from named sources. Never invent a headline, source or date.
 2. Pick the top 3 to 5 headlines. For each: headline, source, date.
 3. Add ONE plain-English line on what the story means for price (positive, negative or noise, and how confident).
@@ -18,7 +18,7 @@ export const NEWS_GUIDE = `How to use this (spoken reply stays short; headlines 
 5. Say aloud only the headline and direction, e.g. "TSLA: earnings beat, leaning positive." State whether the move has a confirmed catalyst or looks purely technical. If search finds nothing solid, say "no clear catalyst, looks technical" rather than guessing.
 Analysis only, not financial advice. News often lands after the move; say so when it applies.`;
 
-export const AUTO_NEWS = 'NEWS STEP: for each symbol you name as a mover or setup (at most 3), call ticker_news and then say whether the move has a confirmed catalyst or looks purely technical. Put the headlines on the HUD in panel id "ticker_news"; speak only the headline and direction.';
+export const AUTO_NEWS = 'NEWS STEP: for each symbol you name as a mover or setup (at most 3), call ticker_news and then say whether the move has a confirmed catalyst or looks purely technical. Put the headlines on the HUD in panel id "ticker_news"; speak the headline, direction and key price figure aloud; never say "on screen" or "on the HUD".';
 
 export function plan(symbol, kind) {
   const s = normSymbol(symbol);

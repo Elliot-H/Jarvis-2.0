@@ -193,3 +193,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Ticker news (A25)
 - `news.js` builds a search plan; the model's own web search (WebSearch / OpenRouter web_search) does the searching. `ticker_news` is in `NEWS_TOOLS` (tools.js) and talk-mode `TALK_TOOLS`; signal_scan, chart_read and crypto_scan results carry `news.AUTO_NEWS` telling Jarvis to call it per named symbol. HUD panel id `ticker_news`.
+
+## Voice-first replies (2026-10-01)
+- Owner is often voice-only. Spoken replies must carry the key numbers themselves and never say "on screen" / "on the HUD" unless he asks about the screen. HUD panels still get the detail. Rule lives in config/persona.md (Style) plus the guide strings in crypto.js, news.js, chart.js.
