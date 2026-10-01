@@ -73,7 +73,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'sigWatch'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -216,9 +216,11 @@ Object.assign(handlers, {
   }
 });
 const memoryServer = createSdkMcpServer({ alwaysLoad: true, name: 'memory', version: '1.0.0', tools: sdkTools(MEMORY_TOOLS) });
-const memoryContext = () => state.memory.length
+const memoryContext = () => (state.memory.length
   ? `\nLong-term memory (facts from earlier conversations; trust them, use them naturally, don't recite unprompted): ${state.memory.slice(-60).map(m => `[${m.id}] ${m.fact}`).join(' | ')}`
-  : '';
+  : '') + ((state.sigWatch || []).length
+  ? `\nMonitored investments (saved when he asked you to watch them; for "how are my investments going" call signal_watch list, which compares each entry price with the current price): ${state.sigWatch.map(w => `${w.symbol} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'} since ${w.addedAt ? new Date(w.addedAt).toISOString().slice(0, 10) : '?'}${w.note ? ' instruction: ' + w.note : ''}`).join(' | ')}`
+  : '');
 const failuresServer = createSdkMcpServer({ alwaysLoad: true, name: 'failures', version: '1.0.0', tools: sdkTools(FAILURE_TOOLS) });
 
 function setPanel(id, panel) {
@@ -1096,14 +1098,23 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
-handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
+handlers.signal_watch = async ({ action, symbol, entry, stop, note }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
-  if (action === 'list') return state.sigWatch.length ? state.sigWatch.map(w => `${w.symbol} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'Nothing on the sell-warning watch yet (Alpaca positions are watched automatically).';
+  if (action === 'list') {
+    if (!state.sigWatch.length) return 'Nothing on the sell-warning watch yet (Alpaca positions are watched automatically).';
+    const rows = await Promise.all(state.sigWatch.map(async w => {
+      let now = null; try { now = (await sig.evaluate(w.symbol)).price; } catch {}
+      const pl = now != null && w.entry ? ` now ${now} (${((now / w.entry - 1) * 100).toFixed(1)}% vs entry)` : '';
+      return `${w.symbol} entry ${w.entry ?? '?'}${w.addedAt ? ' on ' + new Date(w.addedAt).toISOString().slice(0, 10) : ''}${pl} stop ${w.stop ?? '?'}${w.note ? ' instruction: ' + w.note : ''}`;
+    }));
+    return rows.join('; ');
+  }
   if (!sym) return 'Which ticker?';
   if (action === 'remove') { state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym); saveState(); return `Stopped watching ${sym}.`; }
   try {
     const ev = await sig.evaluate(sym);
-    const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, addedAt: Date.now() };
+    const prev = state.sigWatch.find(x => x.symbol === sym);
+    const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, note: note || prev?.note || '', addedAt: Date.now() };
     state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState();
     return `Watching ${sym}: entry ${w.entry}, stop ${w.stop}. I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) { return `Could not add ${sym}: ${e.message}`; }
