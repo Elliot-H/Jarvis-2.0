@@ -227,3 +227,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Photo analysis (2026-10-01)
 - `vision.js` + `POST /api/photo` (server.js, own 12mb JSON limit, PIN cookie auth). HUD camera button (`#camBtn`, hidden `#camInput` capture=environment), client shrinks to 1600px JPEG. Voice trigger regex `LOOK_RE` in app.js `submit()` opens the camera; because browsers need a tap, a "TAP TO OPEN CAMERA" button appears. Result: `say` (spoken) + panel `image_analysis` (shown directly, not held, since he asked for it). Failures call `recordFailure` and are spoken. Env: `VISION_MODEL` (optional, must support images; defaults to `TALK_MODEL`). Costs counted via `addSpend`. APK: `MainActivity.onShowFileChooser` added (reinstall needed); not compiled or run from the maintenance sandbox.
+
+## Mic button fix (2026-10-01)
+- Tap-to-talk left the recognizer deaf because startMic() reopened it 500 ms after asking the wake engine to stop, but the engine frees its AudioRecord on its own thread. startMic now waits for the wake engine's `stopped` event (2.5 s fallback). Tap while the mic is really open stops it (aborts the recognizer); a tap with a stale "listening" state now starts it. Page-only change (public/app.js), no APK reinstall.

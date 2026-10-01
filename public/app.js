@@ -514,7 +514,11 @@
     if (!rec || now < micNotBefore || now - lastMicStart < 600) return;
     // Two recorders on the mic at once leave the recognizer deaf: the wake word engine must be off while the recognizer listens.
     if (WAKE_FIRST && wakeEver && !wakeErrShown && mode === 'passive' && now > manualMicUntil) return;
-    if (window.AndroidWake && wakeOn) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; setTimeout(startMic, 500); return; }
+    // The wake engine releases the mic on its own thread, a moment after stop(): wait for its 'stopped' report, or the recognizer opens against a still-held mic and hears nothing.
+    if (window.AndroidWake && (wakeOn || wakeHalting)) {
+      if (wakeOn) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; wakeHalting = true; clearTimeout(wakeHaltTimer); wakeHaltTimer = setTimeout(() => { wakeHalting = false; startMic(); }, 2500); }
+      return;
+    }
     if (now > manualMicUntil && musicPlaying()) {
       if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Music is playing: listening is off so it does not cut out. Tap the mic button to talk.'); }
       return;
@@ -524,12 +528,13 @@
   }
   // While music plays the recognizer stays off (it pauses Spotify). An on-device wake word (Porcupine, no audio focus) listens instead.
   let wakeOn = false, wakeErrShown = false, wakeEver = false;
+  let wakeHalting = false, wakeHaltTimer = 0;
   window.__wake = (type, data) => {
     if (type === 'started') {
       // Late start (models take a moment to load): if the recognizer is being used right now, the wake engine must not hold the mic.
       if (recOn || mode === 'active' || Date.now() < manualMicUntil) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; return; }
       wakeOn = true; wakeEver = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (app ' + data + ').'); }
-    else if (type === 'stopped') { wakeOn = false; }
+    else if (type === 'stopped') { wakeOn = false; if (wakeHalting) { wakeHalting = false; clearTimeout(wakeHaltTimer); setTimeout(() => { if (recWanted && !recOn) startMic(); }, 200); } }
     else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data + ' (back to speech listening)'); } setTimeout(() => { if (recWanted && !recOn) startMic(); }, 500); }
     else if (type === 'near') addActivity('Wake word almost (' + data + ')');
     else if (type === 'hit') { if (speaking) return; addActivity('Heard "Jarvis" (' + data + ')'); manualMicUntil = Date.now() + 15000; answerWake(); }
@@ -811,7 +816,12 @@
     if (!booted) boot();
     submit(v);
   });
-  $('#micBtn').onclick = () => { if (!booted) return boot(); if (state === 'listening') { mode = 'passive'; setState('idle'); } else { manualMicUntil = Date.now() + 15000; goActive(); } };
+  $('#micBtn').onclick = () => {
+    if (!booted) return boot();
+    // Only a mic that is really open counts as "on"; a stale listening state must not turn the tap into a stop.
+    if (state === 'listening' && recOn) { mode = 'passive'; manualMicUntil = 0; clearTimeout(activeTimer); try { rec && rec.abort(); } catch {} setState('idle'); }
+    else { micNotBefore = 0; recBackoff = 0; manualMicUntil = Date.now() + 15000; goActive(); }
+  };
   $('#reactor').onclick = () => { if (!booted) return boot(); if (speaking) stopSpeaking(); else goActive(); };
   $('#newSess').onclick = () => { send({ type: 'new_session' }); $('#log').innerHTML = ''; };
   document.addEventListener('keydown', e => {
