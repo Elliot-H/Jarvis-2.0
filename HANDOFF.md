@@ -169,3 +169,6 @@ OPENROUTER_API_KEY, TALK_MODEL, TALK_SEARCH_ENGINE, TALK_REASONING, BRAIN, MONTH
 
 ## LED strip (A20)
 `led_color` tool (tools.js) -> `handlers.led_color` (server.js) builds BanlanX packets `53 cmd 00 01 00 len data` (power 50, mode 53, color 52 r g b level, brightness 51) -> device action `led` -> `DeviceBridge.ledWrite` scans mfr id 20563 (data[1]==0x10), caches MAC in prefs "led", writes ffe1, disconnects. Needs BLUETOOTH_SCAN. Untested on hardware; if it fails, check ACTIVITY for the detail text.
+
+## Remote model test
+Set `BENCH_TOKEN` (16+ chars) in Railway. Then `POST /api/bench?token=...` starts the test (body `{"ids":[...]}` optional), `GET /api/bench?token=...` returns progress/report/text, `POST /api/talk-model?token=...` sets the winner. Only those two routes accept the token.

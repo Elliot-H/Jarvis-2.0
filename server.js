@@ -1126,6 +1126,9 @@ setInterval(() => { let c = false; for (const f of state.followups) if (f.status
 const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png)$/;
 app.use((req, res, next) => {
   if (authed(req) || PUBLIC_FILES.test(req.path)) return next();
+  // Claude can run and read the model test remotely with BENCH_TOKEN (set in Railway); only the bench and talk-model routes accept it.
+  const BT = String(process.env.BENCH_TOKEN || '');
+  if (BT.length >= 16 && /^\/api\/(bench|talk-model)$/.test(req.path) && String(req.query.token || req.headers['x-bench-token'] || '') === BT) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'locked' });
   res.status(401).send(loginPage());
 });
