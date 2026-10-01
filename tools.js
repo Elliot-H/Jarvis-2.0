@@ -76,6 +76,11 @@ export const PHONE_TOOLS = [
   { name: 'followup_skip', description: 'Skip (never send) follow-ups by id.', shape: { ids: z.array(z.string()) } },
   { name: 'followup_edit', description: 'Change the wording of one follow-up before it is approved.', shape: { id: z.string(), text: z.string() } },
   { name: 'followup_add', description: 'Draft a follow-up for a customer by name (as saved in the shop phone contacts). Still needs his OK to send.', shape: { customer: z.string(), text: z.string().optional() } },
+  { name: 'vehicle_add', description: 'Set up a vehicle (truck, R8...) with its Bluetooth OBD dongle: the dongle\'s paired Bluetooth name or address (use bluetooth_paired to see names). The phone then reads it whenever it is in range.', shape: { name: z.string(), dongle: z.string() } },
+  { name: 'vehicle_scan', description: 'Read a vehicle now through its OBD dongle (phone must be near it): battery volts, check engine light, trouble codes, fuel, coolant. Explain codes in plain words.', shape: { name: z.string().optional() } },
+  { name: 'vehicle_status', description: 'Last reading of one or all vehicles, without scanning.', shape: { name: z.string().optional() } },
+  { name: 'vehicle_clear_codes', description: 'Clear trouble codes / check engine light on a vehicle. ONLY when the Owner explicitly asks to clear codes.', shape: { name: z.string() } },
+  { name: 'vehicle_remove', description: 'Remove a vehicle.', shape: { name: z.string() } },
   { name: 'reminder_list', description: 'List the reminders in the bucket with their ids.', shape: {} },
   { name: 'reminder_remove', description: 'Remove a reminder by id.', shape: { id: z.string() } },
   {

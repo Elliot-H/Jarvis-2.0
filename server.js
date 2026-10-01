@@ -68,7 +68,7 @@ const state = loadState();
 state.stats ||= {}; state.panels ||= {};
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1561,6 +1561,58 @@ function deviceAction(action, args = {}, timeout = 20000) {
     for (const c of deviceClients) if (c.readyState === 1) c.send(JSON.stringify({ type: 'device', id, action, ...args }));
   });
 }
+// ---------- vehicles: Bluetooth OBD dongles read by the phone when it is near (A17) ----------
+// state.vehicles [{name, dongle (paired BT name or address), last:{...scan}, lastTry, alerts:{key: time}}]. While the Jarvis app is
+// open (foreground or background), it tries each vehicle every OBD_EVERY_MIN minutes; out of range just fails quietly.
+// After each good scan: new trouble codes, a low resting battery (R8 sitting) and low fuel become one short remark.
+state.vehicles ||= [];
+const OBD_EVERY = Number(process.env.OBD_EVERY_MIN || 20) * 60e3;
+const vFind = name => state.vehicles.find(v => norm(v.name) === norm(name)) || (state.vehicles.length === 1 && !name ? state.vehicles[0] : null)
+  || state.vehicles.find(v => norm(v.name).includes(norm(name || '#')) || norm(name || '#').includes(norm(v.name)));
+async function obdScan(v, why = 'auto') {
+  v.lastTry = Date.now(); saveState();
+  const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
+  let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
+  if (!d.ok) { if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
+  const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
+  const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
+  const fresh = (d.dtcs || []).filter(c => !(prev.dtcs || []).includes(c));
+  if (fresh.length) lines.push(`Heads up, sir: the ${v.name} has ${fresh.length > 1 ? 'new trouble codes' : 'a new trouble code'}, ${listJoin(fresh)}${d.mil ? ', and the check engine light is on' : ''}. Ask me what ${fresh.length > 1 ? 'they mean' : 'it means'}.`);
+  else if (d.mil && !prev.mil) lines.push(`The ${v.name}'s check engine light has come on, sir.`);
+  const off = !d.rpm;
+  if (off && d.volts && d.volts < Number(process.env.OBD_LOW_VOLTS || 12.2) && once('volts', 24)) lines.push(`The ${v.name}'s battery is resting at ${d.volts.toFixed(1)} volts, sir. Might be worth putting the tender on it.`);
+  if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
+  saveState();
+  if (lines.length && why === 'auto') deliver(lines.join(' '), v.name);
+  return { ok: true, data: d, news: lines };
+}
+if (!process.env.JARVIS_SMOKE) setInterval(async () => {
+  if (!deviceClients.size || busy) return;
+  for (const v of state.vehicles) if (!v.lastTry || Date.now() - v.lastTry > OBD_EVERY) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
+}, 5 * 60_000);
+const vSummary = v => { const d = v.last; if (!d) return `${v.name}: never read yet (dongle "${v.dongle}").`;
+  return `${v.name} (read ${d.at.slice(0, 16).replace('T', ' ')} UTC): battery ${d.volts ?? '?'} V${d.rpm ? ` (engine running, ${d.rpm} rpm)` : ' (engine off)'}, check engine light ${d.mil ? 'ON' : 'off'}, codes: ${(d.dtcs || []).join(', ') || 'none'}${d.fuelPct != null ? `, fuel ${d.fuelPct}%` : ''}${d.coolantC != null ? `, coolant ${d.coolantC} C` : ''}${d.kmSinceClear != null ? `, ${Math.round(d.kmSinceClear * 0.621)} miles since codes were last cleared` : ''}${d.vin ? `, VIN ${d.vin}` : ''}.`; };
+Object.assign(handlers, {
+  vehicle_add: async ({ name, dongle }) => {
+    state.vehicles = state.vehicles.filter(v => norm(v.name) !== norm(name));
+    state.vehicles.push({ name, dongle }); saveState();
+    return `Saved the ${name} with OBD dongle "${dongle}". The phone will read it whenever it is in range (every ${OBD_EVERY / 60e3} min while the app runs). Ask "scan the ${name}" to try now.`;
+  },
+  vehicle_remove: async ({ name }) => { const n = state.vehicles.length; state.vehicles = state.vehicles.filter(v => norm(v.name) !== norm(name)); saveState(); return n === state.vehicles.length ? 'No vehicle by that name.' : 'Removed.'; },
+  vehicle_scan: async ({ name }) => {
+    const v = vFind(name); if (!v) return state.vehicles.length ? `Which one? ${state.vehicles.map(x => x.name).join(', ')}.` : 'No vehicles set up yet. Pair the OBD dongle with the phone, then use vehicle_add (bluetooth_paired lists the paired names).';
+    const r = await obdScan(v, 'asked');
+    return r.ok ? vSummary(v) + (r.news.length ? ' New: ' + r.news.join(' ') : '') + ' Explain any trouble codes in plain words (likely causes, how urgent).' : `Could not read the ${v.name}: ${r.why}`;
+  },
+  vehicle_status: async ({ name }) => { const vs = name ? [vFind(name)].filter(Boolean) : state.vehicles; return vs.length ? vs.map(vSummary).join('\n') : 'No vehicles set up yet.'; },
+  vehicle_clear_codes: async ({ name }) => {
+    const v = vFind(name); if (!v) return 'Which vehicle?';
+    const r = await deviceAction('obd_clear', { dongle: v.dongle }, 30000);
+    let d = {}; try { d = JSON.parse(r.detail); } catch {}
+    if (d.cleared) { if (v.last) { v.last.dtcs = []; v.last.mil = false; } saveState(); return `Codes cleared on the ${v.name}. The check engine light should go out (it comes back if the fault is still there).`; }
+    return `Could not clear codes on the ${v.name}: ${d.detail || 'the car did not confirm'}. The engine usually needs to be off with the key on.`;
+  }
+});
 const spoRef = () => state.spotifyRefresh || process.env.SPOTIFY_REFRESH_TOKEN || '';
 const spoFail = e => String(e.message || e) === 'NO_DEVICE'
   ? 'Spotify has no player to use. Spotify must be open on the phone.'

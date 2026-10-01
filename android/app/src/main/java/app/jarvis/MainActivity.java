@@ -66,6 +66,7 @@ public class MainActivity extends Activity {
     web.addJavascriptInterface(new DeviceBridge(this, web), "AndroidDevice");
     web.addJavascriptInterface(new WakeBridge(this, web), "AndroidWake");
     web.addJavascriptInterface(new PhoneAudio(this, web), "AndroidPhoneAudio");
+    web.addJavascriptInterface(new ObdBridge(this, web), "AndroidObd");
 
     final String origin = BuildConfig.BASE_URL;
     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) && !shim.isEmpty()) {
