@@ -965,13 +965,12 @@
     rx.restore();
   }
 
-  // boot screen emblem: same reactor, drawn on its own canvas
+  // boot screen emblem: Reactor Prime (prime.js), drawn on its own canvas
   function drawBootReactor(t) {
     const r = brc.getBoundingClientRect(), w = r.width * dpr, h = r.height * dpr;
     if (brc.width !== w || brc.height !== h) { brc.width = w; brc.height = h; }
-    const keep = [rx, W, H]; rx = brx; W = w; H = h;
-    drawReactor(t);
-    [rx, W, H] = keep;
+    brx.setTransform(1, 0, 0, 1, 0, 0); brx.clearRect(0, 0, brc.width, brc.height);
+    drawPrime(brx, Math.min(w, h), t, { bg: false, hud: false, fx: false, R: 128 });
   }
 
   // ======================= start =======================

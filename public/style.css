@@ -31,7 +31,7 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
   background:radial-gradient(circle at center,#06223a 0%,#01050a 70%);transition:opacity .8s}
 .boot.hide{opacity:0;pointer-events:none}
 .boot-inner{text-align:center}
-.boot-reactor{display:block;width:min(360px,94vw);height:min(260px,62vw);margin:0 auto 18px}
+.boot-reactor{display:block;width:min(320px,82vw);height:min(320px,82vw);margin:0 auto 14px}
 .boot-logo{font-family:Orbitron;font-weight:900;font-size:clamp(34px,7vw,84px);letter-spacing:.28em;
   color:var(--c);text-shadow:var(--glow);animation:flick 3s infinite}
 .boot-sub{margin-top:8px;color:var(--muted);letter-spacing:.4em;font-size:12px;text-transform:uppercase}
