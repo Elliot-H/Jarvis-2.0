@@ -62,7 +62,7 @@
       s === 'listening' ? 'Go ahead, ' + cfg.userTitle + '…' :
       s === 'thinking' ? 'Working on it' :
       s === 'speaking' ? 'Click the core or press SPACE to interrupt' :
-      `Say "${cap(cfg.wakeWord)}" or press SPACE`;
+      `Say "${window.AndroidWake ? 'Hey ' + cap(cfg.wakeWord) : cap(cfg.wakeWord)}" or press SPACE`;
     if (echo && !DISPLAY_ONLY && ws?.readyState === 1 && (s === 'listening' || s === 'speaking' || s === 'idle'))
       ws.send(JSON.stringify({ type: 'state', state: s }));
   }
@@ -962,7 +962,7 @@
   (async () => {
     try { cfg = await (await fetch('/api/config')).json(); } catch {}
     $('#brandName').textContent = cfg.name.split('').join('.').toUpperCase() + '.';
-    $('#wakeHint').textContent = cap(cfg.wakeWord);
+    $('#wakeHint').textContent = window.AndroidWake ? 'Hey ' + cap(cfg.wakeWord) : cap(cfg.wakeWord); // the phone's wake model is trained on "Hey Jarvis"
     chip('#chipVoice', cfg.elevenlabs ? 'ok' : 'warn', cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE');
     if (DISPLAY_ONLY) { $('#boot').classList.add('hide'); booted = true; $('.bottom .cmd').style.display = 'none'; chip('#chipMic', '', 'DISPLAY'); }
     setState('idle', { echo: false });
