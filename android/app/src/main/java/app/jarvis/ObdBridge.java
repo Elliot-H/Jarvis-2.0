@@ -68,7 +68,26 @@ public class ObdBridge {
         r.put("ecu", ecu);
         if (ecu) {
           r.put("mil", (st[0] & 0x80) != 0).put("dtcCount", st[0] & 0x7F);
-          r.put("dtcs", dtcs(cmd(in, out, "03", 5000)));
+          r.put("dtcs", dtcs(cmd(in, out, "03", 5000), "43"));
+          r.put("pending", dtcs(cmd(in, out, "07", 5000), "47"));   // seen once, light not on (yet)
+          r.put("readiness", readiness(st));
+          JSONObject trims = new JSONObject();
+          String[][] tp = {{"0106", "stft1"}, {"0107", "ltft1"}, {"0108", "stft2"}, {"0109", "ltft2"}};
+          for (String[] q : tp) { int[] v = bytes(cmd(in, out, q[0], 2500), "41" + q[0].substring(2), 1); if (v != null) trims.put(q[1], Math.round((v[0] - 128) * 1000 / 128.0) / 10.0); }
+          if (trims.length() > 0) r.put("trims", trims);
+          // Freeze frame (frame 0): the snapshot saved when the light came on
+          int[] ffd = bytes(cmd(in, out, "020200", 3000), "420200", 2);
+          if (ffd != null && (ffd[0] | ffd[1]) != 0) {
+            JSONObject ff = new JSONObject().put("code", code(ffd[0], ffd[1]));
+            int[] v;
+            if ((v = bytes(cmd(in, out, "020400", 2500), "420400", 1)) != null) ff.put("loadPct", Math.round(v[0] * 100 / 255.0));
+            if ((v = bytes(cmd(in, out, "020500", 2500), "420500", 1)) != null) ff.put("coolantC", v[0] - 40);
+            if ((v = bytes(cmd(in, out, "020C00", 2500), "420C00", 2)) != null) ff.put("rpm", (v[0] * 256 + v[1]) / 4);
+            if ((v = bytes(cmd(in, out, "020D00", 2500), "420D00", 1)) != null) ff.put("kmh", v[0]);
+            if ((v = bytes(cmd(in, out, "020600", 2500), "420600", 1)) != null) ff.put("stft1", Math.round((v[0] - 128) * 1000 / 128.0) / 10.0);
+            if ((v = bytes(cmd(in, out, "020700", 2500), "420700", 1)) != null) ff.put("ltft1", Math.round((v[0] - 128) * 1000 / 128.0) / 10.0);
+            r.put("freezeFrame", ff);
+          }
           int[] f = bytes(cmd(in, out, "012F", 3000), "412F", 1); if (f != null) r.put("fuelPct", Math.round(f[0] * 100 / 255.0));
           int[] t = bytes(cmd(in, out, "0105", 3000), "4105", 1); if (t != null) r.put("coolantC", t[0] - 40);
           int[] rp = bytes(cmd(in, out, "010C", 3000), "410C", 2); if (rp != null) r.put("rpm", (rp[0] * 256 + rp[1]) / 4);
@@ -102,9 +121,26 @@ public class ObdBridge {
     int[] o = new int[n]; for (int k = 0; k < n; k++) o[k] = Integer.parseInt(r.substring(i + head.length() + k * 2, i + head.length() + k * 2 + 2), 16);
     return o;
   }
-  // Mode 03 reply: "43" then 2-byte codes (CAN replies may carry a count byte after 43). Zero pairs are padding.
-  private static JSONArray dtcs(String r) {
-    JSONArray a = new JSONArray(); int i = r.indexOf("43"); if (i < 0) return a;
+  private static String code(int b0, int b1) {
+    String[] sys = {"P", "C", "B", "U"};
+    return sys[b0 >> 6] + ((b0 >> 4) & 3) + Integer.toHexString(b0 & 15).toUpperCase() + String.format("%02X", b1);
+  }
+  // Emissions monitors from 0101 bytes B, C, D: which are supported and which have not finished ("not ready").
+  private static JSONObject readiness(int[] st) {
+    JSONObject o = new JSONObject(); JSONArray ok = new JSONArray(), not = new JSONArray();
+    try {
+      String[] cont = {"misfire", "fuel system", "components"};
+      for (int b = 0; b < 3; b++) if ((st[1] & (1 << b)) != 0) ((st[1] & (1 << (b + 4))) != 0 ? not : ok).put(cont[b]);
+      boolean diesel = (st[1] & 8) != 0;
+      String[] gas = {"catalyst", "heated catalyst", "evap", "secondary air", "A/C", "O2 sensor", "O2 heater", "EGR"};
+      if (!diesel) for (int b = 0; b < 8; b++) if ((st[2] & (1 << b)) != 0) ((st[3] & (1 << b)) != 0 ? not : ok).put(gas[b]);
+      o.put("ready", ok).put("notReady", not);
+    } catch (Exception ignored) {}
+    return o;
+  }
+  // Mode 03/07 reply: "43"/"47" then 2-byte codes (CAN replies may carry a count byte). Zero pairs are padding.
+  private static JSONArray dtcs(String r, String head) {
+    JSONArray a = new JSONArray(); int i = r.indexOf(head); if (i < 0) return a;
     String d = r.substring(i + 2).replaceAll("[^0-9A-F]", "");
     if (d.length() % 4 == 2) d = d.substring(2);
     String[] sys = {"P", "C", "B", "U"};

@@ -39,5 +39,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A14 | Routine learning | 💡 | "You're usually at the shop by 9." |
 | A15 | Email triage | 💡 | Summary + urgent flags. |
 | A16 | Stores on the way | 💡 | "When I'm near Lowe's, remind me..." |
-| A17 | Vehicles: truck + R8 via Bluetooth OBD dongles | ✅ | Free (one-time dongle). Phone reads it when near: battery volts, check engine light, trouble codes (explained), fuel, coolant. Alerts on new codes, low resting battery, low fuel. Clears codes only on request. |
+| A17 | Vehicles: truck + R8 via Bluetooth OBD dongles | ✅ | Free (one-time dongle). Phone reads it when near: battery volts, check engine light, trouble + pending codes (explained), inspection readiness, fuel trims, freeze frame, fuel, coolant. Alerts on new/pending codes, low resting battery, battery drain trend (parasitic draw), low fuel. Clears codes only on request. |
 | A18 | Lights, compressor, bay door, heat (Shelly relays) | 💡 | Compressor through a motor contactor (electrician). Off freely, on only after confirmation. |

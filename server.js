@@ -1580,6 +1580,16 @@ async function obdScan(v, why = 'auto') {
   if (fresh.length) lines.push(`Heads up, sir: the ${v.name} has ${fresh.length > 1 ? 'new trouble codes' : 'a new trouble code'}, ${listJoin(fresh)}${d.mil ? ', and the check engine light is on' : ''}. Ask me what ${fresh.length > 1 ? 'they mean' : 'it means'}.`);
   else if (d.mil && !prev.mil) lines.push(`The ${v.name}'s check engine light has come on, sir.`);
   const off = !d.rpm;
+  // Battery trend: resting readings only (engine off and not run for 2 h, so no surface charge from driving)
+  if (!off) v.lastRun = now;
+  if (off && d.volts && (!v.lastRun || now - v.lastRun > 2 * 3600e3)) {
+    v.volts = [...(v.volts || []).filter(x => now - x.t < 14 * 86400e3), { t: now, v: d.volts }].slice(-200);
+    const drop = voltDropPerDay(v.volts);
+    if (drop != null && drop >= Number(process.env.OBD_DRAIN_V_DAY || 0.08) && once('drain', 72))
+      lines.push(`The ${v.name} is losing about ${drop.toFixed(2)} volts a day while it sits, sir. Something is drawing power; worth a parasitic draw test.`);
+  }
+  const freshPending = (d.pending || []).filter(c => !(prev.pending || []).includes(c) && !(d.dtcs || []).includes(c));
+  if (freshPending.length) lines.push(`Early warning on the ${v.name}: ${listJoin(freshPending)} ${freshPending.length > 1 ? 'are' : 'is'} pending. The light isn't on yet.`);
   if (off && d.volts && d.volts < Number(process.env.OBD_LOW_VOLTS || 12.2) && once('volts', 24)) lines.push(`The ${v.name}'s battery is resting at ${d.volts.toFixed(1)} volts, sir. Might be worth putting the tender on it.`);
   if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
   saveState();
@@ -1590,8 +1600,21 @@ if (!process.env.JARVIS_SMOKE) setInterval(async () => {
   if (!deviceClients.size || busy) return;
   for (const v of state.vehicles) if (!v.lastTry || Date.now() - v.lastTry > OBD_EVERY) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
 }, 5 * 60_000);
+// Least-squares slope of resting voltage over at least 2 days of readings, as volts lost per day (positive = draining).
+function voltDropPerDay(pts) {
+  if (!pts || pts.length < 3 || pts[pts.length - 1].t - pts[0].t < 2 * 86400e3) return null;
+  const xs = pts.map(p => p.t / 86400e3), ys = pts.map(p => p.v), n = pts.length;
+  const mx = xs.reduce((a, b) => a + b) / n, my = ys.reduce((a, b) => a + b) / n;
+  const num = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0), den = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+  return den ? -num / den : null;
+}
 const vSummary = v => { const d = v.last; if (!d) return `${v.name}: never read yet (dongle "${v.dongle}").`;
-  return `${v.name} (read ${d.at.slice(0, 16).replace('T', ' ')} UTC): battery ${d.volts ?? '?'} V${d.rpm ? ` (engine running, ${d.rpm} rpm)` : ' (engine off)'}, check engine light ${d.mil ? 'ON' : 'off'}, codes: ${(d.dtcs || []).join(', ') || 'none'}${d.fuelPct != null ? `, fuel ${d.fuelPct}%` : ''}${d.coolantC != null ? `, coolant ${d.coolantC} C` : ''}${d.kmSinceClear != null ? `, ${Math.round(d.kmSinceClear * 0.621)} miles since codes were last cleared` : ''}${d.vin ? `, VIN ${d.vin}` : ''}.`; };
+  return `${v.name} (read ${d.at.slice(0, 16).replace('T', ' ')} UTC): battery ${d.volts ?? '?'} V${d.rpm ? ` (engine running, ${d.rpm} rpm)` : ' (engine off)'}, check engine light ${d.mil ? 'ON' : 'off'}, codes: ${(d.dtcs || []).join(', ') || 'none'}${d.fuelPct != null ? `, fuel ${d.fuelPct}%` : ''}${d.coolantC != null ? `, coolant ${d.coolantC} C` : ''}${d.kmSinceClear != null ? `, ${Math.round(d.kmSinceClear * 0.621)} miles since codes were last cleared` : ''}${d.vin ? `, VIN ${d.vin}` : ''}.`
+  + ((d.pending || []).length ? ` Pending codes (light not on yet): ${d.pending.join(', ')}.` : '')
+  + (d.readiness?.ready ? ` Emissions monitors not ready: ${(d.readiness.notReady || []).join(', ') || 'none'} (ready: ${d.readiness.ready.join(', ') || 'none'}). Inspection: ${d.mil ? 'would FAIL, check engine light is on' : (d.readiness.notReady || []).length <= 1 ? 'should pass on monitors (most states allow one not-ready)' : 'likely rejected until more monitors finish; drive a mixed highway/town cycle'}.` : '')
+  + (d.trims ? ` Fuel trims (%; + = adding fuel/lean, - = rich): ${Object.entries(d.trims).map(([k, x]) => `${k} ${x}`).join(', ')}.` : '')
+  + (d.freezeFrame ? ` Freeze frame for ${d.freezeFrame.code}: ${Object.entries(d.freezeFrame).filter(([k]) => k !== 'code').map(([k, x]) => `${k} ${x}`).join(', ')}.` : '')
+  + (voltDropPerDay(v.volts) != null ? ` Resting battery trend: ${(-voltDropPerDay(v.volts)).toFixed(2)} V/day over ${Math.round((v.volts[v.volts.length - 1].t - v.volts[0].t) / 86400e3)} days.` : ''); };
 Object.assign(handlers, {
   vehicle_add: async ({ name, dongle }) => {
     state.vehicles = state.vehicles.filter(v => norm(v.name) !== norm(name));
