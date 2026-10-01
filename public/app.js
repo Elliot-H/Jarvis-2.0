@@ -281,6 +281,8 @@
     // The page player plays out loud for sure (it may pause Spotify for a moment, which beats silence).
     _webFallback() {
       if (this.stopped || this.fellBack) return this._fire('onerror');
+      let bt = false; try { bt = window.AndroidPhoneAudio.btActive(); } catch {}
+      if (bt) { addActivity('Voice: skipped this clip rather than play it on the Bluetooth speaker'); return this._fire('onerror'); }
       this.fellBack = true;
       const a = new Audio(this.src); this.web = a;
       a.onended = () => this._fire('onended'); a.onerror = () => this._fire('onerror');
@@ -288,7 +290,8 @@
     }
     async play() {
       // Newer app builds stream the voice straight from the server: playback starts as the first audio arrives.
-      if (window.AndroidPhoneAudio.playUrl) { window.AndroidPhoneAudio.playUrl(this.id, new URL(this.src, location.href).href); return; }
+      // (blob: and data: clips can't be streamed by URL; they take the older hand-over path below)
+      if (window.AndroidPhoneAudio.playUrl && !/^(blob|data):/.test(this.src)) { window.AndroidPhoneAudio.playUrl(this.id, new URL(this.src, location.href).href); return; }
       try {
         const r = await fetch(this.src);
         if (r.status !== 200) throw new Error('no audio');
@@ -394,7 +397,7 @@
       const worker = async () => {
         while (i < jobs.length) {
           const { kind, g, u } = jobs[i++];
-          try { const r = await fetch(u); if (r.ok && r.status === 200) { const b = await r.blob(); if (b.size > 500) ((filler[kind][g] ||= []).push(URL.createObjectURL(b))); } } catch {}
+          try { const r = await fetch(u); if (r.ok && r.status === 200) { const b = await r.blob(); if (b.size > 500) ((filler[kind][g] ||= []).push(PHONE_AUDIO ? u : URL.createObjectURL(b))); } } catch {}
         }
       };
       await Promise.all([worker(), worker(), worker()]);
@@ -448,7 +451,8 @@
       if (r.status !== 200) return fallback();
       const blob = await r.blob(); if (blob.size < 500) return fallback();
       if (my !== ackSeq || state !== 'thinking' || speaking || filler.cur) return;   // the real answer beat it
-      const a = newClip(URL.createObjectURL(blob)); filler.cur = a; filler.curAt = Date.now();
+      const ackId = r.headers.get('X-Ack-Id');
+      const a = newClip(PHONE_AUDIO && ackId ? '/api/ack-clip/' + ackId + '.mp3' : URL.createObjectURL(blob)); filler.cur = a; filler.curAt = Date.now();
       const end = () => { if (filler.cur === a) filler.cur = null; };
       a.onended = end; a.onerror = end; a.onpause = end; setTimeout(end, 9000);
       a.play().catch(end);

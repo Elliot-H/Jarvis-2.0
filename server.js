@@ -1468,9 +1468,14 @@ app.post('/api/ack', async (req, res) => {
     if (!out.r) return res.status(502).end();
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Ack-Text', encodeURIComponent(line));
-    res.type('audio/mpeg').send(Buffer.from(await out.r.arrayBuffer()));
+    const ackBuf = Buffer.from(await out.r.arrayBuffer()), ackId = crypto.randomBytes(6).toString('hex');
+    ackClips.set(ackId, ackBuf); setTimeout(() => ackClips.delete(ackId), 120000); // the phone app replays it by URL on its own audio route
+    res.setHeader('X-Ack-Id', ackId); res.setHeader('Access-Control-Expose-Headers', 'X-Ack-Id, X-Ack-Text');
+    res.type('audio/mpeg').send(ackBuf);
   } catch { res.status(500).end(); }
 });
+const ackClips = new Map();
+app.get('/api/ack-clip/:id.mp3', (req, res) => { const b = ackClips.get(req.params.id); if (!b) return res.status(404).end(); res.setHeader('Cache-Control', 'no-store'); res.type('audio/mpeg').send(b); });
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
