@@ -146,6 +146,11 @@ export const CHART_TOOLS = [
   { name: 'chart_read', description: 'Read a price chart for a stock (TSLA) or crypto (BTC, ETH): candlesticks, trend, moving averages, RSI, MACD, Bollinger, volume, support and resistance, breakouts and candle patterns, for a timeframe (5m, 15m, 1h, 1d default, 1w, 1mo). Use for "how does the chart look", "is TSLA breaking out", "where is support". Compare two timeframes when asked about short vs long term. Analysis only.', shape: { symbol: z.string(), timeframe: z.enum(['5m', '15m', '1h', '1d', '1w', '1mo']).optional() } }
 ];
 
+export const SIGNAL_TOOLS = [
+  { name: 'signal_scan', description: 'Scan trending stocks (Alpaca\'s top gainers and most active; or the symbols he names) and rank them by a rule-based candle/trend score with a stop-loss level, target, risk %, and how that same setup has worked on that ticker\'s own history. Use for "what\'s trending", "find me something to buy", "scan the market", "any good setups". Present results as SIGNALS from rules with the stop-loss, never as personal advice; say once, briefly, that it is not financial advice and no setup is certain. Never place a trade from this: if he wants in, use the trade_propose flow.', shape: { symbols: z.array(z.string()).optional(), top: z.number().optional() } },
+  { name: 'signal_watch', description: 'Watch a stock he owns or just bought so Jarvis sends a phone alert when the rules say the uptrend is breaking (sell warning) or the stop is hit. action add (symbol, optional entry price and stop; stop is computed if omitted), remove, or list. Positions in the Alpaca account are watched automatically.', shape: { action: z.enum(['add', 'remove', 'list']), symbol: z.string().optional(), entry: z.number().optional(), stop: z.number().optional() } }
+];
+
 export const TRADE_TOOLS = [
   { name: 'trade_status', description: 'Trading account (Alpaca): mode (PAPER or LIVE), cash, equity, open positions with profit/loss, open orders. Use for "how is my portfolio", "what do I own".', shape: {} },
   { name: 'trade_quote', description: 'Latest price of a stock (e.g. TSLA) or crypto (e.g. BTC, ETH, SOL).', shape: { symbol: z.string() } },

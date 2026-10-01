@@ -14,12 +14,13 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS } from './tools.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
 import * as trade from './trade.js';
 import * as chart from './chart.js';
+import * as sig from './signals.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -491,7 +492,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -1033,6 +1034,54 @@ handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '');
   return err ? `Could not send: ${err} Tell the Owner plainly.` : 'Sent. Tell the Owner to check his phone.';
 };
+// ---------- Signals (A24): rule-based scan of trending tickers, stop-loss levels, sell-warning alerts ----------
+state.sigWatch ||= [];
+const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
+handlers.signal_scan = async ({ symbols, top } = {}) => {
+  try {
+    let list = (symbols || []).map(x => String(x).toUpperCase().replace(/[^A-Z.\-]/g, '')).filter(Boolean);
+    let src = 'the symbols he named';
+    if (!list.length) {
+      if (!trade.configured()) return 'Alpaca keys are not set, so I cannot pull the trending list. Ask him for tickers to scan, or add ALPACA_KEY_ID and ALPACA_SECRET in Railway.';
+      const t = await trade.trending(15); list = t.all.slice(0, 25); src = `Alpaca's top gainers and most active (${list.length} tickers)`;
+    }
+    const r = await sig.scan(list, Math.min(8, Math.max(1, top || 5)));
+    return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice.' });
+  } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
+};
+handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
+  const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
+  if (action === 'list') return state.sigWatch.length ? state.sigWatch.map(w => `${w.symbol} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'Nothing on the sell-warning watch yet (Alpaca positions are watched automatically).';
+  if (!sym) return 'Which ticker?';
+  if (action === 'remove') { state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym); saveState(); return `Stopped watching ${sym}.`; }
+  try {
+    const ev = await sig.evaluate(sym);
+    const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, addedAt: Date.now() };
+    state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState();
+    return `Watching ${sym}: entry ${w.entry}, stop ${w.stop}. I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
+  } catch (e) { return `Could not add ${sym}: ${e.message}`; }
+};
+// During US market hours, every 15 minutes: check watched tickers and Alpaca positions for a sell warning. One alert per ticker per 4 hours.
+async function sigTick() {
+  const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = ny.getHours() * 60 + ny.getMinutes();
+  if (ny.getDay() === 0 || ny.getDay() === 6 || mins < 9 * 60 + 30 || mins > 16 * 60) return;
+  const list = new Map(state.sigWatch.map(w => [w.symbol, w]));
+  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s)) list.set(s, { symbol: s, stop: null }); } } catch {}
+  state.sigAlerted ||= {};
+  for (const w of list.values()) {
+    try {
+      if (Date.now() - (state.sigAlerted[w.symbol] || 0) < 4 * 3600e3) continue;
+      const ex = sig.exitSignal(await chart.bars(w.symbol, '1dlong'), w.stop);
+      if (!ex.exit) continue;
+      state.sigAlerted[w.symbol] = Date.now(); saveState();
+      const msg = `${w.symbol} at ${ex.price}: ${ex.reasons.join('; ')}.${w.stop ? ' Your stop is ' + w.stop + '.' : ''} Rule-based warning, not advice.`;
+      broadcast({ type: 'activity', text: 'SELL WARNING: ' + msg });
+      await push(`Sell warning: ${w.symbol}`, msg);
+    } catch (e) { console.warn('signal check failed', w.symbol, e.message); }
+  }
+}
+if (!process.env.JARVIS_SMOKE) setInterval(() => sigTick().catch(e => console.warn('sigTick', e.message)), 15 * 60_000);
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');
   if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }

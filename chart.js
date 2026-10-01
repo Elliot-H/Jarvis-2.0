@@ -2,7 +2,7 @@
 // support/resistance, volume, candle patterns. Returns facts; the brain explains them. Analysis only, never trades.
 const FRAMES = {
   '5m': { interval: '5m', range: '5d' }, '15m': { interval: '15m', range: '5d' }, '1h': { interval: '60m', range: '1mo' },
-  '1d': { interval: '1d', range: '6mo' }, '1w': { interval: '1wk', range: '2y' }, '1mo': { interval: '1mo', range: '10y' }
+  '1d': { interval: '1d', range: '6mo' }, '1dlong': { interval: '1d', range: '2y' }, '1w': { interval: '1wk', range: '2y' }, '1mo': { interval: '1mo', range: '10y' }
 };
 const CRYPTO = { BTC: 1, ETH: 1, SOL: 1, DOGE: 1, XRP: 1, ADA: 1, AVAX: 1, LINK: 1, LTC: 1, DOT: 1, BNB: 1, SHIB: 1, MATIC: 1 };
 const r2 = v => (v == null || !Number.isFinite(v) ? null : Math.abs(v) >= 1 ? Number(v.toFixed(2)) : Number(v.toPrecision(3)));
@@ -17,7 +17,7 @@ export function ySymbol(s) {
   return /^[A-Z.\-]{1,6}$/.test(s) ? s.replace('.', '-') : null;
 }
 
-async function bars(sym, tf) {
+export async function bars(sym, tf) {
   const f = FRAMES[tf]; if (!f) throw new Error(`Timeframe must be one of ${Object.keys(FRAMES).join(', ')}.`);
   const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${f.interval}&range=${f.range}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 Jarvis', Accept: 'application/json' }, signal: AbortSignal.timeout(15000)
@@ -31,9 +31,9 @@ async function bars(sym, tf) {
   return out;
 }
 
-const sma = (a, n) => (a.length >= n ? a.slice(-n).reduce((x, y) => x + y, 0) / n : null);
-function emaSeries(a, n) { const k = 2 / (n + 1); const o = []; a.forEach((v, i) => o.push(i ? v * k + o[i - 1] * (1 - k) : v)); return o; }
-function rsi(c, n = 14) {
+export const sma = (a, n) => (a.length >= n ? a.slice(-n).reduce((x, y) => x + y, 0) / n : null);
+export function emaSeries(a, n) { const k = 2 / (n + 1); const o = []; a.forEach((v, i) => o.push(i ? v * k + o[i - 1] * (1 - k) : v)); return o; }
+export function rsi(c, n = 14) {
   if (c.length <= n) return null;
   let g = 0, l = 0;
   for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; d > 0 ? (g += d) : (l -= d); }
@@ -41,7 +41,7 @@ function rsi(c, n = 14) {
   for (let i = n + 1; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n; }
   return l === 0 ? 100 : 100 - 100 / (1 + g / l);
 }
-function atr(b, n = 14) { const tr = b.slice(1).map((x, i) => Math.max(x.h - x.l, Math.abs(x.h - b[i].c), Math.abs(x.l - b[i].c))); return sma(tr, n); }
+export function atr(b, n = 14) { const tr = b.slice(1).map((x, i) => Math.max(x.h - x.l, Math.abs(x.h - b[i].c), Math.abs(x.l - b[i].c))); return sma(tr, n); }
 
 // Swing highs/lows (3 bars each side), clustered within 1.5% into levels with touch counts.
 export function levels(b, price) {

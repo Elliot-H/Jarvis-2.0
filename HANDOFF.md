@@ -187,3 +187,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Chart reading (2026-10-01)
 - `chart.js` + tool `chart_read` (tools.js CHART_TOOLS, server.js handler, persona "Charts"). Bars from Yahoo's public chart API (no key; stocks and crypto as BTC-USD), indicators computed locally: SMA 20/50/200, RSI, MACD, Bollinger, ATR, volume vs avg, swing support/resistance with touches, candle patterns, breakout/double top-bottom/squeeze. Timeframes 5m,15m,1h,1d,1w,1mo. Server-side only, no APK reinstall. Yahoo is unofficial; if it blocks Railway IPs, swap `bars()` for Alpaca data (`/v2/stocks/{s}/bars`).
+
+## Market scanner (A24)
+`signals.js` (setupScore, stopLevel, exitSignal, backtest, scan) on top of chart.js bars (Yahoo, '1dlong' = 2y daily). `trade.trending()` pulls Alpaca screener movers + most-actives. Tools `signal_scan`, `signal_watch` (tools.js SIGNAL_TOOLS). `sigTick` every 15 min in market hours -> sell-warning push for state.sigWatch + Alpaca positions, one alert per ticker per 4h. Untested against live data from the sandbox (Yahoo/Alpaca blocked here); logic tested on synthetic candles.

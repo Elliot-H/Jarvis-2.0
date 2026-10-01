@@ -71,3 +71,14 @@ export async function place({ symbol, side, dollars }) {
   const o = await api(BASE, '/v2/orders', { method: 'POST', body: JSON.stringify(body) });
   return { id: o.id, status: o.status, symbol: o.symbol, side: o.side, notional: o.notional };
 }
+
+// Trending stocks from Alpaca's screener: today's biggest gainers plus most active by volume.
+export async function trending(n = 15) {
+  const [m, a] = await Promise.all([
+    api(DATA, `/v1beta1/screener/stocks/movers?top=${n}`).catch(() => ({})),
+    api(DATA, `/v1beta1/screener/stocks/most-actives?by=volume&top=${n}`).catch(() => ({}))
+  ]);
+  const ok = x => x?.symbol && /^[A-Z]{1,5}$/.test(x.symbol) && (x.price == null || x.price >= 2);
+  const gain = (m.gainers || []).filter(ok), act = (a.most_actives || []).filter(ok);
+  return { gainers: gain.map(x => x.symbol), active: act.map(x => x.symbol), all: [...new Set([...gain, ...act].map(x => x.symbol))] };
+}
