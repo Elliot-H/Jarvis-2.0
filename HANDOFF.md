@@ -230,3 +230,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Mic button fix (2026-10-01)
 - Tap-to-talk left the recognizer deaf because startMic() reopened it 500 ms after asking the wake engine to stop, but the engine frees its AudioRecord on its own thread. startMic now waits for the wake engine's `stopped` event (2.5 s fallback). Tap while the mic is really open stops it (aborts the recognizer); a tap with a stale "listening" state now starts it. Page-only change (public/app.js), no APK reinstall.
+
+## Arrival repeat fix (2026-10-01)
+- Bug: repeated "Welcome to the shop" while he stayed there. Causes: `state.at` was not backed up, so every redeploy (data/ wiped) made the next fix look like a fresh arrival; and single stray fixes outside the 250 m + 120 m margin flipped at/away.
+- `onMove()` now: first fix after a wipe only learns the place (no greeting); a change of place needs 3+ consecutive readings over `PLACE_CONFIRM_MIN` (3) before it counts; re-entering a place within `ARRIVE_REARM_MIN` (30) of leaving it updates state silently; arrival needs a confirmed leave first. `at, atSince, atInit, leftAt` are in BACKUP_KEYS. Server only, no APK reinstall. Tested with a simulated move sequence only.

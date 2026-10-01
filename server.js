@@ -74,7 +74,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -695,7 +695,7 @@ async function bucketAnswer(text) {
 // Arrival remark only when the place changed since the last check, so it is news and not a habit.
 function placeNote() {
   const pl = currentPlace(), key = pl ? placeKey(pl.name) : '';
-  if (key === (state.lastPlace || '')) return '';
+  if (key === (state.lastPlace || '') || (state.cand && state.at !== key)) return ''; // unchanged, or an unconfirmed edge reading
   state.lastPlace = key; saveState();
   if (!pl) return '';
   const c = nowCtx();
@@ -813,6 +813,7 @@ handlers.shop_day = async ({ going }) => shopDay(going);
 // Items (the Places box / voice): trigger arrive | leave | heading (said when he is headed there), once = fire then delete,
 // kind bring = something to bring TO that place (said when he leaves anywhere else / says he's headed there; cleared on arrival).
 const LEAVE_MARGIN = 120, QUIET_FROM = Number(process.env.QUIET_FROM ?? 22), QUIET_TO = Number(process.env.QUIET_TO ?? 6);
+const CONFIRM_MS = Number(process.env.PLACE_CONFIRM_MIN || 3) * 60e3, REARM_MS = Number(process.env.ARRIVE_REARM_MIN || 30) * 60e3;
 const MAX_REMARKS_HOUR = Number(process.env.MAX_REMARKS_HOUR || 4);
 function placeFor(L, prevKey) {
   let best = null;
@@ -863,8 +864,17 @@ const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p
 function onMove() {
   const L = state.location; if (!L) return;
   const prevKey = state.at || '', pl = placeFor(L, prevKey), key = pl ? placeKey(pl.name) : '';
-  if (key === prevKey) return;
+  const now = Date.now();
+  if (!state.atInit) { state.at = key; state.atSince = now; state.atInit = true; state.lastPlace = key; saveState(); return; } // fresh/wiped state: learn where he is, do not greet
+  if (key === prevKey) { if (state.cand) { state.cand = null; saveState(); } return; } // back inside (or never left): jitter, forget the candidate
+  // Debounce: a change of place only counts once the new reading has held for CONFIRM_MS (one stray fix at the edge never flips the state).
+  if (state.cand?.key !== key) { state.cand = { key, since: now, n: 1 }; saveState(); return; }
+  state.cand.n++;
+  if (now - state.cand.since < CONFIRM_MS || state.cand.n < 3) return;
+  state.cand = null;
   const prev = state.places.find(p => placeKey(p.name) === prevKey);
+  if (prev) (state.leftAt ||= {})[prevKey] = now;
+  const rearmed = !pl || !state.leftAt?.[key] || now - state.leftAt[key] >= REARM_MS; // same place re-entered soon after leaving: no new greeting
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
@@ -879,7 +889,7 @@ function onMove() {
     }
     if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
   }
-  if (pl) { // arrived somewhere
+  if (pl && rearmed) { // arrived somewhere
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
