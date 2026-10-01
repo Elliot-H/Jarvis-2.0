@@ -1,0 +1,32 @@
+name: Model test
+on:
+  push:
+    paths: ['bench-trigger.txt']
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci --omit=dev || npm install --omit=dev
+      - name: Run model test
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BENCH_BUDGET_USD: '1.5'
+          BRAIN: openrouter
+        run: |
+          test -n "$OPENROUTER_API_KEY" || { echo "::error::OPENROUTER_API_KEY secret missing"; exit 1; }
+          node bench/run.js | tee bench.out
+          mkdir -p bench-results
+          node -e "import('./bench/run.js').then(async m=>{const r=JSON.parse(require('fs').readFileSync('data/bench-latest.json'));require('fs').writeFileSync('bench-results/latest.txt',m.renderText(r))})" || true
+          cp data/bench-latest.json bench-results/latest.json
+      - name: Save results
+        run: |
+          git config user.name "bench-bot"; git config user.email "bench@users.noreply.github.com"
+          git add bench-results; git commit -m "Model test results [skip ci]" || exit 0
+          git pull --rebase -q; git push
