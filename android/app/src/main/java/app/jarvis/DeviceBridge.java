@@ -52,7 +52,7 @@ public class DeviceBridge {
       else if ("close_app".equals(action)) { SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
       else if ("media_key".equals(action)) { if ("pause".equals(o.optString("key")) || "stop".equals(o.optString("key"))) SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; else if ("play".equals(o.optString("key"))) SttBridge.noResumeUntil = 0; mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
       else if ("bt_scan".equals(action)) btScan(id, o.optInt("seconds", 9));
-      else if ("bt_pair".equals(action)) btPair(id, o.optString("mac"));
+      else if ("bt_pair".equals(action)) btPair(id, o.optString("mac"), o.optInt("seconds", 30));
       else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"));
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
@@ -342,6 +342,8 @@ public class DeviceBridge {
           j.put("rssi", in.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) -100));
           android.bluetooth.BluetoothClass bc = d.getBluetoothClass();
           j.put("audio", bc != null && bc.getMajorDeviceClass() == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO);
+          int mc = bc == null ? 0 : bc.getDeviceClass();
+          j.put("speaker", mc == 0x414 || mc == 0x41C || mc == 0x420 || mc == 0x428 || mc == 0x418);
           j.put("bonded", d.getBondState() == BluetoothDevice.BOND_BONDED);
           found.put(d.getAddress(), j);
         } catch (Exception ignored) {}
@@ -362,7 +364,7 @@ public class DeviceBridge {
     }, Math.max(5, Math.min(15, seconds)) * 1000L);
   }
 
-  private void btPair(final String id, String mac) {
+  private void btPair(final String id, final String mac, final int secs) {
     final BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
     if (ad == null || mac.isEmpty()) { reply(id, false, "no device"); return; }
     final BluetoothDevice d = ad.getRemoteDevice(mac);
@@ -382,6 +384,6 @@ public class DeviceBridge {
       try { ad.cancelDiscovery(); } catch (Exception ignored) {}
       if (!d.createBond()) { done[0] = true; ctx.unregisterReceiver(rc); reply(id, false, "could not start pairing"); return; }
     } catch (SecurityException e) { reply(id, false, "Bluetooth permission missing"); return; }
-    ui.postDelayed(() -> { if (!done[0]) { done[0] = true; try { ctx.unregisterReceiver(rc); } catch (Exception ignored) {} reply(id, false, "pairing timed out (tap Pair on the phone if a prompt is showing)"); } }, 30000);
+    ui.postDelayed(() -> { if (!done[0]) { done[0] = true; try { ctx.unregisterReceiver(rc); } catch (Exception ignored) {} reply(id, false, "pairing timed out (tap Pair on the phone if a prompt is showing)"); } }, secs * 1000L);
   }
 }

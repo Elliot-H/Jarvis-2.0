@@ -1746,23 +1746,26 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   let list = []; try { list = JSON.parse(sc.detail); } catch {}
   const h = norm(speaker_name);
   const named = list.filter(d => d.name);
-  let pick = h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(d => d.audio);
-  pick.sort((a, b) => b.rssi - a.rssi);
-  const seen = named.slice(0, 12).map(d => `${d.name}${d.audio ? '' : ' (not audio)'} ${d.rssi}dBm`).join('; ') || 'nothing';
+  // Named: just that one. Otherwise every real speaker/soundbar/headphone in range (TVs and other gear are left alone).
+  const pick = (h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(d => d.speaker)).sort((a, b) => b.rssi - a.rssi);
+  const seen = named.slice(0, 12).map(d => `${d.name}${d.speaker ? '' : ' (not a speaker)'} ${d.rssi}dBm`).join('; ') || 'nothing';
   say('saw: ' + seen);
   if (!pick.length) return `No ${speaker_name || 'speaker'} found in pairing range. Saw: ${seen}. Put the speaker in pairing mode (hold its Bluetooth button) and try again.`;
-  const d = pick[0];
-  if (!d.bonded) {
-    say(`pairing ${d.name}`);
-    const pr = await deviceAction('bt_pair', { mac: d.mac }, 40000);
-    if (!pr.ok) return `Found ${d.name} but pairing failed: ${pr.detail}`;
-  }
   if (!state.speakers.length) state.speakers.push({ name: process.env.BT_SPEAKER_NAME || 'Rockville', alias: 'Rockville', area: '' });
-  if (!state.speakers.some(x => norm(x.name) === norm(d.name))) await handlers.speaker_save({ name: d.name, alias: d.name, area: area || '' });
-  const c = await connectSpeaker(d.name);
-  if (!c.ok) return `Paired ${d.name} but could not connect it: ${c.text}. The Tasker connect task may need to read %par1 as the address.`;
+  const ok = [], skipped = [];
+  for (const d of pick) {
+    if (!d.bonded) {
+      say(`pairing ${d.name}`);
+      const pr = await deviceAction('bt_pair', { mac: d.mac, seconds: 12 }, 20000);   // short: devices that need a button press are skipped, not forced
+      if (!pr.ok) { skipped.push(`${d.name} (${pr.detail.split('(')[0].trim()})`); continue; }
+    }
+    if (!state.speakers.some(x => norm(x.name) === norm(d.name))) await handlers.speaker_save({ name: d.name, alias: d.name, area: area || '' });
+    const c = await connectSpeaker(d.name);
+    if (c.ok) ok.push(d.name); else skipped.push(`${d.name} (paired, would not connect)`);
+  }
+  if (!ok.length) return `God Mode: nothing took over. Skipped: ${skipped.join('; ')}.`;
   const m = await handlers.music_control({ action: 'play', query: song || 'Back in Black', kind: 'track' });
-  return `SUCCESS: God Mode took over ${d.name}. ${c.text} ${m}`;
+  return `SUCCESS: God Mode connected ${ok.join(', ')}.${skipped.length ? ' Skipped: ' + skipped.join('; ') + '.' : ''} ${m} Note: the phone streams to one speaker at a time, whichever connected last.`;
 };
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
