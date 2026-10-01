@@ -53,9 +53,14 @@ export const FAILURE_TOOLS = [
 export const MODE_TOOLS = [
   {
     name: 'use_workshop',
-    description: 'Call this (and nothing else) when the Owner wants you to change, fix, repair, add to or roll back your OWN code, screen, voice, settings or personality. A stronger engineering mode then takes over the same request.',
+    description: 'ONLY when the Owner says "workshop" by name. For any other request to change, fix or add to your OWN code, screen, voice, settings or personality, use maintenance_request instead.',
     shape: {}
   }
+];
+
+export const MAINT_TOOLS = [
+  { name: 'maintenance_request', description: 'MAINTENANCE MODE. Use when the Owner says "maintenance mode" or asks you to change, fix, repair, add to or roll back your OWN code, screen, voice, settings or personality. Hands the request to a Claude Code engineer session that edits the code and pushes it live (takes a few minutes). request = his full request in plain words with every detail he gave (if he only said "maintenance mode", ask what to change first). Tell him it is sent and that he can ask "maintenance status" later. Never claim it is done; only maintenance_status can say that.', shape: { request: z.string() } },
+  { name: 'maintenance_status', description: 'Check the result of the last maintenance request ("maintenance status", "did the fix go through?"). Reads the engineer\'s report and tells the Owner what changed, whether it is live, and whether he must reinstall the app.', shape: {} }
 ];
 
 export const PHONE_TOOLS = [

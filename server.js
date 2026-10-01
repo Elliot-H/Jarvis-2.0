@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS } from './tools.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
@@ -442,7 +442,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -1739,6 +1739,39 @@ handlers.led_color = async ({ color, brightness, power }) => {
   }
   const r = await deviceAction('led', { packets: pk }, 25000);
   return r.ok ? `SUCCESS: LED ${power === 'off' && !color ? 'off' : (color || 'on') + (brightness != null ? ' at ' + brightness + '%' : '')}.` : `LED failed: ${r.detail}`;
+};
+// ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
+const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_01VMo6nMcNNWzXvPqsXS5yLQ';
+const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';
+handlers.maintenance_request = async ({ request }) => {
+  const tok = process.env.MAINT_ROUTINE_TOKEN;
+  if (!tok) return 'Maintenance mode is not connected yet: MAINT_ROUTINE_TOKEN is missing in Railway. Tell the Owner plainly. (use_workshop is the old path and needs Anthropic credit.)';
+  if (!String(request || '').trim()) return 'No request given. Ask the Owner what to change.';
+  try {
+    const r = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${MAINT_ID}/fire`, {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+      headers: { Authorization: `Bearer ${tok}`, 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: `Owner's maintenance request (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return `The maintenance engineer could not be started (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the Owner.`;
+    state.maintLast = { at: Date.now(), request: String(request).slice(0, 300), session: j.claude_code_session_url || '' }; saveState();
+    broadcast({ type: 'activity', text: `Maintenance request sent: ${String(request).slice(0, 120)}${j.claude_code_session_url ? ' · ' + j.claude_code_session_url : ''}` });
+    return 'SENT: a Claude Code engineer session has started on it. It usually takes a few minutes. Tell the Owner it is sent and to ask "maintenance status" in a few minutes.';
+  } catch (e) { return `Could not reach the maintenance engineer: ${e.message}`; }
+};
+handlers.maintenance_status = async () => {
+  try {
+    const h = { Accept: 'application/vnd.github.raw+json', 'User-Agent': 'jarvis' };
+    if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO()}/contents/maintenance/last.md`, { headers: h, signal: AbortSignal.timeout(10000) });
+    if (r.status === 404) return state.maintLast ? 'No report yet. The engineer is probably still working. Ask again in a couple of minutes.' : 'No maintenance request has been sent yet.';
+    if (!r.ok) return `Could not read the report (HTTP ${r.status}).`;
+    const txt = await r.text();
+    const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1];
+    const stale = state.maintLast && t && Date.parse(t) < state.maintLast.at - 60000;
+    return stale ? 'The engineer has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : txt.slice(0, 1500);
+  } catch (e) { return `Could not read the report: ${e.message}`; }
 };
 // ---------- God Mode (A21): scan the room, pair a new speaker, connect it, play ----------
 handlers.god_mode = async ({ speaker_name, area, song } = {}) => {

@@ -175,3 +175,6 @@ Set `BENCH_TOKEN` (16+ chars) in Railway. Then `POST /api/bench?token=...` start
 
 ## Model test result (2026-09-30)
 Ran via GitHub Action `bench.yml` (push to `bench-trigger.txt`; needs repo secret OPENROUTER_API_KEY; results in `bench-results/`). Winner: deepseek/deepseek-v4.1-flash (21-23/24, ~$1-2.4/mo at 100 q/day). Owner set `TALK_MODEL` to it in Railway. Gemini Flash, GPT Luna, Haiku and Mistral hit 429s (likely provider throttling at concurrency 3), so their scores are understated; rerun at concurrency 1 if a fair comparison is wanted. Workshop (self-repair) model not yet tested.
+
+## Maintenance mode (A22)
+Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.anthropic.com/v1/claude_code/routines/{MAINT_ROUTINE_ID}/fire with bearer MAINT_ROUTINE_TOKEN (Railway) -> routine "Jarvis maintenance" (trig_01VMo6nMcNNWzXvPqsXS5yLQ, runs on the Owner's Claude plan) edits repo, pushes, writes `maintenance/last.md` (STATUS/TIME/REQUEST/RESULT). `maintenance_status` reads that file via GitHub API. The routine's sandbox cannot reach Railway, so no callback; status is polled. Routine needs the repo attached and an API trigger token generated in its settings on claude.ai/code. Plan caps routine runs per day.
