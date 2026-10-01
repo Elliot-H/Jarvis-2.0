@@ -46,6 +46,7 @@ public class DeviceBridge {
       else if ("bt_connect".equals(action)) btConnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBT"));
       else if ("bt_disconnect".equals(action)) { SttBridge.noResumeUntil = Long.MAX_VALUE; btDisconnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBTOff"), o.optBoolean("off", true)); }
       else if ("bt_paired".equals(action)) btPaired(id);
+      else if ("alarms_off".equals(action)) alarmsOff(id, o.optString("task", ""));
       else if ("spotify_resume".equals(action)) { SttBridge.noResumeUntil = 0; spotifyResume(id); }
       else if ("spotify_search".equals(action)) { SttBridge.noResumeUntil = 0; spotifySearch(id, o.optString("query"), o.optString("kind")); }
       else if ("music_active".equals(action)) { boolean a = PhoneAudio.otherMusicActive((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)); reply(id, true, a ? "playing" : "silent"); }
@@ -57,6 +58,31 @@ public class DeviceBridge {
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
     } catch (Exception e) { reply(id, false, String.valueOf(e.getMessage())); }
+  }
+
+  // "I'm awake": dismiss every pending alarm via the standard clock intent; optionally also run a Tasker task (TASKER_ALARM_TASK) for clock apps that ignore it.
+  private void alarmsOff(String id, String task) {
+    String res;
+    try {
+      Intent i = new Intent(android.provider.AlarmClock.ACTION_DISMISS_ALARM)
+          .putExtra(android.provider.AlarmClock.EXTRA_ALARM_SEARCH_MODE, android.provider.AlarmClock.ALARM_SEARCH_MODE_ALL)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      ctx.startActivity(i);
+      res = "dismiss sent";
+    } catch (Exception e) { res = "clock refused: " + e.getMessage(); }
+    boolean ok = res.startsWith("dismiss sent");
+    if (task != null && !task.isEmpty()) {
+      for (String pk : new String[]{"net.dinglisch.android.taskerm", "net.dinglisch.android.tasker"}) {
+        try { ctx.sendBroadcast(new Intent("net.dinglisch.android.tasker.ACTION_TASK").setPackage(pk).putExtra("task_name", task)); } catch (Exception ignored) {}
+      }
+      res += "; tasker " + task;
+      ok = true;
+    }
+    ui.postDelayed(() -> {
+      Intent back = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("silent", true);
+      try { ctx.startActivity(back); } catch (Exception ignored) {}
+    }, 1200);
+    reply(id, ok, res);
   }
 
   private void reply(String id, boolean ok, String detail) {

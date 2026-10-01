@@ -1854,6 +1854,11 @@ handlers.led_color = async ({ color, brightness, power }) => {
   const r = await deviceAction('led', { packets: pk }, 25000);
   return r.ok ? `SUCCESS: LED ${power === 'off' && !color ? 'off' : (color || 'on') + (brightness != null ? ' at ' + brightness + '%' : '')}.` : `LED failed: ${r.detail}`;
 };
+// ---------- Awake: "I'm awake" dismisses every pending alarm on the phone ----------
+handlers.alarms_off = async () => {
+  const r = await deviceAction('alarms_off', { task: process.env.TASKER_ALARM_TASK || '' }, 10000).catch(e => ({ ok: false, detail: String((e && e.message) || e) }));
+  return r.ok ? 'SUCCESS: the rest of the alarms are dismissed for today. Confirm briefly.' : `Could not clear the alarms: ${r.detail}. Say so plainly.`;
+};
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';

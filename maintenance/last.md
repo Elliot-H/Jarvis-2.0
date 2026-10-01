@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-01T05:17:34Z
-REQUEST: Add pre-market data (trades, volume, gap/high/low/VWAP vs prior close) to the investment outlook; volume as conviction signal.
+TIME: 2026-10-01T13:45:32Z
+REQUEST: Voice "I'm awake" / "I'm up" dismisses all remaining morning alarms on the phone and confirms.
 RESULT:
-Owner, the market outlook now reads pre-market data for stocks: the gap versus the prior close, pre-market high, low and VWAP, volume versus usual, and prints when your Alpaca keys are set. Heavy pre-market volume raises confidence and thin volume lowers it, and the score stays capped so it never sounds certain. It says paper or live and never trades. It goes live when Railway redeploys; no APK reinstall needed. I could only test it on mock data, so the first real morning run is worth a look.
+Owner, I added it. Say "I'm awake" or "I'm up" in any wording and Jarvis tells the phone to dismiss every pending alarm, then confirms the rest are cleared. The server side goes live when Railway redeploys. The phone part is in the Android app, so you need to reinstall the APK once. I could not test it on your real phone, so try it tomorrow morning. If your Samsung clock ignores it, I will need a small Tasker task, and Jarvis will say so instead of claiming success.

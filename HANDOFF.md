@@ -202,3 +202,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Pre-market in outlook (2026-10-01)
 - `premarket.js` (Yahoo 5m bars incl. pre/post, 4:00-9:30 ET): gap vs prior regular close, pre-market high/low/VWAP, volume vs same-time average of earlier days (heavy >=1.5x, thin <0.5x or <20k sh), optional Alpaca IEX prints via `trade.stockTrades`. `outlook.js` adds gap x conviction weight to the score, confidence +8 heavy / -10 thin, and returns `premarket` + `tradingMode`. Stocks only; mocked-data test only (Yahoo blocked in sandbox). Server-side, no APK reinstall.
+
+## Awake = alarms off (2026-10-01)
+- Tool `alarms_off` (tools.js, server.js handler, persona "Awake") -> device action `alarms_off` -> DeviceBridge.alarmsOff: AlarmClock.ACTION_DISMISS_ALARM with search mode ALL (manifest SET_ALARM permission), optionally also Tasker task `TASKER_ALARM_TASK`. Needs an APK reinstall. Untested on hardware: if the Samsung clock ignores the intent, build a Tasker task for it.
