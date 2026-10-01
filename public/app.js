@@ -80,7 +80,7 @@
   let lostMidRequest = false; // a redeploy killed the socket while a request was in flight: its answer will never come
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-    ws.onopen = () => { if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
+    ws.onopen = () => { if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
     ws.onclose = () => { if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); setTimeout(connect, 2000); };
     ws.onmessage = e => handle(JSON.parse(e.data));
   }
@@ -627,6 +627,8 @@
     startMic();
     if (tries > 0) setTimeout(() => ensureMic(tries - 1), 700);
   }
+  // After a redeploy the server comes back: clear any mic cooldown the outage caused and make sure the mic is really on.
+  window.__micKick = () => { recBackoff = 0; recThrottled = false; micNotBefore = 0; recErrs = []; ensureMic(); };
   // "Hey Jarvis" on its own: he answers "Yes, sir?" (cached clip, on the phone's own route), THEN the mic opens for the command,
   // so the recognizer never hears his reply. No clip available: the old chime.
   let wakeAnswering = false;
