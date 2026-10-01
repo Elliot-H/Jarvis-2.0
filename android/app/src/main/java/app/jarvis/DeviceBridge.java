@@ -79,6 +79,8 @@ public class DeviceBridge {
     if (ad == null) { reply(id, false, "This phone has no Bluetooth."); return; }
     final long deadline = System.currentTimeMillis() + 20000;
     final boolean[] sent = {false};
+    final long holdUntil = System.currentTimeMillis() + 7000;   // wait (up to 7 s) for his instant reply to finish before connecting, so it is not dragged onto the speaker
+    final int[] quiet = {0};
     // Tasker connects most reliably by hardware address: look up the paired speaker whose name contains what we were given.
     final String[] target = {name, name};
     try { for (BluetoothDevice d : ad.getBondedDevices()) { String n = d.getName(); if (n != null && n.toLowerCase().contains(name.toLowerCase())) { target[0] = d.getAddress(); target[1] = n; break; } } } catch (SecurityException ignored) {}
@@ -96,6 +98,8 @@ public class DeviceBridge {
             ad.closeProfileProxy(profile, p);
             if (hit != null) { reply(id, true, hit + (sent[0] ? "" : " was already connected")); return; }
             if (!sent[0]) {
+              if (PhoneAudio.PLAYING.get() > 0) quiet[0] = 0; else quiet[0]++;
+              if (quiet[0] < 2 && System.currentTimeMillis() < holdUntil) { ui.postDelayed(poll[0], 250); return; }
               sent[0] = true;
               // Tasker from Google Play is package net.dinglisch.android.taskerm; the direct-download build is ...tasker. Try both.
               for (String pkg : new String[]{"net.dinglisch.android.taskerm", "net.dinglisch.android.tasker"}) {

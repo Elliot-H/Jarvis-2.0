@@ -28,6 +28,8 @@ public class PhoneAudio {
   private final WebView web;
   private final AudioManager am;
   private final Handler ui = new Handler(Looper.getMainLooper());
+  /** How many of Jarvis's voice clips are playing right now (the Bluetooth connect waits for 0 so a clip is not dragged onto the speaker mid-sentence). */
+  static final java.util.concurrent.atomic.AtomicInteger PLAYING = new java.util.concurrent.atomic.AtomicInteger();
   private final Map<String, MediaPlayer> players = new HashMap<>();
   private final Map<String, android.media.audiofx.LoudnessEnhancer> boosts = new HashMap<>();
   private static final int VOICE_GAIN_MB = 1200;   // +12 dB on Jarvis's voice so it carries over the shop and over music
@@ -56,7 +58,7 @@ public class PhoneAudio {
   // While Bluetooth music plays, Android sends media-type audio to the Bluetooth speaker no matter the preferred device. Other usages
   // (accessibility, notification, alarm) are routed differently, so try them in turn and keep the first one that lands on the phone speaker.
   private static final int[] USAGES = { AudioAttributes.USAGE_MEDIA, AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY, AudioAttributes.USAGE_NOTIFICATION, AudioAttributes.USAGE_ALARM };
-  private int goodVariant = 0;
+  private int goodVariant = 1;   // start on the accessibility route: media-type audio follows Bluetooth the moment the speaker connects
   private static boolean isBtOut(AudioDeviceInfo d) {
     if (d == null) return false;
     int t = d.getType();
@@ -94,7 +96,7 @@ public class PhoneAudio {
         if (bt && v < USAGES.length - 1) { goodVariant = v + 1; startUrlV(id, url, v + 1, true); return true; }
         emit(id, "error:" + what + "/" + extra); return true;
       });
-      players.put(id, mp);
+      if (players.put(id, mp) == null) PLAYING.incrementAndGet();
       mp.prepareAsync();
     } catch (Exception e) { release(id); emit(id, "error:" + e.getClass().getSimpleName()); }
   }
@@ -118,13 +120,14 @@ public class PhoneAudio {
       mp.setOnPreparedListener(p -> { boost(id, p); p.start(); });
       mp.setOnCompletionListener(p -> { release(id); emit(id, "ended"); });
       mp.setOnErrorListener((p, what, extra) -> { release(id); emit(id, "error"); return true; });
-      players.put(id, mp);
+      if (players.put(id, mp) == null) PLAYING.incrementAndGet();
       mp.prepareAsync();
     } catch (Exception e) { release(id); emit(id, "error"); }
   }
 
   private void release(String id) {
     MediaPlayer mp = players.remove(id);
+    if (mp != null) PLAYING.decrementAndGet();
     android.media.audiofx.LoudnessEnhancer le = boosts.remove(id); if (le != null) { try { le.release(); } catch (Throwable ignored) {} }
     if (mp != null) { try { mp.stop(); } catch (Exception ignored) {} try { mp.release(); } catch (Exception ignored) {} }
     try { new File(ctx.getCacheDir(), "clip-" + id + ".mp3").delete(); } catch (Exception ignored) {}
