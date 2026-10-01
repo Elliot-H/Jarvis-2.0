@@ -30,6 +30,11 @@ public class PhoneAudio {
   private final Handler ui = new Handler(Looper.getMainLooper());
   /** How many of Jarvis's voice clips are playing right now (the Bluetooth connect waits for 0 so a clip is not dragged onto the speaker mid-sentence). */
   static final java.util.concurrent.atomic.AtomicInteger PLAYING = new java.util.concurrent.atomic.AtomicInteger();
+  static volatile long lastOwnEnd = 0;   // when Jarvis's own voice last stopped
+  /** True only when ANOTHER app is playing music. Jarvis's own voice (and the second after it) counts as music to Android, which made the app think music was on and press PLAY afterwards. */
+  static boolean otherMusicActive(AudioManager am) {
+    try { return am.isMusicActive() && PLAYING.get() == 0 && System.currentTimeMillis() - lastOwnEnd > 1500; } catch (Exception e) { return false; }
+  }
   private final Map<String, MediaPlayer> players = new HashMap<>();
   private final Map<String, android.media.audiofx.LoudnessEnhancer> boosts = new HashMap<>();
   private static final int VOICE_GAIN_MB = 1200;   // +12 dB on Jarvis's voice so it carries over the shop and over music
@@ -48,7 +53,7 @@ public class PhoneAudio {
   @JavascriptInterface public boolean btActive() { return find(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) != null; }
 
   /** True while any app (Spotify) is playing music. The page stops listening in the background then, because the speech recognizer interrupts music. */
-  @JavascriptInterface public boolean musicActive() { try { return am.isMusicActive(); } catch (Exception e) { return false; } }
+  @JavascriptInterface public boolean musicActive() { return otherMusicActive(am); }
 
   @JavascriptInterface public void play(final String id, final String base64) { ui.post(() -> start(id, base64)); }
   @JavascriptInterface public void stop(final String id) { ui.post(() -> release(id)); }
@@ -127,7 +132,7 @@ public class PhoneAudio {
 
   private void release(String id) {
     MediaPlayer mp = players.remove(id);
-    if (mp != null) PLAYING.decrementAndGet();
+    if (mp != null) { PLAYING.decrementAndGet(); lastOwnEnd = System.currentTimeMillis(); }
     android.media.audiofx.LoudnessEnhancer le = boosts.remove(id); if (le != null) { try { le.release(); } catch (Throwable ignored) {} }
     if (mp != null) { try { mp.stop(); } catch (Exception ignored) {} try { mp.release(); } catch (Exception ignored) {} }
     try { new File(ctx.getCacheDir(), "clip-" + id + ".mp3").delete(); } catch (Exception ignored) {}

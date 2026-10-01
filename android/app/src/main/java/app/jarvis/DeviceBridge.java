@@ -48,7 +48,7 @@ public class DeviceBridge {
       else if ("bt_paired".equals(action)) btPaired(id);
       else if ("spotify_resume".equals(action)) { SttBridge.noResumeUntil = 0; spotifyResume(id); }
       else if ("spotify_search".equals(action)) { SttBridge.noResumeUntil = 0; spotifySearch(id, o.optString("query"), o.optString("kind")); }
-      else if ("music_active".equals(action)) { boolean a = ((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)).isMusicActive(); reply(id, true, a ? "playing" : "silent"); }
+      else if ("music_active".equals(action)) { boolean a = PhoneAudio.otherMusicActive((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)); reply(id, true, a ? "playing" : "silent"); }
       else if ("close_app".equals(action)) { SttBridge.noResumeUntil = Long.MAX_VALUE; String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
       else if ("media_key".equals(action)) { if ("pause".equals(o.optString("key")) || "stop".equals(o.optString("key"))) SttBridge.noResumeUntil = Long.MAX_VALUE; else if ("play".equals(o.optString("key"))) SttBridge.noResumeUntil = 0; mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
       else if ("bt_scan".equals(action)) btScan(id, o.optInt("seconds", 9));

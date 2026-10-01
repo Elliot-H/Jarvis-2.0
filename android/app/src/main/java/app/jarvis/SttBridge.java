@@ -87,7 +87,7 @@ public class SttBridge {
     if (System.currentTimeMillis() - musicBeforeAt > 60000) return;
     try {
       if (System.currentTimeMillis() < noResumeUntil) wantPause = true;
-      if (!wantPause && !am.isMusicActive()) {
+      if (!wantPause && !am.isMusicActive() && PhoneAudio.PLAYING.get() == 0) {
         long t = android.os.SystemClock.uptimeMillis();
         am.dispatchMediaKeyEvent(new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, 0));
         am.dispatchMediaKeyEvent(new android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_MEDIA_PLAY, 0));
@@ -158,7 +158,7 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L);
     i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L);
-    try { if (!musicBefore) { musicBefore = am.isMusicActive() && System.currentTimeMillis() >= noResumeUntil; musicBeforeAt = System.currentTimeMillis(); } } catch (Exception ignored) {}
+    try { if (!musicBefore) { musicBefore = PhoneAudio.otherMusicActive(am) && System.currentTimeMillis() >= noResumeUntil; musicBeforeAt = System.currentTimeMillis(); } } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;
     try { if (FEED_ENABLED && !feedBroken && am.isMusicActive()) fed = startFeed(i); } catch (Exception ignored) {}
