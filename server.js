@@ -1741,7 +1741,7 @@ handlers.led_color = async ({ color, brightness, power }) => {
   return r.ok ? `SUCCESS: LED ${power === 'off' && !color ? 'off' : (color || 'on') + (brightness != null ? ' at ' + brightness + '%' : '')}.` : `LED failed: ${r.detail}`;
 };
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
-const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_01VMo6nMcNNWzXvPqsXS5yLQ';
+const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';
 handlers.maintenance_request = async ({ request }) => {
   const tok = process.env.MAINT_ROUTINE_TOKEN;
