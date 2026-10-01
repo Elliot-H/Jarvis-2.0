@@ -524,7 +524,7 @@
     if (type === 'started') {
       // Late start (models take a moment to load): if the recognizer is being used right now, the wake engine must not hold the mic.
       if (recOn || mode === 'active' || Date.now() < manualMicUntil) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; return; }
-      wakeOn = true; wakeEver = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (music keeps playing).'); }
+      wakeOn = true; wakeEver = true; if (WAKE_FIRST) { try { rec && rec.abort(); } catch {} } addActivity('Wake word "Hey Jarvis" is listening (app ' + data + ').'); }
     else if (type === 'stopped') { wakeOn = false; }
     else if (type === 'error') { wakeOn = false; if (!wakeErrShown) { wakeErrShown = true; addActivity('Wake word engine: ' + data + ' (back to speech listening)'); } setTimeout(() => { if (recWanted && !recOn) startMic(); }, 500); }
     else if (type === 'near') addActivity('Wake word almost (' + data + ')');

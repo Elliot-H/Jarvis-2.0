@@ -64,7 +64,7 @@ public class WakeBridge {
       // The mel model starts with a 1-sample input; XNNPACK (applied automatically at load) cannot prepare that, so load it without and size it first.
       Interpreter.Options om = new Interpreter.Options(); om.setNumThreads(2); om.setUseXNNPACK(false);
       mel = new Interpreter(map("melspectrogram.tflite"), om);
-      mel.resizeInput(0, new int[]{1, 1760}); mel.allocateTensors();
+      mel.allocateTensors();   // the bundled mel model has its input fixed at 1760 samples (the original's 1-sample default cannot be prepared)
       emb = new Interpreter(map("embedding_model.tflite"), o);
       clf = new Interpreter(map("hey_jarvis_v0.1.tflite"), o);
 
@@ -75,7 +75,7 @@ public class WakeBridge {
       if (rec.getState() != AudioRecord.STATE_INITIALIZED) { emit("error", "mic not available"); cleanup(mel, emb, clf); return; }
       if (!on) { cleanup(mel, emb, clf); return; }
       rec.startRecording();
-      emit("started", "");
+      emit("started", BuildConfig.VERSION_NAME);
 
       short[] pcm = new short[chunk];
       float[][] rawIn = new float[1][1760];
@@ -113,7 +113,7 @@ public class WakeBridge {
         else if (score >= 0.2f && score < threshold && now - lastNear > 1500) { lastNear = now; emit("near", String.format(java.util.Locale.US, "%.2f", score)); }
       }
     } catch (Throwable t) {
-      emit("error", t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()));
+      emit("error", "v" + BuildConfig.VERSION_NAME + " " + t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()));
     } finally {
       cleanup(mel, emb, clf);
     }
