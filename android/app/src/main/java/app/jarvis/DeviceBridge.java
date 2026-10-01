@@ -51,6 +51,8 @@ public class DeviceBridge {
       else if ("music_active".equals(action)) { boolean a = ((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)).isMusicActive(); reply(id, true, a ? "playing" : "silent"); }
       else if ("close_app".equals(action)) { SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
       else if ("media_key".equals(action)) { if ("pause".equals(o.optString("key")) || "stop".equals(o.optString("key"))) SttBridge.noResumeUntil = System.currentTimeMillis() + 120000; else if ("play".equals(o.optString("key"))) SttBridge.noResumeUntil = 0; mediaKey(o.optString("key")); reply(id, true, o.optString("key")); }
+      else if ("bt_scan".equals(action)) btScan(id, o.optInt("seconds", 9));
+      else if ("bt_pair".equals(action)) btPair(id, o.optString("mac"));
       else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"));
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
@@ -318,5 +320,68 @@ public class DeviceBridge {
     };
     ui.postDelayed(() -> { if (ledBusy) { ledBusy = false; try { if (g[0] != null) { g[0].disconnect(); g[0].close(); } } catch (Exception ignored) {} if (!done[0]) { done[0] = true; sp.edit().remove("mac").apply(); reply(id, false, "LED controller timed out"); } } }, 12000);
     g[0] = Build.VERSION.SDK_INT >= 23 ? dev.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE) : dev.connectGatt(ctx, false, cb);
+  }
+
+  // ---- God Mode: discover nearby Bluetooth audio devices, then pair one ----
+  private boolean scanBusy = false;
+  private void btScan(final String id, int seconds) {
+    final BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
+    if (ad == null || !ad.isEnabled()) { reply(id, false, "Bluetooth is off"); return; }
+    if (scanBusy) { reply(id, false, "scan already running"); return; }
+    scanBusy = true;
+    final java.util.LinkedHashMap<String, JSONObject> found = new java.util.LinkedHashMap<>();
+    final android.content.BroadcastReceiver rc = new android.content.BroadcastReceiver() {
+      @Override public void onReceive(Context c, Intent in) {
+        try {
+          BluetoothDevice d = in.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+          if (d == null) return;
+          JSONObject j = new JSONObject();
+          j.put("mac", d.getAddress());
+          String n = d.getName(); if (n == null) n = in.getStringExtra(BluetoothDevice.EXTRA_NAME);
+          j.put("name", n == null ? "" : n);
+          j.put("rssi", in.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) -100));
+          android.bluetooth.BluetoothClass bc = d.getBluetoothClass();
+          j.put("audio", bc != null && bc.getMajorDeviceClass() == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO);
+          j.put("bonded", d.getBondState() == BluetoothDevice.BOND_BONDED);
+          found.put(d.getAddress(), j);
+        } catch (Exception ignored) {}
+      }
+    };
+    try {
+      ctx.registerReceiver(rc, new android.content.IntentFilter(BluetoothDevice.ACTION_FOUND));
+      if (ad.isDiscovering()) ad.cancelDiscovery();
+      if (!ad.startDiscovery()) { scanBusy = false; ctx.unregisterReceiver(rc); reply(id, false, "could not start scan (Nearby devices permission?)"); return; }
+    } catch (SecurityException e) { scanBusy = false; reply(id, false, "Bluetooth scan permission missing"); return; }
+    ui.postDelayed(() -> {
+      try { ad.cancelDiscovery(); } catch (Exception ignored) {}
+      try { ctx.unregisterReceiver(rc); } catch (Exception ignored) {}
+      scanBusy = false;
+      org.json.JSONArray a = new org.json.JSONArray();
+      for (JSONObject j : found.values()) a.put(j);
+      reply(id, true, a.toString());
+    }, Math.max(5, Math.min(15, seconds)) * 1000L);
+  }
+
+  private void btPair(final String id, String mac) {
+    final BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
+    if (ad == null || mac.isEmpty()) { reply(id, false, "no device"); return; }
+    final BluetoothDevice d = ad.getRemoteDevice(mac);
+    try { if (d.getBondState() == BluetoothDevice.BOND_BONDED) { reply(id, true, "already paired"); return; } } catch (SecurityException e) { reply(id, false, "Bluetooth permission missing"); return; }
+    final boolean[] done = {false};
+    final android.content.BroadcastReceiver rc = new android.content.BroadcastReceiver() {
+      @Override public void onReceive(Context c, Intent in) {
+        BluetoothDevice x = in.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        if (x == null || !mac.equalsIgnoreCase(x.getAddress()) || done[0]) return;
+        int st = in.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1);
+        if (st == BluetoothDevice.BOND_BONDED) { done[0] = true; try { ctx.unregisterReceiver(this); } catch (Exception ignored) {} reply(id, true, "paired"); }
+        else if (st == BluetoothDevice.BOND_NONE && in.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, -1) == BluetoothDevice.BOND_BONDING) { done[0] = true; try { ctx.unregisterReceiver(this); } catch (Exception ignored) {} reply(id, false, "pairing refused (speaker not in pairing mode, or you declined the Pair prompt)"); }
+      }
+    };
+    try {
+      ctx.registerReceiver(rc, new android.content.IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED));
+      try { ad.cancelDiscovery(); } catch (Exception ignored) {}
+      if (!d.createBond()) { done[0] = true; ctx.unregisterReceiver(rc); reply(id, false, "could not start pairing"); return; }
+    } catch (SecurityException e) { reply(id, false, "Bluetooth permission missing"); return; }
+    ui.postDelayed(() -> { if (!done[0]) { done[0] = true; try { ctx.unregisterReceiver(rc); } catch (Exception ignored) {} reply(id, false, "pairing timed out (tap Pair on the phone if a prompt is showing)"); } }, 30000);
   }
 }

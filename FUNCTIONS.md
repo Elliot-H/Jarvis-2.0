@@ -43,3 +43,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A18 | Lights, compressor, bay door, heat (Shelly relays) | 💡 | Compressor through a motor contactor (electrician). Off freely, on only after confirmation. |
 | A19 | Extra wake phrases: "Yo Jarvis", "Jarvis bro", "Jarvis homie" | 💡 | Today: "Hey Jarvis" only (openWakeWord hey_jarvis model). Test scores in ACTIVITY first; train a small model per phrase on Colab if needed. |
 | A20 | LED strip color (SP63XE BLE controller) | ✅ | "Make the lights purple / 40% / off." Phone scans BLE (BanlanX protocol), writes color, disconnects. Needs Nearby devices permission. Close the phone SP63XE app first (one connection at a time). |
+| A21 | God Mode: scan room, pair new speaker, connect, play | ✅ | "God mode" / "take over the Vizio". Scans classic BT, pairs, saves speaker, connects (needs Tasker JarvisBT to use %par1 as address), plays Back in Black on Spotify. Speaker must be in pairing mode. |
