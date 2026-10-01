@@ -215,5 +215,10 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - Bug: onMove only spoke when an item matched, so leaving/arriving Home (and any place with no items) was silent; arrival at home was never greeted. Now every leave/arrive says one short line ("Leaving home, sir." / "Welcome home, sir." / "Welcome to X, sir." / "Arrived at X, sir."), only suppressed in quiet hours (no hourly cap). place_list now reports the age of the last phone position.
 - App open: location is sent every 60 s (was 10 min). Background: relies on KeepAliveService /api/loc reports (100 m / 60 s); if these never arrive (location permission denied, battery restriction, cookie missing) "He is at Home now" stays stale. Could not verify the phone side from here; check place_list's "min ago". Server and app.js only, no APK reinstall needed for the foreground part; the background service is unchanged.
 
+<<<<<<< HEAD
 ## Long-term memory (A29)
 - `state.memory` = [{id, fact, topic, at}], tools `remember_fact` / `list_memory` / `forget_fact` (MEMORY_TOOLS in tools.js, handlers + `memoryServer` + `memoryContext()` in server.js). `memory` is in BACKUP_KEYS (phone backup restores it after a wipe; a Railway volume is still better). Injected into the `<context>` block of every chat/work request (latest 60). Persona section "Long-term memory" tells Jarvis when to save. Short-term `state.history` (12 lines, 6 h) is unchanged.
+=======
+## Long-term memory (2026-10-01)
+- `state.memory` [{fact, at}] (in BACKUP_KEYS), max 60, oldest dropped, duplicates ignored. Tools `memory_save/list/forget` (tools.js MEMORY_TOOLS, handlers in server.js, TALK_TOOLS only). `memoryBlock()` is injected into the `<context>` of every chat turn. Persona "Memory" section tells the brain to save facts silently. Simple facts list, not a summary digest. Server-side only, no APK reinstall. Syntax-checked only.
+>>>>>>> e6863b4 (Long-term memory: memory_save/list/forget, facts loaded into every chat)
