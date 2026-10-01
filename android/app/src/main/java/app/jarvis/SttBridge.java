@@ -154,8 +154,8 @@ public class SttBridge {
     i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
     i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
-    i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
-    i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
+    i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L);
+    i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3500L);
     try { if (!musicBefore) musicBefore = am.isMusicActive() && System.currentTimeMillis() >= noResumeUntil; } catch (Exception ignored) {}
     stopFeed();
     boolean fed = false;

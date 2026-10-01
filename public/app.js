@@ -570,7 +570,7 @@
       // With the wake word engine healthy the recognizer is single-shot: one session per "Hey Jarvis" / mic tap / question, so it does not
       // re-open (and ding, through the Bluetooth speaker when music plays) every second. It only re-opens to finish a sentence he is mid-way through.
       const single = WAKE_FIRST && wakeEver && !wakeErrShown;
-      if (single && !(pending && MID_THOUGHT.test(lastHeard || carry || ''))) {
+      if (single && !pending && !carry) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
         manualMicUntil = 0;
         if (mode === 'active' && !pending) { mode = 'passive'; clearTimeout(activeTimer); setState('idle'); }
       } else if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
@@ -662,7 +662,7 @@
     const v = Number(params.get('pause'));
     if (v >= 600 && v <= 8000) { try { localStorage.setItem('jarvisPause', String(v)); } catch {} return v; }
     try { const k = Number(localStorage.getItem('jarvisPause')); if (k >= 600 && k <= 8000) return k; } catch {}
-    return 2100;
+    return 3300;   // he talks in long stretches: wait for a real pause before acting
   })();
   const MID_THOUGHT = /(,|\b(and|but|so|then|also|or|to|the|a|an|for|with|of|in|on|that|which|because|if|when|my|your|is|are|i|it)|\.\.\.?)\s*$/i;
   const silenceFor = text => PAUSE_MS + (MID_THOUGHT.test(text || '') ? 1300 : 0);
