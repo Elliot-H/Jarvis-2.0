@@ -70,7 +70,7 @@ function loadState() {
   catch { return { stats: {}, panels: {}, sessionId: null }; }
 }
 const state = loadState();
-state.stats ||= {}; state.panels ||= {};
+state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
 const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory'];
@@ -111,10 +111,8 @@ const handlers = {
     return 'Removed.';
   },
   show_panel: async ({ id, title, body }) => {
-    state.panels[id] = { id, title, body, updatedAt: new Date().toISOString() };
-    saveState();
-    broadcast({ type: 'panels', panels: state.panels });
-    return `Panel "${title}" shown.`;
+    holdPanel(id, { title, body });
+    return `NOT on screen yet: "${title}" is held until the Owner approves. Give your spoken answer, then end by asking "Would you like to see it on screen, sir?" Do not call show_panel again; it appears only if he says yes.`;
   },
   hide_panel: async ({ id }) => {
     if (id === '*') state.panels = {}; else delete state.panels[id];
@@ -222,8 +220,8 @@ const memoryContext = () => state.memory.length
 const failuresServer = createSdkMcpServer({ alwaysLoad: true, name: 'failures', version: '1.0.0', tools: sdkTools(FAILURE_TOOLS) });
 
 function setPanel(id, panel) {
-  if (panel) state.panels[id] = { id, ...panel, updatedAt: new Date().toISOString() };
-  else delete state.panels[id];
+  if (panel) return holdPanel(id, panel);
+  delete state.panels[id]; delete heldPanels[id];
   saveState();
   broadcast({ type: 'panels', panels: state.panels });
 }
@@ -661,6 +659,23 @@ function placeOk(r, pl) {
   const L = state.location, known = state.places.some(p => placeKey(p.name) === placeKey(r.place));
   return known && !here && L && Date.now() - Date.parse(L.at) < 30 * 60e3;
 }
+// Pop-up panels never appear on their own. They are held until Jarvis asks "want to see it?" and the Owner says yes (anything else = no).
+const heldPanels = {};
+function holdPanel(id, panel) { heldPanels[id] = { id, ...panel, heldAt: Date.now() }; }
+const PANEL_YES = /^(yes|yeah|yea|yep|yup|ya|sure|ok|okay|please|go ahead|show( it| me| them)?|do it|put it up|pull it up|let s see|let me see|why not|absolutely|of course|definitely|sounds good|affirmative)\b/;
+async function panelAnswer(text) {
+  const held = Object.values(heldPanels).filter(h => Date.now() - h.heldAt < 10 * 60e3);
+  if (!held.length) { for (const k in heldPanels) delete heldPanels[k]; return false; }
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  for (const k in heldPanels) delete heldPanels[k];   // default is no: whatever he says next, the held panel is dropped
+  if (t.split(' ').length > 6 || !PANEL_YES.test(t)) return false;
+  for (const h of held) state.panels[h.id] = { id: h.id, title: h.title, body: h.body, updatedAt: new Date().toISOString() };
+  saveState(); broadcast({ type: 'panels', panels: state.panels });
+  const reply = 'Putting it on screen, sir.';
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
 // A bucket question with its own yes/no replies is answered here (short answers only, within 10 minutes).
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
@@ -1005,7 +1020,7 @@ const BRIEF_SLOTS = {
   evening: parseTime(process.env.CRYPTO_BRIEF_EVENING ?? '18:30')
 };
 const ALERT_PCT = Number(process.env.CRYPTO_ALERT_PCT || 6);
-const TAIL = 'Reply with one or two spoken sentences (the headline only); the detail goes in the "crypto" panel.';
+const TAIL = 'Reply with one or two spoken sentences (the headline only). Put the detail in a "crypto" panel with show_panel (it stays hidden until he says yes), and end by asking "Want to see the details, sir?"';
 const BRIEF_PROMPTS = {
   morning: () => `[crypto morning brief] Scan crypto. What moved overnight, which news matters today, and anything on my watchlist. ${TAIL}`,
   midday: moved => `[crypto midday check] These coins moved a lot today: ${moved}. Find out why, and say whether it looks worth watching, worth being cautious about, or just noise. ${TAIL}`,
@@ -1741,7 +1756,7 @@ wss.on('connection', ws => {
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !(await panelAnswer(msg.text.trim())) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
