@@ -184,3 +184,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Music never restarts by itself (2026-10-01)
 - Bug: music came back on after "Spotify off". Cause (Android app only; server never auto-starts music and maintenance_status/redeploy touch nothing): SttBridge auto-resumes music after the mic closes, and the "do not resume" window after a deliberate stop was only 120 s. Now `noResumeUntil` is sticky (Long.MAX_VALUE) after pause/stop/close_app/bt_disconnect and cleared only by an explicit start/resume/play/search; a stale `musicBefore` (older than 60 s) never resumes. Needs an APK reinstall.
+
+## Chart reading (2026-10-01)
+- `chart.js` + tool `chart_read` (tools.js CHART_TOOLS, server.js handler, persona "Charts"). Bars from Yahoo's public chart API (no key; stocks and crypto as BTC-USD), indicators computed locally: SMA 20/50/200, RSI, MACD, Bollinger, ATR, volume vs avg, swing support/resistance with touches, candle patterns, breakout/double top-bottom/squeeze. Timeframes 5m,15m,1h,1d,1w,1mo. Server-side only, no APK reinstall. Yahoo is unofficial; if it blocks Railway IPs, swap `bars()` for Alpaca data (`/v2/stocks/{s}/bars`).

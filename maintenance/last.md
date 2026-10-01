@@ -1,7 +1,8 @@
 STATUS: done
-TIME: 2026-10-01T04:12:39Z
-REQUEST: music turned back on by itself when asking about maintenance status; stop it
+TIME: 2026-10-01T04:40:00Z
+REQUEST: add chart/graph reading for stocks and crypto (candles, trend, support/resistance, volume, averages, patterns)
 RESULT:
-Owner, I found it. Checking maintenance status and redeploys never start music on the server; the culprit was the phone app's auto-resume after the microphone closes.
-After you said off, its do-not-resume window lasted only two minutes, so a later mic opening could press Play. Now an off, pause or stop sticks until you explicitly ask for music again, and stale resumes are ignored.
-This is an app change, so you need to reinstall the APK to get it. The server side needs nothing.
+Owner, Jarvis can now read charts for stocks and crypto with a new chart_read tool.
+It pulls price bars from Yahoo's free chart feed and works out trend, moving averages, RSI, MACD, volume, support and resistance, breakouts and candle patterns on any timeframe from 5 minutes to monthly.
+It is analysis only and never trades. It is server-side, so it goes live when Railway redeploys; no APK reinstall.
+I tested the math on sample data, but I could not confirm Yahoo is reachable from Railway, so try "how does Tesla's chart look" once it is live.

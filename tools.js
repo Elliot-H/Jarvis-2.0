@@ -142,6 +142,10 @@ export const CRYPTO_TOOLS = [
 ];
 
 
+export const CHART_TOOLS = [
+  { name: 'chart_read', description: 'Read a price chart for a stock (TSLA) or crypto (BTC, ETH): candlesticks, trend, moving averages, RSI, MACD, Bollinger, volume, support and resistance, breakouts and candle patterns, for a timeframe (5m, 15m, 1h, 1d default, 1w, 1mo). Use for "how does the chart look", "is TSLA breaking out", "where is support". Compare two timeframes when asked about short vs long term. Analysis only.', shape: { symbol: z.string(), timeframe: z.enum(['5m', '15m', '1h', '1d', '1w', '1mo']).optional() } }
+];
+
 export const TRADE_TOOLS = [
   { name: 'trade_status', description: 'Trading account (Alpaca): mode (PAPER or LIVE), cash, equity, open positions with profit/loss, open orders. Use for "how is my portfolio", "what do I own".', shape: {} },
   { name: 'trade_quote', description: 'Latest price of a stock (e.g. TSLA) or crypto (e.g. BTC, ETH, SOL).', shape: { symbol: z.string() } },
