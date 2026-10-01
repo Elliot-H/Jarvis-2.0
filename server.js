@@ -571,7 +571,7 @@ async function runTalk({ text, promptWithContext, chatPrompt, spoken, origin, la
   broadcast({ type: 'meta', cost: r.cost, ms: r.ms });
 
   if (escalate) return run(text, { spoken, origin, label, forceMode: 'work' });
-  let finalText = r.text || (r.error ? 'I ran into a problem finishing that, sir. Check the log.' : 'Done, sir.');
+  let finalText = r.text || (r.error ? 'I ran into a problem finishing that, sir. Check the log.' : 'I did not get an answer back from my brain on that one, sir. Please ask me again.');
   if (r.error && r.error !== 'aborted') { console.warn(`  talk error: ${r.error}`); if (origin === 'user') recordFailure(text, r.error); }
   if (origin === 'user') { remember('user', text); remember('jarvis', finalText); }
   broadcast({ type: 'say', text: finalText, speak: spoken });

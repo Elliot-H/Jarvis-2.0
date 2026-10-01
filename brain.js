@@ -46,13 +46,14 @@ export async function talk({ cfg = brainConfig(), model, system, prompt, history
   if (webSearch) fnTools.push({ type: 'openrouter:web_search', parameters: { engine: cfg.searchEngine, max_results: 5, max_uses: 3 } });
   const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: prompt }];
 
+  let nudged = false, body_tokens = maxTokens;
   for (let round = 0; round < maxRounds; round++) {
     out.rounds = round + 1;
     const body = {
       model: out.model,
       messages,
       ...(fnTools.length ? { tools: fnTools, tool_choice: 'auto' } : {}),
-      max_tokens: maxTokens,
+      max_tokens: body_tokens,
       ...(cfg.reasoning === 'none' ? { reasoning: { enabled: false } } : { reasoning: { effort: cfg.reasoning, exclude: true } }),
       ...(provider ? { provider } : {}),
       ...(extraBody || {})
@@ -82,7 +83,17 @@ export async function talk({ cfg = brainConfig(), model, system, prompt, history
     out.usage.cached += u.prompt_tokens_details?.cached_tokens || 0;
     const msg = data.choices?.[0]?.message || {};
     const calls = (msg.tool_calls || []).filter(c => c.type === 'function' || c.function);
-    if (!calls.length) { out.text = String(msg.content || '').trim(); break; }
+    if (!calls.length) {
+      out.text = String(msg.content || '').trim();
+      // Empty reply (often after web search or tools, or reasoning ate the token budget): ask once more for the spoken answer instead of letting the caller say a bare "Done".
+      if (!out.text && !nudged && round < maxRounds - 1) {
+        nudged = true;
+        messages.push({ role: 'assistant', content: '' }, { role: 'user', content: 'Now give the Owner the actual answer in speech: the real findings, names and numbers, in 1-4 short sentences. Never reply with just "Done".' });
+        body_tokens = Math.max(maxTokens, 1200);
+        continue;
+      }
+      break;
+    }
 
     messages.push({ role: 'assistant', content: msg.content || '', tool_calls: msg.tool_calls, ...(msg.reasoning_details ? { reasoning_details: msg.reasoning_details } : {}) });
     let stop = false;
