@@ -78,7 +78,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -713,6 +713,7 @@ async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
+  if (q.type === 'meal') return mealAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
@@ -853,6 +854,49 @@ async function shopAnswer(text) {
   return true;
 }
 handlers.shop_day = async ({ going }) => shopDay(going);
+
+// ---------- work-morning coffee/breakfast + lunch prompts, pinned to the clock (not the random bucket) ----------
+// On a work day (workDay.on today) a once-a-day check runs every minute: coffee/breakfast question from MEAL_ASK_FROM (10:00),
+// still fired up to MEAL_CATCHUP_MIN late if the server was down. His answer sets state.meal.kind: 'both' (breakfast with coffee)
+// -> lunch question at 14:00; 'coffee' (just coffee) or 'none' or unanswered -> lunch question at 12:00.
+const MEAL_ASK_MIN = Number(process.env.MEAL_ASK_FROM_MIN ?? 600), MEAL_CATCHUP_MIN = Number(process.env.MEAL_CATCHUP_MIN ?? 45);
+const LUNCH_EARLY_MIN = Number(process.env.LUNCH_EARLY_MIN ?? 720), LUNCH_LATE_MIN = Number(process.env.LUNCH_LATE_MIN ?? 840);
+const minsNow = () => { const c = nowCtx(); return c.h * 60 + Number(new Date().toLocaleString('en-US', { minute: 'numeric', timeZone: c.tz })); };
+function mealTick() {
+  const c = nowCtx(), mins = minsNow();
+  if (!(state.workDay?.day === c.day && state.workDay.on)) return;
+  if (state.meal?.day !== c.day) state.meal = { day: c.day };
+  const m = state.meal;
+  if (!m.asked && mins >= MEAL_ASK_MIN && mins < MEAL_ASK_MIN + MEAL_CATCHUP_MIN) {
+    m.asked = true; state.pendingQ = { type: 'meal', at: Date.now() }; saveState();
+    deliver('Coffee this morning, sir? Are you having breakfast with it, just the coffee, or neither?', 'Jarvis');
+    return;
+  }
+  const from = m.kind === 'both' ? LUNCH_LATE_MIN : LUNCH_EARLY_MIN;
+  if (!m.lunchAsked && mins >= from && mins < from + 60) {
+    m.lunchAsked = true; saveState();
+    deliver(m.kind === 'both' ? 'Time to think about lunch, sir. Have you eaten, or shall I remind you later?' : 'Lunch time, sir. Have you eaten yet?', 'Jarvis');
+  }
+}
+function mealSet(kind) {
+  const c = nowCtx(); if (state.meal?.day !== c.day) state.meal = { day: c.day };
+  state.meal.kind = kind; state.meal.asked = true; state.pendingQ = null; saveState();
+  return kind === 'both' ? 'Very good, sir. I will ask about lunch around two.' : kind === 'coffee' ? 'Just coffee then, sir. I will ask about lunch around noon.' : 'Understood, sir. I will check on lunch around noon.';
+}
+async function mealAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (t.split(' ').length > 10) { state.pendingQ = null; saveState(); return false; }
+  const kind = /\b(just|only)\b.*\bcoffee\b|\bcoffee (only|alone)\b|\b(no|without|skip(ping)?) (the )?breakfast\b/.test(t) ? 'coffee'
+    : /\b(neither|nothing|none|no coffee|not today|skip both)\b|^(no|nope|nah)$/.test(t) ? 'none'
+    : /\bbreakfast|\b(eating|having|got) (something|food|a)\b/.test(t) ? 'both' : null;
+  if (!kind) return false;
+  const reply = mealSet(kind);
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
+handlers.meal_answer = async ({ kind }) => mealSet(['both', 'coffee', 'none'].includes(kind) ? kind : 'none');
+if (!process.env.JARVIS_SMOKE) { setInterval(mealTick, 60_000); setTimeout(mealTick, 15_000); }
 
 // ---------- comings and goings: arrive / leave events from any location update (app open, or the app's background reports) ----------
 // Hysteresis: you are "at" a place inside its radius, and only "left" once you are 120 m past it, so GPS jitter at the edge
@@ -2302,6 +2346,7 @@ async function obdScan(v, why = 'auto') {
   const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
   if (!d.ok) { if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
+  v.lastOk = Date.now();
   const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
   const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
   const fresh = (d.dtcs || []).filter(c => !(prev.dtcs || []).includes(c));
@@ -2324,10 +2369,19 @@ async function obdScan(v, why = 'auto') {
   if (lines.length && why === 'auto') deliver(lines.join(' '), v.name);
   return { ok: true, data: d, news: lines };
 }
-if (!process.env.JARVIS_SMOKE) setInterval(async () => {
+// The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the Owner's.
+// Not connected yet (or last try failed) -> retry every OBD_RETRY_MIN so it connects as soon as it is in range; once connected, read
+// every OBD_EVERY_MIN. Alerts only for something new or concerning (see obdScan).
+const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 3) * 60e3;
+if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) state.vehicles.push({ name: 'truck', dongle: 'OBDII' }); }
+async function obdTick() {
   if (!deviceClients.size || busy) return;
-  for (const v of state.vehicles) if (!v.lastTry || Date.now() - v.lastTry > OBD_EVERY) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
-}, 5 * 60_000);
+  for (const v of state.vehicles) {
+    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_EVERY : OBD_RETRY;
+    if (!v.lastTry || Date.now() - v.lastTry > gap) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
+  }
+}
+if (!process.env.JARVIS_SMOKE) setInterval(obdTick, 60_000);
 // Least-squares slope of resting voltage over at least 2 days of readings, as volts lost per day (positive = draining).
 function voltDropPerDay(pts) {
   if (!pts || pts.length < 3 || pts[pts.length - 1].t - pts[0].t < 2 * 86400e3) return null;
