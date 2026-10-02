@@ -61,7 +61,7 @@ Status: ✅ built · 🔧 next up · 💡 idea
 
 - Mic mute (voice): "stop listening" / "mic off" / "mute the mic" / "stop the mic" / "go deaf" fully shuts the recognizer, wake word engine and mic meter, shows MIC MUTED (red chip, core, mic button), and Jarvis confirms aloud. Voice cannot unmute; only a tap on the mic button, the core, or SPACE does. Persists across reloads (localStorage `jarvis.muted`). Android side key does not unmute.
 
-- Live holdings box (HUD, left column): every open Alpaca position with ticker, price, value, P/L % and $, refreshed on each Investment Watch tick; dust under $1 in a footer. (Work/HUD)
+- Live holdings box (HUD, left column): every open Alpaca position with ticker, price, value, P/L % and $, refreshed on each Investment Watch tick; dust under $1 in a footer. (Work/HUD) Each row also shows entry (buy-in) price and quantity @ cost basis; the bottom shows overall % gain/loss of current value vs total buy-in cost.
 - Holdings and watch-panel tickers open their chart when tapped; holdings show a WATCH tag for signal-watched symbols.
 - WATCH LIST box sits directly under Holdings: every signal_watch symbol as a tappable chart link (price and stop when known). Updates live when symbols are added or removed. Every row (watched and auto position rows) shows BUY/WATCH/AVOID, entry, stop, target and price.
 - 2026-10-02: Holdings box: each holding has a sparkline (5d), live BUY/WATCH/AVOID verdict, stop, target, chart link and a watch-only "+ watch" button (same logic as alerts and the watch list).
