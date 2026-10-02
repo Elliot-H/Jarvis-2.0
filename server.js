@@ -19,6 +19,7 @@ import * as news from './news.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
+import * as kr from './krakenlive.js';
 import * as trade from './trade.js';
 import * as md from './marketdata.js';
 import * as lf from './livefeed.js';
@@ -1482,15 +1483,20 @@ function cgRefresh() {
     cgPx.at = Date.now(); cgPx.busy = false; cgPx.err = null; saveState(); broadcast(watchlistMsg(true));
   }).catch(e => { cgPx.err = String(e.message || e).slice(0, 120); console.warn('crypto prices:', cgPx.err); cgPx.at = Date.now() - 90e3; cgPx.busy = false; broadcast(watchlistMsg(true)); });   // retry in 30 s, not 2 min
 }
+// Real-time prices for watched coins that Kraken lists; everything else keeps the CoinGecko price (refreshed every ~2 min).
+let krPush = 0;
+if (!process.env.JARVIS_SMOKE) kr.start(
+  () => [...new Set([...(state.watchlist || []).map(i => state.cgLast[i]?.symbol), ...(state.sigWatch || []).map(w => crypto_.coinIdFor(w.symbol) ? String(w.symbol).toUpperCase() : null)].filter(Boolean))],
+  () => { if (Date.now() - krPush > 2000) { krPush = Date.now(); broadcast(watchlistMsg(true)); } });
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   cgRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
   const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
-  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && cgPx.bySym.get(wlKey(w.symbol))?.price != null ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
+  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
   const have = new Set(stocks.map(w => wlKey(w.symbol)));
-  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: c?.price ?? null, dayPct: c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null, note: c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
   return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
