@@ -70,3 +70,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - 2026-10-02: Position management: ATR-based trailing stop per ticker (2x ATR / swing low, ratchets up), scale-out ladder (sell a third at +1R and +2R as alerts, stop to breakeven+costs after +1R), Holdings shows trail stop, next level, open vs realised P&L. Broker-side resting orders not built (needs Owner OK).
 - 2026-10-02: Jarvis watch list rows (QTEX, SDEV, SCKT) now show a 5-day sparkline and the daily % change; list contents and stops unchanged.
 - 2026-10-02: HUD watch list = only tickers added via signal_watch; persists across restarts (phone-backup restore race fixed); holdings are never auto-added and held symbols are not shown in it.
+- 2026-10-02: Watch list rule: every row shows day % (standing rule); rows stay until the Owner removes them or the ticker is bought, then it is dropped from the watch list automatically and shows in Holdings. Survives full app close via server state plus phone backup.

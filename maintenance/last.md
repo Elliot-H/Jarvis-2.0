@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T19:51:51Z
-REQUEST: Fix HUD watch list not persisting across restarts; stop auto-adding Alpaca holdings.
+TIME: 2026-10-02T20:20:07Z
+REQUEST: Watch list: show day % on every row, keep tickers until removed or bought (then move to holdings), persist across full app restarts.
 RESULT:
-Owner, the watch list now keeps only the tickers you add with signal_watch and holds them until you remove them. Holdings are no longer added to it, and anything you hold is hidden from it. The restart bug was a backup-restore race after Railway wiped data, and that is fixed. It goes live when Railway redeploys. No APK reinstall is needed. I could only syntax-check it, not run it live.
+Owner, every watch list row already shows its day percent, and the restart persistence fix from earlier is in place. The one new change is that when a watched ticker is bought, it is now removed from the watch list automatically and shows up in holdings. Tickers stay otherwise until you say remove. It goes live when Railway redeploys, and no APK reinstall is needed. I could only syntax-check it, not run it live. Durable storage across Railway wipes still relies on the phone backup, and a Railway volume would be more solid.

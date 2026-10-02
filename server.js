@@ -1474,6 +1474,9 @@ async function watchTick() {
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
+    // Bought = moved off the watch list into holdings (a watch row is never dropped any other way except his say-so).
+    const bought = new Set(pos.filter(p => !isDustVal(p.value)).map(p => wlKey(p.symbol)));
+    if (state.sigWatch.some(w => bought.has(wlKey(w.symbol)))) { state.sigWatch = state.sigWatch.filter(w => !bought.has(wlKey(w.symbol))); saveState(); broadcast(watchlistMsg(true)); }
     watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, entry: p.entry, qty: p.qty, costBasis: p.costBasis, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
     broadcast(holdingsOut()); broadcast(watchlistMsg());
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
