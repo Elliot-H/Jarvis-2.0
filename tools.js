@@ -184,6 +184,15 @@ export function toFunctionTool({ name, description, shape }) {
   return { type: 'function', function: { name, description, parameters: schema } };
 }
 
+
+export const MARKETDATA_TOOLS = [
+  { name: 'stock_quote', description: 'Live-ish stock/ETF quote from the free Finnhub, Twelve Data or Financial Modeling Prep feeds (price, day change, high/low, previous close). Use for "price of X", "how is X doing today". Facts only.', shape: { symbol: z.string() } },
+  { name: 'stock_fundamentals', description: 'Company snapshot: sector, market cap, P/E, P/B, margins, debt, dividend yield, 52-week range, from Financial Modeling Prep (Finnhub backup). Use for "is X expensive", "what does X do", "how healthy is X". Facts only, not advice.', shape: { symbol: z.string() } },
+  { name: 'stock_news', description: 'Recent headlines from Finnhub: for one stock (last 7 days) or, with no symbol, general market news. Summarise the 2-3 that matter.', shape: { symbol: z.string().optional() } },
+  { name: 'stock_earnings', description: 'Next earnings date with estimates, and the latest analyst buy/hold/sell counts, for one stock (Finnhub).', shape: { symbol: z.string() } },
+  { name: 'data_feeds', description: 'Which market-data feeds (Finnhub, Twelve Data, Financial Modeling Prep) have keys set and how much of each free allowance is used today.', shape: {} }
+];
+
 export const MUSIC_TOOLS = [
   {
     name: 'music_control',

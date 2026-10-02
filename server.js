@@ -14,12 +14,13 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
 import * as trade from './trade.js';
+import * as md from './marketdata.js';
 import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
@@ -508,6 +509,15 @@ Object.assign(handlers, {
     try { return all ? await trade.cancelAll() : 'Pending trade cancelled.'; } catch (e) { return tradeFail(e); }
   }
 });
+// Free market-data feeds (Finnhub, Twelve Data, Financial Modeling Prep). Analysis only.
+const mdFail = e => `Market data problem: ${e.message}. Tell the Owner plainly; if a key is missing say which one.`;
+Object.assign(handlers, {
+  stock_quote: async ({ symbol }) => { try { return JSON.stringify(await md.quote(symbol)); } catch (e) { return mdFail(e); } },
+  stock_fundamentals: async ({ symbol }) => { try { return JSON.stringify(await md.fundamentals(symbol)); } catch (e) { return mdFail(e); } },
+  stock_news: async ({ symbol }) => { try { return JSON.stringify(await md.news(symbol)); } catch (e) { return mdFail(e); } },
+  stock_earnings: async ({ symbol }) => { try { return JSON.stringify(await md.earnings(symbol)); } catch (e) { return mdFail(e); } },
+  data_feeds: async () => JSON.stringify(md.status())
+});
 // Calendar: what each colour means is saved in state.calendarColors ({ "6": "install job", "default": "personal" }).
 state.calendarColors ||= {};
 try { if (!Object.keys(state.calendarColors).length && process.env.CALENDAR_COLOR_MEANINGS) state.calendarColors = JSON.parse(process.env.CALENDAR_COLOR_MEANINGS); } catch {}
@@ -537,7 +547,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
