@@ -91,6 +91,15 @@ export async function latestPrices(symbols) {
   return out;
 }
 
+// Previous daily close per symbol (Alpaca snapshots), so watch-list rows have a day % straight after a restart.
+export async function prevCloses(symbols) {
+  const out = {}, st = [], cr = [];
+  for (const x of symbols) { const s = normSymbol(x); if (s) (isCrypto(s) ? cr : st).push(s); }
+  if (st.length) { const j = await api(DATA, `/v2/stocks/snapshots?symbols=${st.join(',')}`); for (const s of st) { const c = (j[s] || j.snapshots?.[s])?.prevDailyBar?.c; if (c > 0) out[s] = c; } }
+  if (cr.length) { const j = await api(DATA, `/v1beta3/crypto/us/snapshots?symbols=${encodeURIComponent(cr.join(','))}`); for (const s of cr) { const c = (j.snapshots?.[s] || j[s])?.prevDailyBar?.c; if (c > 0) out[s] = c; } }
+  return out;
+}
+
 // Trending stocks from Alpaca's screener: today's biggest gainers plus most active by volume.
 export async function trending(n = 15) {
   const [m, a] = await Promise.all([

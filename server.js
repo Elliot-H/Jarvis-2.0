@@ -1421,7 +1421,7 @@ const WATCH_SEC = Math.max(20, Number(process.env.WATCH_INTERVAL_SEC || 60));
 // Thresholds come from the tunable alert config (state.alertCfg, alert_config tool), read on every check: no redeploy needed.
 state.alertCfg ||= {};
 const acfg = () => alerts.cfgOf(state.alertCfg);
-const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0, realised: new Map(), realisedAt: 0 };
+const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0, realised: new Map(), realisedAt: 0, prevCl: new Map() };
 const isCryptoSym = s => /\/USD$/.test(s);
 const marketOpenNow = () => { const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); const m = ny.getHours() * 60 + ny.getMinutes(); return ny.getDay() > 0 && ny.getDay() < 6 && m >= 570 && m < 960; };
 const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
@@ -1442,7 +1442,7 @@ async function watchTick() {
     const items = new Map();   // key = Alpaca symbol form
     for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, value: p.value, stop: restStop.get(p.symbol) ?? null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
-    if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
+    if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); let pcs = {}; try { pcs = await trade.prevCloses(extra.map(w => w.symbol)); for (const k in pcs) watch.prevCl.set(k, pcs[k]); } catch (e) { console.warn('watch prevClose', e.message); } for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], prevClose: watch.prevCl.get(w.symbol), held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it) { it.floor = Math.max(it.floor || 0, w.floor || 0) || null; if (it.entry == null) it.entry = w.entry; } }
     for (const it of items.values()) {   // trailing stop for every position and watch row: ratchets up with the highest price seen
       if (!(it.price > 0)) continue;

@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T20:20:07Z
-REQUEST: Watch list: show day % on every row, keep tickers until removed or bought (then move to holdings), persist across full app restarts.
+TIME: 2026-10-02T20:23:59Z
+REQUEST: After restart, watch list tiles should re-fetch and show daily % (and other per-ticker figures) immediately.
 RESULT:
-Owner, every watch list row already shows its day percent, and the restart persistence fix from earlier is in place. The one new change is that when a watched ticker is bought, it is now removed from the watch list automatically and shows up in holdings. Tickers stay otherwise until you say remove. It goes live when Railway redeploys, and no APK reinstall is needed. I could only syntax-check it, not run it live. Durable storage across Railway wipes still relies on the phone backup, and a Railway volume would be more solid.
+Owner, I found the cause: watch-only tickers were refreshed with a price but no previous close, so the day percent stayed blank until a live quote feed caught up. The server now fetches each watched ticker's previous close from Alpaca on the first check after a restart and every check after, so the day percent shows within a few seconds. The sparkline and verdict already reload on their own. It goes live when Railway redeploys, and no APK reinstall is needed. I could only syntax-check it, not run it against live Alpaca.
