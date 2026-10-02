@@ -59,6 +59,11 @@ export async function quote(symbol) {
   const j = await api(DATA, `/v2/stocks/${s}/trades/latest`);
   return { symbol: s, price: j.trade?.p };
 }
+// Company name for a ticker, so he can hear what he is about to buy (speech-to-text mishears tickers).
+export async function assetName(symbol) {
+  const s = normSymbol(symbol); if (!s) return null;
+  try { const a = await api(BASE, '/v2/assets/' + encodeURIComponent(s)); return a.name || null; } catch { return null; }
+}
 export async function orders() {
   const o = await api(BASE, '/v2/orders?status=open&limit=100');
   return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, status: x.status }));

@@ -492,8 +492,10 @@ Object.assign(handlers, {
     if (side === 'buy' && spentToday() + dollars > trade.MAX_DAY) return `Refused: would pass the $${trade.MAX_DAY} daily buy limit ($${spentToday()} used).`;
     try {
       const q = await trade.quote(s);
+      const nm = await trade.assetName(s);
       pendingTrade = { symbol: s, side, dollars, price: q.price, turnId: turn.id, at: Date.now() };
-      return `PENDING (not placed): ${side} $${dollars} of ${s} at about $${q.price}. Read it back and ask him to say confirm.`;
+      const spelled = s.replace('/USD', '').split('').join('-');
+      return `PENDING (not placed): ${side} $${dollars} of ${s}${nm ? ' (' + nm + ')' : ''} at about $${q.price}. Read it back with the company name and the ticker spelled out letter by letter (${spelled}) so he can catch a misheard ticker, then ask him to say confirm.`;
     } catch (e) { return tradeFail(e); }
   },
   trade_confirm: async () => {
