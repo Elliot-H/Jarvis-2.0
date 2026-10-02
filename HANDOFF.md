@@ -279,3 +279,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Watch list rows complete (2026-10-02, maintenance)
 - Every watch list row (signal_watch symbols AND Alpaca positions tagged auto) now gets a verdict, stop and target: `wlRefresh` evaluates all of `wlSymbols()`, not just sigWatch. Rows also show entry (sigWatch entry, or the position's avg entry via `holdings.positions[].entry`). Row: symbol, price, BUY/WATCH/AVOID, "in X · stop Y · tgt Z". Same BUY/WATCH/AVOID wording as the alerts. Untested live; syntax-checked only. No APK reinstall.
+
+## Holdings microchart recommendation (2026-10-02, maintenance)
+- server.js `holdingsOut()` enriches each position with verdict/stop/target (same `wlEval` + `wlVerdict` as alerts and the watch list), a 5-day 15m sparkline (`sparkFor`, cached 15 min), and a signed `wk` for `/watch-add` (watch only). public/app.js `renderHoldings` adds a second line per holding: sparkline, verdict, stop, target, chart link, "+ watch" button.

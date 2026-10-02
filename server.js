@@ -1272,8 +1272,27 @@ function wlRefresh() {
     const c = wlEval.get(w.symbol);
     if (c && (c.busy || Date.now() - c.at < 15 * 60e3)) continue;
     wlEval.set(w.symbol, { ...(c || {}), at: Date.now(), busy: true });
-    sig.evaluate(w.symbol).then(ev => { wlEval.set(w.symbol, { at: Date.now(), verdict: wlVerdict(ev), target: ev.target, stop: ev.stop }); broadcast(watchlistMsg(true)); }).catch(() => { wlEval.set(w.symbol, { ...(wlEval.get(w.symbol) || {}), at: Date.now(), busy: false }); });
+    sig.evaluate(w.symbol).then(ev => { wlEval.set(w.symbol, { at: Date.now(), verdict: wlVerdict(ev), target: ev.target, stop: ev.stop }); broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => { wlEval.set(w.symbol, { ...(wlEval.get(w.symbol) || {}), at: Date.now(), busy: false }); });
   }
+}
+// Holdings box extras: 5-day sparkline (15m closes, cached 15 min), live verdict/stop/target (same wlEval + wlVerdict as alerts and the watch list), signed watch-only link.
+const spark = new Map(); // symbol -> { at, pts, busy }
+function sparkFor(sym) {
+  const c = spark.get(sym);
+  if (!c || (!c.busy && Date.now() - c.at > 15 * 60e3)) {
+    spark.set(sym, { ...(c || {}), at: Date.now(), busy: true });
+    chart.bars(chart.ySymbol(sym) || sym, '15m').then(b => { const step = Math.max(1, Math.ceil(b.length / 60)); spark.set(sym, { at: Date.now(), pts: b.filter((_, i) => i % step === 0 || i === b.length - 1).map(x => Number(x.c.toPrecision(6))) }); broadcast(holdingsOut()); }).catch(() => spark.set(sym, { ...(spark.get(sym) || {}), at: Date.now(), busy: false }));
+  }
+  return spark.get(sym)?.pts || null;
+}
+function holdingsOut() {
+  const h = watch.holdings; if (!h) return null;
+  const evals = new Map(wlSymbols().map(w => [w.symbol, wlEval.get(w.symbol) || {}]));
+  return { type: 'holdings', ...h, positions: h.positions.map(p => {
+    const k = p.symbol.replace('/USD', '').replace('/', ''), e = evals.get(k) || wlEval.get(k) || {};
+    if (!(p.value < 1) && !wlEval.has(k)) wlRefresh();
+    return { ...p, verdict: e.verdict ?? null, stop: e.stop ?? null, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
+  }) };
 }
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
@@ -1372,7 +1391,7 @@ async function watchTick() {
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
     watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, entry: p.entry, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
-    broadcast({ type: 'holdings', ...watch.holdings }); broadcast(watchlistMsg());
+    broadcast(holdingsOut()); broadcast(watchlistMsg());
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
     watch.error = e.message; watch.fails++;
@@ -2050,7 +2069,7 @@ wss.on('connection', ws => {
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
-  if (watch.holdings) ws.send(JSON.stringify({ type: 'holdings', ...watch.holdings }));
+  if (watch.holdings) ws.send(JSON.stringify(holdingsOut()));
   ws.send(JSON.stringify(watchlistMsg()));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });

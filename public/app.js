@@ -236,10 +236,14 @@
     const usd = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
     const main = list.filter(p => p.value >= 1).sort((x, y) => y.value - x.value), dust = list.filter(p => p.value < 1);
-    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${chartA(p.symbol)}${p.watch ? ' <small class="wtag">WATCH</small>' : ''}</td><td>${px(p.price)}</td><td>${usd(p.value)}</td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>`;
+    const vcl = { BUY: 'up', WATCH: '', AVOID: 'dn' };
+    const spark = pts => { if (!pts || pts.length < 2) return ''; const lo = Math.min(...pts), hi = Math.max(...pts), r = hi - lo || 1; return `<svg class="spk" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="${pts[pts.length - 1] >= pts[0] ? '#4dff9a' : '#ff6b6b'}" stroke-width="1.2" points="${pts.map((v, i) => (i * 60 / (pts.length - 1)).toFixed(1) + ',' + (15 - (v - lo) / r * 14).toFixed(1)).join(' ')}"/></svg>`; };
+    const rec = p => `<tr class="rec"><td colspan="4">${spark(p.spark)} <b class="${vcl[p.verdict] || ''}">${p.verdict || '…'}</b> <small>${p.stop ? 'stop ' + px(p.stop) : ''}${p.target ? ' · tgt ' + px(p.target) : ''}</small> <a class="tk" href="/chart?s=${encodeURIComponent(p.symbol.includes('/') ? p.symbol.replace('/USD', '') + '-USD' : p.symbol)}">chart</a> ${p.watch ? '<small class="wtag">WATCH</small>' : `<button class="wbtn" data-s="${esc(p.symbol.replace('/USD', '').replace('/', ''))}" data-k="${esc(p.wk || '')}">+ watch</button>`}</td></tr>`;
+    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${chartA(p.symbol)}${p.watch ? ' <small class="wtag">WATCH</small>' : ''}</td><td>${px(p.price)}</td><td>${usd(p.value)}</td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>` + rec(p);
     const tot = main.reduce((a, p) => a + p.value, 0), totPnl = main.reduce((a, p) => a + p.pnl, 0);
     box.innerHTML = `<table><tr><th>TICKER</th><th>PRICE</th><th>VALUE</th><th>P/L</th></tr>${main.map(row).join('')}<tr class="tot ${totPnl >= 0 ? 'up' : 'dn'}"><td>TOTAL</td><td></td><td>${usd(tot)}</td><td>${totPnl >= 0 ? '+' : ''}${usd(totPnl)}</td></tr></table>` +
       (dust.length ? `<div class="dust">Dust: ${dust.map(p => chartA(p.symbol) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
+    box.querySelectorAll('.wbtn').forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await fetch(`/watch-add?s=${encodeURIComponent(b.dataset.s)}&k=${b.dataset.k}`); b.textContent = r.ok ? 'watching' : 'failed'; } catch { b.textContent = 'failed'; b.disabled = false; } });
     fr.style.display = '';
     ageHoldings();
   }
