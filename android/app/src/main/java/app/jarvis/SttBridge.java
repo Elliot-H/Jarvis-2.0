@@ -186,7 +186,7 @@ public class SttBridge {
     try {
       if (!muted) {
         // Never mute the music stream while music is playing (that silenced Spotify and Jarvis's own voice).
-        boolean music = false; try { music = am.isMusicActive(); } catch (Exception ignored) {}
+        boolean music = false; try { music = PhoneAudio.otherMusicActive(am); } catch (Exception ignored) {}   // Jarvis's own voice must not count as music, or the beeps stay audible
         for (int st : BEEP_STREAMS) { if (music && st == AudioManager.STREAM_MUSIC) continue; try { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); mutedStreams.add(st); } catch (Exception ignored) {} }
         muted = true;
       }
@@ -203,12 +203,13 @@ public class SttBridge {
   private final RecognitionListener listener = new RecognitionListener() {
     @Override public void onReadyForSpeech(Bundle p) {
       ready = true; ui.removeCallbacks(stall); ui.postDelayed(stall, 60000);   // a live session never runs this long
-      emit("start", ""); ui.removeCallbacks(unhush); ui.postDelayed(unhush, 450); }
+      emit("start", ""); hush(600); }   // re-arm: a slow start must not leave the ready beep audible
     @Override public void onBeginningOfSpeech() {}
     @Override public void onRmsChanged(float v) { if (v > maxRms) maxRms = v; }
     @Override public void onBufferReceived(byte[] b) {}
-    @Override public void onEndOfSpeech() { hush(500); }
+    @Override public void onEndOfSpeech() { hush(1500); }
     @Override public void onError(int code) {
+      hush(1200);   // the stop/error beep arrives after this callback
       running = false; ready = false; stopFeed(); ui.removeCallbacks(stall);
       if (fedSession && maxRms <= -100f && code != 10) { feedBroken = true; emit("diag", "recognizer ignored our audio feed (code " + code + "), using its own mic from now on"); }
       fedSession = false;
@@ -241,7 +242,7 @@ public class SttBridge {
       emit("end", ""); scheduleResume();
     }
     @Override public void onPartialResults(Bundle b) { push(b, false); }
-    @Override public void onResults(Bundle b) { running = false; ready = false; stopFeed(); ui.removeCallbacks(stall); push(b, true); emit("end", ""); scheduleResume(); }
+    @Override public void onResults(Bundle b) { hush(1200); running = false; ready = false; stopFeed(); ui.removeCallbacks(stall); push(b, true); emit("end", ""); scheduleResume(); }
     @Override public void onEvent(int t, Bundle b) {}
   };
 
