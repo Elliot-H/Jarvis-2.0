@@ -1069,6 +1069,17 @@
     drawPrime(brx, Math.min(w, h), t, { bg: false, hud: false, fx: false, R: 128 });
   }
 
+  // Comms log / activity: minimized by default, tap the title to open (remembered).
+  for (const [id, key] of [['foldLog', 'jarvis.foldLog'], ['foldAct', 'jarvis.foldAct']]) {
+    const el = document.getElementById(id); if (!el) continue;
+    try { if (localStorage.getItem(key) === '1') el.classList.add('open'); } catch {}
+    el.querySelector('.frame-h').addEventListener('click', e => {
+      if (e.target.closest('a,button')) return;
+      el.classList.toggle('open');
+      try { localStorage.setItem(key, el.classList.contains('open') ? '1' : '0'); } catch {}
+    });
+  }
+
   // ======================= start =======================
   (async () => {
     try { cfg = await (await fetch('/api/config')).json(); } catch {}

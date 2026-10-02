@@ -83,12 +83,12 @@
 
   <!-- RIGHT: comms -->
   <section class="col right">
-    <div class="frame grow">
-      <div class="frame-h"><span>COMMS LOG</span><span><a href="/followups" class="mini" title="Customer follow-up texts" style="text-decoration:none;margin-right:6px">FOLLOW-UPS</a><a href="/places" class="mini" title="Places and the reminder box" style="text-decoration:none;margin-right:6px">PLACES</a><button id="newSess" class="mini" title="Start a fresh conversation">NEW</button></span></div>
+    <div class="frame grow fold" id="foldLog">
+      <div class="frame-h"><span class="fold-t">COMMS LOG</span><span><a href="/followups" class="mini" title="Customer follow-up texts" style="text-decoration:none;margin-right:6px">FOLLOW-UPS</a><a href="/places" class="mini" title="Places and the reminder box" style="text-decoration:none;margin-right:6px">PLACES</a><button id="newSess" class="mini" title="Start a fresh conversation">NEW</button></span></div>
       <div id="log" class="log"></div>
     </div>
-    <div class="frame">
-      <div class="frame-h"><span>ACTIVITY</span></div>
+    <div class="frame fold" id="foldAct">
+      <div class="frame-h"><span class="fold-t">ACTIVITY</span></div>
       <ul id="activity" class="activity"></ul>
     </div>
   </section>
