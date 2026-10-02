@@ -78,7 +78,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1413,13 +1413,19 @@ function holdingsOut() {
 }
 // Crypto rows for the HUD watch list: state.watchlist (CoinGecko ids), priced from CoinGecko (scan is cached 5 min).
 const cgPx = { at: 0, busy: false, byId: new Map(), bySym: new Map() };
+// Crypto prices never vanish: the last good prices are kept (and saved with the phone backup) and shown while CoinGecko is slow, limited or down.
+state.cgLast ||= {};   // { id: { symbol, name, price, change24h, at } }
+const cgFresh = () => Date.now() - cgPx.at < 120e3;
 function cgRefresh() {
-  if (cgPx.busy || Date.now() - cgPx.at < 120e3 || !(state.watchlist || []).length) return;
+  if (cgPx.busy || cgFresh() || !(state.watchlist || []).length) return;
   cgPx.busy = true;
-  crypto_.scan({ top: 1, watch: state.watchlist }).then(r => {
-    cgPx.byId = new Map(r.coins.map(c => [c.id, c])); cgPx.bySym = new Map(r.coins.map(c => [c.symbol, c]));
-    cgPx.at = Date.now(); cgPx.busy = false; broadcast(watchlistMsg(true));
-  }).catch(() => { cgPx.at = Date.now(); cgPx.busy = false; });
+  crypto_.byIds(state.watchlist).then(coins => {
+    if (!coins.length) throw new Error('CoinGecko returned no coins for ' + state.watchlist.join(', '));
+    for (const c of coins) { const o = state.cgLast[c.id]; if (o && c.name === c.id) { c.symbol = o.symbol; c.name = o.name; } }   // lighter fallback endpoint has no names: keep the saved ones
+    for (const c of coins) state.cgLast[c.id] = { symbol: c.symbol, name: c.name, price: c.price, change24h: c.change24h, at: Date.now() };
+    cgPx.byId = new Map(coins.map(c => [c.id, c])); cgPx.bySym = new Map(coins.map(c => [c.symbol, c]));
+    cgPx.at = Date.now(); cgPx.busy = false; cgPx.err = null; saveState(); broadcast(watchlistMsg(true));
+  }).catch(e => { cgPx.err = String(e.message || e).slice(0, 120); console.warn('crypto prices:', cgPx.err); cgPx.at = Date.now() - 90e3; cgPx.busy = false; broadcast(watchlistMsg(true)); });   // retry in 30 s, not 2 min
 }
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
@@ -1429,7 +1435,7 @@ function watchlistMsg(noRefresh) {
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
   const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && cgPx.bySym.get(wlKey(w.symbol))?.price != null ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
   const have = new Set(stocks.map(w => wlKey(w.symbol)));
-  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: c?.price ?? null, dayPct: c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null }));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: c?.price ?? null, dayPct: c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null, note: c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
   return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {

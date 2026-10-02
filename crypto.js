@@ -56,6 +56,17 @@ async function scanFresh({ top = 25, watch = [] } = {}) {
   return { coins, movers, at: new Date().toISOString() };
 }
 
+/** Prices for specific coin ids (one cheap request). Falls back to the lighter /simple/price if /coins/markets fails. */
+export async function byIds(ids) {
+  ids = [...new Set((ids || []).map(i => String(i).toLowerCase().trim()).filter(Boolean))].slice(0, 25); if (!ids.length) return [];
+  try {
+    const more = await get(`/coins/markets?vs_currency=usd&ids=${encodeURIComponent(ids.join(','))}&sparkline=false&price_change_percentage=24h`);
+    if (more.length) return more.map(shape);
+  } catch (e) { if (!/CoinGecko/.test(e.message)) throw e; }
+  const sp = await get(`/simple/price?ids=${encodeURIComponent(ids.join(','))}&vs_currencies=usd&include_24hr_change=true`);
+  return ids.filter(i => sp[i]).map(i => ({ id: i, symbol: i.toUpperCase(), name: i, price: usd(sp[i].usd), change24h: pct(sp[i].usd_24h_change) }));
+}
+
 /** Turn whatever he said (NIGHT, midnight, "Midnight NIGHT") into a CoinGecko id. Exact symbol match wins; best market-cap rank breaks ties. */
 export async function resolveId(q) {
   q = String(q || '').trim(); if (!q) return null;
