@@ -43,7 +43,7 @@ export function exitSignal(b, stop) {
   if (f.rsiPrev != null && f.rsiPrev > 70 && f.rsi < 65) why.push(`RSI rolled over from ${r2(f.rsiPrev)} to ${r2(f.rsi)}`);
   if (f.e20 < f.e50 && f.price < f.e50) why.push('20-day average crossed under the 50-day and price is below both');
   if (stop != null && f.price <= stop) why.push(`price ${r2(f.price)} is at or under the stop ${stop}`);
-  return { exit: why.length > 0, reasons: why, price: r2(f.price) };
+  return { exit: why.length > 0, reasons: why, price: r2(f.price), stop: stopLevel(f).stop };
 }
 
 // Same entry rule replayed on the ticker's own history: entry when the score crosses 70, stop as above, hold up to 10 bars.

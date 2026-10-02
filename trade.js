@@ -44,7 +44,7 @@ export function normSymbol(s) {
 
 export async function account() {
   const a = await api(BASE, '/v2/account');
-  return { mode: mode(), equity: +a.equity, cash: +a.cash, buyingPower: +a.buying_power, status: a.status };
+  return { equity: +a.equity, cash: +a.cash, buyingPower: +a.buying_power, status: a.status };
 }
 export async function positions() {
   const p = await api(BASE, '/v2/positions');

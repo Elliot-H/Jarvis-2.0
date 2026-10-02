@@ -249,3 +249,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Mic mute (2026-10-02)
 - public/app.js `muteMic()/unmuteMic()/paintMute()`, `muted` flag (localStorage `jarvis.muted`) guards `startMic`, `goActive`, `resumeListening`, `answerWake`, `syncWake`, `__wake`. `submit()` catches `MUTE_RE` (<= 8 words) before the brain; client sends `{type:'mic_muted'}`, server (`server.js`) broadcasts the spoken confirmation. Unmute only via mic button / core click / SPACE. Web-only change: no APK reinstall.
+
+## Market alerts: suggestions, no mode (2026-10-02)
+- Alerts (stop hit, sudden drop, down on day, target reached, uptrend break) now carry trigger, symbol, price and an "I would ..." line with a number. PAPER/LIVE removed from alerts, trade_status, trade_propose/confirm, outlook and persona (`trade.mode()` remains only in key diagnostics). Not built: a "fresh high-score signal" auto-alert and other triggers beyond these five; the Owner's list of eight was not specified.

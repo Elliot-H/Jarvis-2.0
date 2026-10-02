@@ -139,13 +139,13 @@ export async function outlook({ symbol } = {}) {
 
   return {
     symbol: sym, price, bias, score, confidencePct: conf, confidenceNote: 'technical-only, capped at 80; adjust with news per newsWeighting',
-    tradingMode: trade.configured() ? trade.mode() : 'no trading account linked', premarket: pre,
+    premarket: pre,
     timeframes: tfs, alignment, levels: dy.levels, plan, invalidation,
     setupsBackedByHistory: setups, setupsFiringButUnproven: unproven.length ? unproven : undefined,
     historyBasis: `${long.length} daily bars (~5y) of ${sym}; ${HORIZON}-bar forward results, min ${MIN_SAMPLES} samples, non-overlapping`,
     signalsUsed: why, candlePatternsNow: dy.candlePatterns, patternsNow: dy.patterns, volume: dy.volume,
     newsWeighting: 'Call ticker_news. Confirmed catalyst in the same direction: raise confidence by up to 10 (stay under 90). Catalyst against the bias: cut confidence by 15 and say the news conflicts. No catalyst: say it looks purely technical and keep the number. Never raise a bias on unconfirmed rumour.',
     newsStep: 'Call ticker_news for this symbol, then say whether the move has a confirmed catalyst or looks purely technical, and fold it into the confidence.',
-    guide: 'Speak: bias, confidence %, PAPER or LIVE (tradingMode), pre-market read if available (gap vs prior close in price and percent, pre-market volume vs usual and what it means for conviction: heavy = stronger, thin = say confidence is low; pre-market high, low, VWAP, prints if any), the historical hit rate for the setup on THIS ticker (win rate, average move, average drawdown, sample size; if none is backed say there is no proven setup), key support/resistance, ATR stop and target, and what would invalidate it. Short, numbers aloud, never "on screen". Odds, not predictions; never promise returns; not financial advice; never trade from a chart read alone (trade_propose is separate).'
+    guide: 'Speak: bias, confidence %, pre-market read if available (gap vs prior close in price and percent, pre-market volume vs usual and what it means for conviction: heavy = stronger, thin = say confidence is low; pre-market high, low, VWAP, prints if any), the historical hit rate for the setup on THIS ticker (win rate, average move, average drawdown, sample size; if none is backed say there is no proven setup), key support/resistance, ATR stop and target, and what would invalidate it. Short, numbers aloud, never "on screen". Odds, not predictions; never promise returns; not financial advice; never trade from a chart read alone (trade_propose is separate).'
   };
 }

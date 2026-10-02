@@ -490,7 +490,7 @@ Object.assign(handlers, {
     try {
       const q = await trade.quote(s);
       pendingTrade = { symbol: s, side, dollars, price: q.price, turnId: turn.id, at: Date.now() };
-      return `PENDING (not placed): ${side} $${dollars} of ${s} at about $${q.price}, ${trade.mode()}. Read it back and ask him to say confirm.`;
+      return `PENDING (not placed): ${side} $${dollars} of ${s} at about $${q.price}. Read it back and ask him to say confirm.`;
     } catch (e) { return tradeFail(e); }
   },
   trade_confirm: async () => {
@@ -501,7 +501,7 @@ Object.assign(handlers, {
     try {
       const o = await trade.place(t);
       state.tradeLog.push({ ...t, orderId: o.id, status: o.status, mode: trade.mode(), at: new Date().toISOString() }); state.tradeLog = state.tradeLog.slice(-200); saveState();
-      return `Placed (${trade.mode()}): ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
+      return `Placed: ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
     } catch (e) { return tradeFail(e); }
   },
   trade_cancel: async ({ all } = {}) => {
@@ -1217,7 +1217,7 @@ async function sigTick() {
       const ex = sig.exitSignal(await chart.bars(w.symbol, '1dlong'), w.stop);
       if (!ex.exit) continue;
       state.sigAlerted[w.symbol] = Date.now(); saveState();
-      const msg = `${w.symbol} at ${ex.price}: ${ex.reasons.join('; ')}.${w.stop ? ' Your stop is ' + w.stop + '.' : ''} Rule-based warning, not advice.`;
+      const msg = `Uptrend break: ${w.symbol} at ${ex.price}, ${ex.reasons.join('; ')}. I would sell now or set the stop at ${w.stop && w.stop > ex.stop ? w.stop : ex.stop}. Rule-based warning, not advice.`;
       broadcast({ type: 'activity', text: 'SELL WARNING: ' + msg });
       await push(`Sell warning: ${w.symbol}`, msg);
     } catch (e) { console.warn('signal check failed', w.symbol, e.message); }
@@ -1237,7 +1237,7 @@ const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
 async function watchAlert(key, title, msg) {
   if (Date.now() - (watch.alerted.get(key) || 0) < WATCH_COOL_MIN * 60e3) return;
   watch.alerted.set(key, Date.now());
-  const full = `${msg} ${trade.mode()}. Not financial advice.`;
+  const full = `${msg} Not financial advice.`;
   broadcast({ type: 'activity', text: 'WATCH: ' + full });
   const err = await push(title, full); if (err) console.warn('watch push failed', err);
 }
@@ -1249,7 +1249,7 @@ async function watchTick() {
     const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
     const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
     const items = new Map();   // key = Alpaca symbol form
-    for (const p of pos) items.set(p.symbol, { sym: p.symbol, price: p.price, prevClose: p.prevClose, held: true, stop: restStop.get(p.symbol) ?? null });
+    for (const p of pos) items.set(p.symbol, { sym: p.symbol, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, stop: restStop.get(p.symbol) ?? null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it && w.stop && (it.stop == null || w.stop > it.stop)) it.stop = w.stop; }
@@ -1260,10 +1260,12 @@ async function watchTick() {
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
       const h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= WATCH_DROP_MIN * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
       const stopTxt = it.stop ? `Stop ${fmtP(it.stop)}.` : 'No stop set.';
-      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `${it.sym} is ${fmtP(it.price)}, at or under your stop ${fmtP(it.stop)}.${it.held ? '' : ' (watch list)'}`);
+      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`);
+      const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = entry && it.stop && it.stop < entry ? entry + 2 * (entry - it.stop) : null;
+      if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or trail the stop up to ${fmtP(entry)}.`);
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
-      if (drop >= WATCH_DROP_PCT && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `${it.sym} fell ${drop.toFixed(1)}% in the last ${Math.round((now - h[0].t) / 60e3)} min: ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt}`);
-      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -2 * WATCH_DROP_PCT) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `${it.sym} is ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt}`);
+      if (drop >= WATCH_DROP_PCT && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`);
+      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -2 * WATCH_DROP_PCT) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`);
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
@@ -1276,7 +1278,7 @@ async function watchTick() {
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
-  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, mode: trade.mode(), lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${WATCH_DROP_PCT}% fall within ${WATCH_DROP_MIN} minutes`, downOnDay: `${2 * WATCH_DROP_PCT}% under yesterday's close`, repeatEveryMinutes: WATCH_COOL_MIN }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${WATCH_DROP_PCT}% fall within ${WATCH_DROP_MIN} minutes`, downOnDay: `${2 * WATCH_DROP_PCT}% under yesterday's close`, repeatEveryMinutes: WATCH_COOL_MIN }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
 };
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 async function cryptoBrief(slot) {
