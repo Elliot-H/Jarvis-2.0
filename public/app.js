@@ -206,11 +206,26 @@
       el.innerHTML = `<h3><span></span><button title="Close">✕</button></h3><div class="pb"></div>`;
       el.querySelector('h3 span').textContent = p.title.toUpperCase();
       el.querySelector('.pb').innerHTML = mdLite(p.body);
+      if (/watch|signal|crypto|alert|holding|position|buy/i.test(p.title)) linkTickers(el.querySelector('.pb'));
       el.querySelector('button').onclick = () => el.remove();
       box.appendChild(el);
     });
   }
+  const NOTK = new Set('USD USDT RSI MACD SMA ATR EMA BUY SELL HOLD WATCH STOP THE AND FOR NOT NEW ALL ETF CEO IPO API HUD PNL N/A TODAY'.split(' '));
+  function linkTickers(root) {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
+    while (w.nextNode()) if (!w.currentNode.parentElement.closest('a')) nodes.push(w.currentNode);
+    for (const n of nodes) {
+      if (!/\b[A-Z]{2,5}\b/.test(n.nodeValue)) continue;
+      const f = document.createDocumentFragment();
+      n.nodeValue.split(/\b([A-Z]{2,5})\b/).forEach((t, i) => {
+        if (i % 2 && !NOTK.has(t)) { const a = document.createElement('a'); a.className = 'tk'; a.href = '/chart?s=' + t; a.textContent = t; f.appendChild(a); } else f.appendChild(document.createTextNode(t));
+      });
+      n.replaceWith(f);
+    }
+  }
   let holdAt = 0;
+  const chartA = sym => { const s = String(sym).replace('/USD', ''); return `<a class="tk" href="/chart?s=${encodeURIComponent(sym.includes('/') ? s + '-USD' : s)}">${esc(s)}</a>`; };
   const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   function renderHoldings(m) {
     const fr = $('#holdFrame'), box = $('#holdings'); if (!fr || !box) return;
@@ -220,10 +235,10 @@
     const usd = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
     const main = list.filter(p => p.value >= 1).sort((x, y) => y.value - x.value), dust = list.filter(p => p.value < 1);
-    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${esc(p.symbol.replace('/USD', ''))}</td><td>${px(p.price)}</td><td>${usd(p.value)}</td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>`;
+    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${chartA(p.symbol)}${p.watch ? ' <small class="wtag">WATCH</small>' : ''}</td><td>${px(p.price)}</td><td>${usd(p.value)}</td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>`;
     const tot = main.reduce((a, p) => a + p.value, 0), totPnl = main.reduce((a, p) => a + p.pnl, 0);
     box.innerHTML = `<table><tr><th>TICKER</th><th>PRICE</th><th>VALUE</th><th>P/L</th></tr>${main.map(row).join('')}<tr class="tot ${totPnl >= 0 ? 'up' : 'dn'}"><td>TOTAL</td><td></td><td>${usd(tot)}</td><td>${totPnl >= 0 ? '+' : ''}${usd(totPnl)}</td></tr></table>` +
-      (dust.length ? `<div class="dust">Dust: ${dust.map(p => esc(p.symbol.replace('/USD', '')) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
+      (dust.length ? `<div class="dust">Dust: ${dust.map(p => chartA(p.symbol) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
     fr.style.display = '';
     ageHoldings();
   }

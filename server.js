@@ -1327,7 +1327,7 @@ async function watchTick() {
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
-    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct })) };
+    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
     broadcast({ type: 'holdings', ...watch.holdings });
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {

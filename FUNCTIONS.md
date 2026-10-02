@@ -62,3 +62,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - Mic mute (voice): "stop listening" / "mic off" / "mute the mic" / "stop the mic" / "go deaf" fully shuts the recognizer, wake word engine and mic meter, shows MIC MUTED (red chip, core, mic button), and Jarvis confirms aloud. Voice cannot unmute; only a tap on the mic button, the core, or SPACE does. Persists across reloads (localStorage `jarvis.muted`). Android side key does not unmute.
 
 - Live holdings box (HUD, left column): every open Alpaca position with ticker, price, value, P/L % and $, refreshed on each Investment Watch tick; dust under $1 in a footer. (Work/HUD)
+- Holdings and watch-panel tickers open their chart when tapped; holdings show a WATCH tag for signal-watched symbols.
