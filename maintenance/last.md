@@ -1,7 +1,5 @@
-STATUS: done
-TIME: 2026-10-02T15:15:25Z
-REQUEST: Make "stop listening" mute the mic and wake word until a manual tap.
+STATUS: needs-owner
+TIME: 2026-10-02T15:43:12Z
+REQUEST: Fix market-data feed keys (Finnhub, Twelve Data, FMP) showing keySet false
 RESULT:
-Owner, the mute feature from the last run was already in place, so I only tightened it. "Stop listening" was already caught; I added more phrasings like "mic off", "stop hearing" and "don't listen".
-Jarvis now says just "Microphone muted." The wake word, recogniser and mic meter stay off, and only a tap on the mic button, the core or the space bar brings them back.
-A voice command cannot unmute, and the muted state survives a reload. It goes live when Railway redeploys. No APK reinstall needed. Checked by syntax check only, not on a phone.
+I cannot see your Railway variables from here, so I could not confirm what is set. The code reads the right names: FINNHUB_API_KEY, TWELVEDATA_API_KEY and FMP_API_KEY, so the Finnhub lookup is correct. Owner, in Railway Variables for the Jarvis service check the name is exactly FINNHUB_API_KEY with no spaces, that it is on the same service and environment, and that the deploy finished after you saved it. Add TWELVEDATA_API_KEY and FMP_API_KEY too, since those are still missing. I added a names-only hint to data_feeds, so after this deploys it will list any similar variable names Railway really provides. No app reinstall needed.

@@ -127,7 +127,11 @@ export async function earnings(symbol) {
 
 export function status() {
   const now = Date.now();
+  // names only (never values): shows near-miss variable names such as FINNHUB_KEY or a trailing space
+  const similar = Object.keys(process.env).filter(k => /finnhub|twelve|fmp|financialmodeling/i.test(k));
   return {
+    expectedVariables: ['FINNHUB_API_KEY', 'TWELVEDATA_API_KEY', 'FMP_API_KEY'],
+    similarVariablesSeen: similar,
     finnhub: { keySet: configured('finnhub'), callsLastMinute: used.finnhub.filter(t => now - t < 60e3).length, limit: '60/min free' },
     twelveData: { keySet: configured('twelve'), callsLastMinute: used.twelve.filter(t => now - t < 60e3).length, callsToday: used.twelve.length, limit: '8/min, 800/day free' },
     fmp: { keySet: configured('fmp'), callsToday: used.fmp.length, limit: '250/day free' }
