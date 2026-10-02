@@ -1452,10 +1452,11 @@ const cgPx = { at: 0, busy: false, byId: new Map(), bySym: new Map() };
 state.cgLast ||= {};   // { id: { symbol, name, price, change24h, at } }
 const cgFresh = () => Date.now() - cgPx.at < 120e3;
 function cgRefresh() {
-  if (cgPx.busy || cgFresh() || !(state.watchlist || []).length) return;
+  const ids = [...new Set([...(state.watchlist || []), ...(state.sigWatch || []).map(w => crypto_.coinIdFor(w.symbol)).filter(Boolean)])];   // coin tickers on the stock watch list (NIGHT) also use CoinGecko
+  if (cgPx.busy || cgFresh() || !ids.length) return;
   cgPx.busy = true;
-  crypto_.byIds(state.watchlist).then(coins => {
-    if (!coins.length) throw new Error('CoinGecko returned no coins for ' + state.watchlist.join(', '));
+  crypto_.byIds(ids).then(coins => {
+    if (!coins.length) throw new Error('CoinGecko returned no coins for ' + ids.join(', '));
     for (const c of coins) { const o = state.cgLast[c.id]; if (o && c.name === c.id) { c.symbol = o.symbol; c.name = o.name; } }   // lighter fallback endpoint has no names: keep the saved ones
     for (const c of coins) state.cgLast[c.id] = { symbol: c.symbol, name: c.name, price: c.price, change24h: c.change24h, at: Date.now() };
     cgPx.byId = new Map(coins.map(c => [c.id, c])); cgPx.bySym = new Map(coins.map(c => [c.symbol, c]));

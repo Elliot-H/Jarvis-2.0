@@ -321,3 +321,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Vehicle start = departure trigger (2026-10-02)
 - `obdScan` (server.js): engine seen running (rpm>0) after >`DEPART_GAP_MIN` (30) of not running -> `vehicleDeparture()` asks once per drive "Are you leaving X, or headed somewhere? <up to 3 places>?" (pendingQ type `depart`). While parked and in range the dongle is polled every `OBD_WATCH_MIN` (2) so a start is caught fast.
 - `departAnswer`: a named place -> leave reminders for the current place + `bringLine(dest)` + `heading` reminders (same lines as `heading_to`); "leaving" with no place -> guessNext or leave reminders only; "no/staying" -> "Very good, sir." `state.departed` stops the normal leave-the-perimeter checklist from asking again for 45 min. Tested: syntax and boot only, not with a real dongle.
+
+## Coin tickers on the stock watch list (2026-10-02)
+- `cgRefresh` (server.js) now also fetches CoinGecko ids for `state.sigWatch` symbols that `crypto.coinIdFor` knows (NIGHT), so a NIGHT row there gets a live price/24h change instead of blank. Add more tickers to `COIN_IDS` in crypto.js. Syntax-checked only.
