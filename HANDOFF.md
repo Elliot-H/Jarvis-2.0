@@ -263,3 +263,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Chart links on alerts (2026-10-02)
 - Every outgoing investment push (stop/drop/day/target/resistance/spike/volume, new buy-watch signal, news catalyst, sell warning, crypto briefs) carries a tappable link to `/chart?s=SYM&lv=stop:1.2&lv=target:3` (public/chart.html: candlesticks, 5m/15m/1h/1d/1w, dashed lines for Jarvis's stop/target/entry plus swing support/resistance; data from `/api/chart`, Yahoo bars). Built by `chartLink()` in server.js; `push(title, body, link)` sends it as Pushover `url`, ntfy `Click`, and appended text on Telegram. Needs `PUBLIC_URL` (or Railway's `RAILWAY_PUBLIC_DOMAIN`, set automatically); without a base URL no link is added. Page is PIN-protected; the login form returns to the chart after the PIN. Yahoo blocked from the build sandbox, so the chart data was not tested live.
+
+## Longer spoken replies + chunked voice (2026-10-02)
+- Persona no longer caps replies at 1-3 sentences (up to ~150 words when needed); talk `maxTokens` 700->1500. `speak()` in public/app.js now voices replies in ~350-char sentence chunks played back to back (short /api/tts URLs, first audio fast, no 2500-char cut-off); a chunk failure falls back to browser speech for the remaining text. Web/server only, no APK reinstall. Not tested on the live phone or Fish.

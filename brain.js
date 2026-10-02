@@ -38,7 +38,7 @@ function explain(status, body) {
  * tools: [{name, description, shape}]   run(name, args) → string | { text, stop }
  * Returns { text, cost, ms, firstMs, rounds, calls, usage, error, stopped }
  */
-export async function talk({ cfg = brainConfig(), model, system, prompt, history = [], tools = [], run, webSearch = true, maxRounds = 6, budgetUsd = 0.05, maxTokens = 700, signal, onTool, provider, extraBody } = {}) {
+export async function talk({ cfg = brainConfig(), model, system, prompt, history = [], tools = [], run, webSearch = true, maxRounds = 6, budgetUsd = 0.05, maxTokens = 1500, signal, onTool, provider, extraBody } = {}) {
   const t0 = Date.now();
   const out = { text: '', cost: 0, ms: 0, firstMs: 0, rounds: 0, calls: [], usage: { in: 0, out: 0, cached: 0 }, error: null, stopped: false, model: model || cfg.model };
   if (!cfg.apiKey) { out.error = 'no-key'; out.text = 'My talk brain has no key yet, sir. Add OPENROUTER_API_KEY in Railway.'; return out; }
@@ -88,8 +88,8 @@ export async function talk({ cfg = brainConfig(), model, system, prompt, history
       // Empty reply (often after web search or tools, or reasoning ate the token budget): ask once more for the spoken answer instead of letting the caller say a bare "Done".
       if (!out.text && !nudged && round < maxRounds - 1) {
         nudged = true;
-        messages.push({ role: 'assistant', content: '' }, { role: 'user', content: 'Now give the Owner the actual answer in speech: the real findings, names and numbers, in 1-4 short sentences. Never reply with just "Done".' });
-        body_tokens = Math.max(maxTokens, 1200);
+        messages.push({ role: 'assistant', content: '' }, { role: 'user', content: 'Now give the Owner the actual answer in speech: the real findings, names and numbers, in a complete spoken answer. Never reply with just "Done".' });
+        body_tokens = Math.max(maxTokens, 2000);
         continue;
       }
       break;

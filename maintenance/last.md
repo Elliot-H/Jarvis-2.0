@@ -1,7 +1,7 @@
 STATUS: done
-TIME: 2026-10-02T16:53:26Z
-REQUEST: Owner hears only the short acknowledgement, not the full spoken reply; fix voice playback.
+TIME: 2026-10-02T17:18:08Z
+REQUEST: Allow longer spoken replies, and make the full real reply come through the speaker, not just the opening line.
 RESULT:
-Owner, I found the cause. The app was almost certainly stuck in silent, text-only mode, which sends full replies to the comms log with no voice. Saying "stop talking" or "be quiet" switched it on, it is remembered, and the short acknowledgement ignored it, so that was the only thing you heard.
-I fixed three things. Those two phrases no longer turn silent mode on. The acknowledgement now respects silent mode. Opening the app always turns silent mode off, so reopening it brings the voice back.
-Replies still go through the Fish JARVIS voice, and only replies over about 2500 characters are cut for speech. It goes live when Railway redeploys, and no APK reinstall is needed. Just close and reopen the app after the deploy.
+Owner, I raised the reply limit. Jarvis may now give complete answers of up to about a hundred and fifty words, and his token budget is doubled.
+For the audio, I could not test the live Fish voice from here. The likely fault was that a whole reply went to the voice as one long request. Now the app speaks long replies in short sentence chunks, one after another, so the real answer starts quickly and is not cut off.
+If a chunk fails, the rest is read by the phone voice instead of going silent. It goes live when Railway redeploys, and no APK reinstall is needed. Close and reopen the app after the deploy, and if it is still quiet, ask Jarvis to run a voice check.

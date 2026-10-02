@@ -334,17 +334,28 @@
     caption(clean);
     const done = () => { if (!speaking) return; speaking = false; currentAudio = null; fakeLevel = false; setState('idle'); afterReply(clean); };
 
+    // Long replies are voiced in short sentence chunks played back to back: short request URLs, audio starts fast, nothing is cut off.
+    const chunks = [];
+    for (const piece of clean.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [clean]) {
+      const last = chunks.length - 1;
+      if (last >= 0 && chunks[last].length + piece.length <= 350) chunks[last] += piece; else chunks.push(piece);
+    }
     if (cfg.elevenlabs) {
       ensureAudio();
-      const a = newClip(); a.crossOrigin = 'anonymous';
-      a.src = '/api/tts?text=' + encodeURIComponent(clean);
-      currentAudio = a;
-      if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
-      a.onended = done;
-      let fell = false;
-      const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); browserSpeak(clean, done); };
-      a.onerror = () => fallback('error');
-      a.play().catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
+      const playChunk = i => {
+        if (!speaking) return;
+        if (i >= chunks.length) return done();
+        const a = newClip(); a.crossOrigin = 'anonymous';
+        a.src = '/api/tts?text=' + encodeURIComponent(chunks[i].trim());
+        currentAudio = a;
+        if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
+        a.onended = () => playChunk(i + 1);
+        let fell = false;
+        const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); browserSpeak(chunks.slice(i).join(' '), done); };
+        a.onerror = () => fallback('error');
+        a.play().catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
+      };
+      playChunk(0);
     } else browserSpeak(clean, done);
   }
   function browserSpeak(text, done) {
