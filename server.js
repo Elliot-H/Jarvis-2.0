@@ -823,7 +823,7 @@ handlers.shop_day = async ({ going }) => shopDay(going);
 // Items (the Places box / voice): trigger arrive | leave | heading (said when he is headed there), once = fire then delete,
 // kind bring = something to bring TO that place (said when he leaves anywhere else / says he's headed there; cleared on arrival).
 const LEAVE_MARGIN = 120, QUIET_FROM = Number(process.env.QUIET_FROM ?? 22), QUIET_TO = Number(process.env.QUIET_TO ?? 6);
-const CONFIRM_MS = Number(process.env.PLACE_CONFIRM_MIN || 3) * 60e3, REARM_MS = Number(process.env.ARRIVE_REARM_MIN || 30) * 60e3;
+const CONFIRM_MS = Number(process.env.PLACE_CONFIRM_MIN || 1) * 60e3, REARM_MS = Number(process.env.ARRIVE_REARM_MIN || 30) * 60e3;
 const MAX_REMARKS_HOUR = Number(process.env.MAX_REMARKS_HOUR || 4);
 function placeFor(L, prevKey) {
   let best = null;
@@ -842,12 +842,17 @@ const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' 
 const dueItem = (r, now) => r.on !== false && (!r.lastShown || r.once || now - r.lastShown > (r.cooldownHours ?? 20) * 3600e3) && (!r.time || r.time === nowCtx().tod)
   && (!r.days || (r.days === 'weekends') === nowCtx().weekend);
 // Lines for an event at a place. Once-items always fire; the others roll their chance. Fired once-items are removed.
-function eventLines(trigger, placeName, roll = Math.random) {
+function eventLines(trigger, placeName, roll = Math.random, always = false) {
   const now = Date.now(), k = placeKey(placeName), out = [];
   const hits = state.reminders.filter(r => r.kind !== 'bring' && r.trigger === trigger && placeKey(r.place) === k && dueItem(r, now));
-  for (const r of hits) if (r.once || roll() * 100 < (r.chance ?? 40)) { r.lastShown = now; out.push(r.text); if (r.kind === 'question') state.pendingQ = { id: r.id, at: now }; }
+  for (const r of hits) if (always || r.once || roll() * 100 < (r.chance ?? 40)) { r.lastShown = now; out.push(r.text); if (r.kind === 'question') state.pendingQ = { id: r.id, at: now }; }
   state.reminders = state.reminders.filter(r => !(r.once && r.lastShown === now && hits.includes(r)));
   return out.slice(0, 2);
+}
+// Voice names are loose ("camden", "the camden house"): exact key first, then a unique partial match.
+function findPlace(name) {
+  const k = placeKey(name); if (!k) return null;
+  return state.places.find(p => placeKey(p.name) === k) || state.places.find(p => placeKey(p.name).includes(k) || (k.length > 3 && k.includes(placeKey(p.name)))) || null;
 }
 const bringFor = name => state.reminders.filter(r => r.kind === 'bring' && placeKey(r.place) === placeKey(name) && r.on !== false);
 function bringLine(name) { const b = bringFor(name); return b.length ? `Don't forget to bring ${listJoin(b.map(r => r.text))} to ${name}.` : ''; }
@@ -871,16 +876,20 @@ function deliver(text, title = 'Jarvis') {
   } else push(title, text).catch(() => {});
 }
 const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
+let moveTimer = null;
 function onMove() {
   const L = state.location; if (!L) return;
   const prevKey = state.at || '', pl = placeFor(L, prevKey), key = pl ? placeKey(pl.name) : '';
-  const now = Date.now();
+  const now = Date.now(), prev0 = state.places.find(p => placeKey(p.name) === prevKey);
   if (!state.atInit) { state.at = key; state.atSince = now; state.atInit = true; state.lastPlace = key; saveState(); return; } // fresh/wiped state: learn where he is, do not greet
   if (key === prevKey) { if (state.cand) { state.cand = null; saveState(); } return; } // back inside (or never left): jitter, forget the candidate
   // Debounce: a change of place only counts once the new reading has held for CONFIRM_MS (one stray fix at the edge never flips the state).
-  if (state.cand?.key !== key) { state.cand = { key, since: now, n: 1 }; saveState(); return; }
-  state.cand.n++;
-  if (now - state.cand.since < CONFIRM_MS || state.cand.n < 3) return;
+  if (state.cand?.key !== key) { state.cand = { key, since: now, n: 1 }; saveState(); }
+  else state.cand.n++;
+  // A stationary phone sends no new fix, so re-check shortly after the confirm window instead of waiting for the next report.
+  // Arriving well inside the perimeter (or leaving well outside it) confirms at once.
+  const deep = pl ? pl.d <= (pl.radius || 150) * .6 : !!prev0 && km(L, prev0) * 1000 > (prev0.radius || 150) + LEAVE_MARGIN + 150;
+  if (!deep && (now - state.cand.since < CONFIRM_MS || state.cand.n < 2)) { clearTimeout(moveTimer); moveTimer = setTimeout(onMove, CONFIRM_MS + 5000); return; }
   state.cand = null;
   const prev = state.places.find(p => placeKey(p.name) === prevKey);
   if (prev) (state.leftAt ||= {})[prevKey] = now;
@@ -888,7 +897,7 @@ function onMove() {
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
-    parts.push(...eventLines('leave', prev.name));
+    parts.push(...eventLines('leave', prev.name, Math.random, true));
     const dest = pl ? null : guessNext(prevKey);
     if (dest) {
       const q = placeKey(dest.name) === 'shop' ? 'Headed to the shop, sir?' : dest.kind === 'home' ? 'Headed home, sir?' : `Headed to ${dest.name}, sir?`;
@@ -897,6 +906,7 @@ function onMove() {
       const other = state.places.find(p => p.name !== prev.name && bringFor(p.name).length);
       if (other) parts.push(bringLine(other.name));
     }
+    if (!pl && dest) { const b = bringLine(dest.name); if (b) parts.push(b); }
     if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
   }
   if (pl && rearmed) { // arrived somewhere
@@ -904,7 +914,7 @@ function onMove() {
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
     const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
-    parts.push(...eventLines('arrive', pl.name));
+    parts.push(...eventLines('arrive', pl.name, Math.random, true));
     if (!parts.length) parts.push(pl.kind === 'home' ? 'Welcome home, sir.' : firstToday ? `Welcome to ${pl.name}, sir.` : `Arrived at ${pl.name}, sir.`); // always one short line on an arrival
   }
   saveState();
@@ -927,18 +937,24 @@ async function destAnswer(q, text) {
   return true;
 }
 handlers.heading_to = async ({ place }) => {
-  const p = state.places.find(x => placeKey(x.name) === placeKey(place));
+  const p = findPlace(place);
   if (!p) return `No saved place called ${place}. Saved: ${state.places.map(x => x.name).join(', ') || 'none'}.`;
-  return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name)].join(' ');
+  return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name, Math.random, true)].join(' ');
 };
 handlers.bring_add = async ({ place, item }) => {
-  const p = state.places.find(x => placeKey(x.name) === placeKey(place));
+  const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
   saveState(); return `Added: bring ${item} to ${p ? p.name : place}${p ? '' : ' (no saved place by that name yet)'}. He'll be reminded when he heads there, and it clears when he arrives.`;
 };
-handlers.bring_list = async ({ place }) => {
-  const b = place ? bringFor(place) : state.reminders.filter(r => r.kind === 'bring');
-  return b.length ? b.map(r => `${r.id}: ${r.text} -> ${r.place}`).join('\n') : 'Nothing to bring anywhere.';
+// "Do I need to bring anything / what do I need to grab": the bring list plus the bucket items for that place (named, else where he is now).
+handlers.bring_list = async ({ place } = {}) => {
+  const p = place ? findPlace(place) : currentPlace();
+  const b = place && p ? bringFor(p.name) : place ? [] : state.reminders.filter(r => r.kind === 'bring' && r.on !== false);
+  const kn = p ? placeKey(p.name) : '', here = p ? state.reminders.filter(r => r.kind !== 'bring' && r.on !== false && placeKey(r.place) === kn && ['arrive', 'leave', 'heading'].includes(r.trigger)) : [];
+  const out = [];
+  if (b.length) out.push('Bring: ' + b.map(r => `${r.text} -> ${r.place}`).join('; '));
+  if (here.length) out.push(`Reminders for ${p.name}: ` + here.map(r => `${r.text} (${r.trigger})`).join('; '));
+  return out.length ? out.join('\n') + '\nSay it in one or two short sentences.' : `Nothing to bring or grab${p ? ' for ' + p.name : ''}, sir.`;
 };
 // Starter check-ins (edit or delete them in the Places box).
 if (!state.seededMoves) {

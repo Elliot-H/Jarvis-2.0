@@ -26,7 +26,7 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A1 | Voice, wake word, HUD, JARVIS voice | ✅ | Fish Audio voice, Android app + PWA. |
 | A2 | Greeting + weather that follows the phone | ✅ | |
 | A3 | Places + perimeters (Home, The Camden House, the shop) | ✅ | Places box on the HUD (PLACES). Private places via PLACES_JSON. |
-| A4 | Comings and goings | ✅ | Background location; arrive/leave remarks; "Headed home, sir?"; quiet hours, 4/hour cap. |
+| A4 | Comings and goings | ✅ | Background location; arrive/leave lines confirmed within ~1 min (shop, Home, Camden house); bring + grab + reminders per place; "Headed home, sir?"; quiet hours, 4/hour cap. |
 | A5 | Reminder / mention / question box | ✅ | Per place: while there, arrive, leave, headed there, not there; once-only; yes/no replies. |
 | A6 | Bring + grab lists | ✅ | "Bring the drill to the Camden house", "grab the film before I leave". |
 | A7 | Everyday check-ins | ✅ | Eaten yet, check with Princess, dogs' food. Editable. |

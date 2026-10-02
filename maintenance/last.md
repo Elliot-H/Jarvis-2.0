@@ -1,7 +1,8 @@
 STATUS: done
-TIME: 2026-10-01T20:32:08Z
-REQUEST: Stop repeated "Arrived at / welcome to the shop" while he stays at the shop; add debounce and re-arm.
+TIME: 2026-10-02T14:34:22Z
+REQUEST: Make the arrive/leave check fire promptly for the shop, Home and Camden house, with bring lists and reminders.
 RESULT:
-Owner, I found two causes. The current place was not saved across redeploys, so every update looked like a fresh arrival. Also, single stray GPS fixes at the edge flipped you in and out.
-Now a place change must hold for three readings over three minutes. A new arrival needs a confirmed leave first, and re-entering within thirty minutes stays silent.
-It goes live when Railway redeploys from main. No APK reinstall needed. I tested it with simulated moves only.
+Owner, the delay came from my last fix: it waited for three location readings, but a phone sitting still sends none, so the shop greeting came ten minutes late.
+Now an arrival or departure is confirmed within about a minute, or at once if you are well inside or outside the place.
+Arrive and leave reminders now always fire, the bring list is spoken on the way out, and "do I need to bring anything" reads the bring list plus that place's reminders.
+It goes live when Railway redeploys from main. No APK reinstall needed. I tested it with a simulated location only, so the phone must keep sending background reports.
