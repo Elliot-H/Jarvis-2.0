@@ -75,7 +75,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -691,6 +691,7 @@ async function panelAnswer(text) {
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
   if (q.type === 'dest') return destAnswer(q, text);
+  if (q.type === 'checklist') return checklistAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
@@ -899,9 +900,9 @@ function onMove() {
   if (prev) { // left somewhere
     parts.push(...eventLines('leave', prev.name, Math.random, true));
     const dest = pl ? null : guessNext(prevKey);
+    if (!pl) parts.push(askChecklist(prev.name, dest)); // every departure from a saved place: ask what to bring, right now
     if (dest) {
-      const q = placeKey(dest.name) === 'shop' ? 'Headed to the shop, sir?' : dest.kind === 'home' ? 'Headed home, sir?' : `Headed to ${dest.name}, sir?`;
-      parts.push(q); state.pendingQ = { type: 'dest', place: dest.name, at: Date.now() };
+      if (placeKey(dest.name) === 'shop') state.workDay = { day: c.day, on: true }; // checklist replaces the "Headed to the shop?" question
     } else if (!pl) { // not a guessable trip: mention anything waiting to be brought somewhere
       const other = state.places.find(p => p.name !== prev.name && bringFor(p.name).length);
       if (other) parts.push(bringLine(other.name));
@@ -913,13 +914,55 @@ function onMove() {
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
+    const lc = state.lastCheck;
+    if (lc && !lc.answered && placeKey(lc.from) !== key && now - lc.at < 12 * 3600e3) parts.push(askChecklist(lc.from, null, true)); // departure prompt missed or cut off: ask on arrival
     const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
     parts.push(...eventLines('arrive', pl.name, Math.random, true));
     if (!parts.length) parts.push(pl.kind === 'home' ? 'Welcome home, sir.' : firstToday ? `Welcome to ${pl.name}, sir.` : `Arrived at ${pl.name}, sir.`); // always one short line on an arrival
   }
   saveState();
   const text = parts.filter(Boolean).join(' ');
-  if (text && (!quietNow() || parts.some(t => /bring|remembered|grab/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
+  if (text && (!quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
+}
+// Departure checklist: asked aloud the moment he leaves a saved place; his answer becomes bring items for the destination.
+const CHECK_ITEMS = 'Tools, food, gas, anything for the dogs, anything for Princess?';
+function checklistQuestion(dest, arrive) {
+  if (arrive) return `You left ${arrive} before I got your list, sir. Anything you need to bring back to ${arrive}? ${CHECK_ITEMS}`;
+  const to = !dest ? '' : placeKey(dest.name) === 'shop' ? ' to the shop' : dest.kind === 'home' ? ' home' : ` to ${dest.name}`;
+  return `Before you go, anything you need to remember to bring${to}, sir? ${CHECK_ITEMS}`;
+}
+function askChecklist(fromName, dest, arrive) {
+  state.pendingQ = { type: 'checklist', from: fromName, dest: dest ? dest.name : '', arrive: !!arrive, at: Date.now() };
+  state.lastCheck = { from: fromName, at: Date.now(), answered: false };
+  return checklistQuestion(dest, arrive ? fromName : '');
+}
+const CHECK_NO = /^(no|nope|nah|nothing|none|not really|i'?m good|im good|all set|all good|got everything|got it all|i have everything|that'?s all)\b/;
+const CHECK_CMD = /^(what|whats|what's|how|when|where|who|why|play|pause|stop|turn|call|text|open|set|show|tell|check|is|are|do|does|did|can|could|will)\b|\?$/;
+const CHECK_FILL = /^(?:(?:yeah|yes|yep|um|uh|okay|ok|well|and|also|so)\s+)*(?:i\s+(?:need|want|have|got)\s+(?:to\s+)?)?(?:(?:bring|take|grab|get|pick up|add)\s+)?(?:the\s+)?/;
+async function checklistAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  if (Date.now() - q.at > 3 * 60e3 || (CHECK_CMD.test(t) && !CHECK_NO.test(t))) return false; // stale or an unrelated request: let it through, keep nothing
+  const done = () => { state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
+  if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.'); }
+  if (/^(yes|yeah|yep|yup|i do|i did)$/.test(t)) { q.at = Date.now(); saveState(); return say('What is it, sir?'); }
+  // Destination: the one guessed at departure, else a saved place named in the answer ("...for the camden house").
+  let dest = q.dest ? findPlace(q.dest) : null, body = t;
+  if (!dest) {
+    const named = state.places.find(p => new RegExp(`\\b(?:to|for|at)\\s+(?:the\\s+)?${placeKey(p.name).replace(/[^a-z0-9 ]/g, '')}\\b`).test(t));
+    if (named) { dest = named; body = t.replace(new RegExp(`\\s*\\b(?:to|for|at)\\s+(?:the\\s+)?${placeKey(named.name).replace(/[^a-z0-9 ]/g, '')}\\b`), ''); }
+  }
+  if (!dest && q.items?.length) { // items already taken down; this answer should be the destination
+    const p = findPlace(t.replace(/^(?:i'?m )?(?:going |headed |heading )?(?:to |for )?(?:the )?/, ''));
+    if (p) { for (const it of q.items) await handlers.bring_add({ place: p.name, item: it }); const all = q.items; done(); return say(`Noted, sir. ${listJoin(all)} for ${p.name}.`); }
+  }
+  const items = body.split(/\s*(?:,|;|\band\b|\bplus\b|\balso\b)\s*/).map(x => x.replace(CHECK_FILL, '').replace(/[.!]+$/, '').trim()).filter(x => x.length > 1);
+  if (!items.length) return false;
+  if (!dest) { q.items = [...(q.items || []), ...items]; q.at = Date.now(); saveState(); return say(`Got ${listJoin(items)}. Where are you headed, sir?`); }
+  const all = [...(q.items || []), ...items];
+  for (const it of all) await handlers.bring_add({ place: dest.name, item: it });
+  state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState();
+  return say(`Noted, sir. ${listJoin(all)} for ${dest.name}.`);
 }
 // Yes / no to "Headed home, sir?"
 async function destAnswer(q, text) {
