@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T21:47:57Z
-REQUEST: Make volume-up the first alert trigger, then price, then trend and the rest, tunable live
+TIME: 2026-10-02T21:56:06Z
+REQUEST: HUD watch list must show crypto (e.g. NIGHT) alongside stocks, with live CoinGecko prices and STOCK/CRYPTO tags
 RESULT:
-Owner, alerts now fire first on volume rising above its 20-day average, with no price move needed. Price confirming up is checked next, then price above a rising 20-day average with spike volume. The first-flag threshold is volFirstRatio, default 1.5, and you can change it by voice with alert config, no redeploy. The 30-minute mover sweep also checks the top gainers for volume first. It is live once Railway redeploys, no APK reinstall needed. Alerts stay information only, nothing trades. It was tested on sample data, not live feeds.
+Owner, the HUD watch list now shows your crypto watchlist next to the stocks, so NIGHT appears with its live CoinGecko price and 24 hour change. Each row is tagged STOCK or CRYPTO. If the stock feed cannot price a symbol, it now falls back to the crypto feed instead of dropping the row. It goes live once Railway redeploys, no APK reinstall needed. The boot test passed, but the CoinGecko pricing was not tested against the live feed.

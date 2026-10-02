@@ -449,7 +449,7 @@ Object.assign(handlers, {
     const clean = ids.map(i => String(i).toLowerCase().trim()).filter(i => /^[a-z0-9-]{1,60}$/.test(i));
     if (action === 'add') state.watchlist = [...new Set([...state.watchlist, ...clean])].slice(0, 25);
     if (action === 'remove') state.watchlist = state.watchlist.filter(i => !clean.includes(i));
-    saveState();
+    saveState(); cgPx.at = 0; broadcast(watchlistMsg(true));
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
   }
 });
@@ -1362,12 +1362,26 @@ function holdingsOut() {
     const sc = scaleInfo(k); return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, scale: sc, realised: watch.realised.get(k) ?? 0, target: e.target ?? null, spark: isDustVal(p.value) ? null : sparkFor(k), wk: watchSig(k) };
   }) };
 }
+// Crypto rows for the HUD watch list: state.watchlist (CoinGecko ids), priced from CoinGecko (scan is cached 5 min).
+const cgPx = { at: 0, busy: false, byId: new Map(), bySym: new Map() };
+function cgRefresh() {
+  if (cgPx.busy || Date.now() - cgPx.at < 120e3 || !(state.watchlist || []).length) return;
+  cgPx.busy = true;
+  crypto_.scan({ top: 1, watch: state.watchlist }).then(r => {
+    cgPx.byId = new Map(r.coins.map(c => [c.id, c])); cgPx.bySym = new Map(r.coins.map(c => [c.symbol, c]));
+    cgPx.at = Date.now(); cgPx.busy = false; broadcast(watchlistMsg(true));
+  }).catch(() => { cgPx.at = Date.now(); cgPx.busy = false; });
+}
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
+  cgRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
   const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
-  return { type: 'watchlist', at: Date.now(), list: wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price), spark: sparkFor(w.symbol) }; }) };
+  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && cgPx.bySym.get(wlKey(w.symbol))?.price != null ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
+  const have = new Set(stocks.map(w => wlKey(w.symbol)));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: c?.price ?? null, dayPct: c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null }));
+  return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
