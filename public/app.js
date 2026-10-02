@@ -230,6 +230,8 @@
   const COIN = '<span class="coin" title="Crypto: trades 24/7">&#8383;</span>';
   const chartA = sym => { const s = String(sym).replace('/USD', ''); return `<a class="tk" href="/chart?s=${encodeURIComponent(sym.includes('/') ? s + '-USD' : s)}">${esc(s)}</a>${/\/USD$/.test(sym) ? COIN : ''}`; };
   const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const isCrypto = p => p.kind === 'crypto' || p.feed === 'crypto' || /\/USD$/.test(p.symbol) || CRYPTO_TK.has(String(p.symbol).replace(/[\/-]?USDT?$/, '').toUpperCase());
+  const atag = p => isCrypto(p) ? '<small class="atag cr">CRYPTO</small>' : '<small class="atag st">STOCK</small>';
   function renderHoldings(m) {
     const fr = $('#holdFrame'), box = $('#holdings'); if (!fr || !box) return;
     const list = m.positions || [];
@@ -241,12 +243,12 @@
     const vcl = { BUY: 'up', WATCH: '', AVOID: 'dn' };
     const spark = pts => { if (!pts || pts.length < 2) return ''; const lo = Math.min(...pts), hi = Math.max(...pts), r = hi - lo || 1; return `<svg class="spk" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="${pts[pts.length - 1] >= pts[0] ? '#4dff9a' : '#ff6b6b'}" stroke-width="1.2" points="${pts.map((v, i) => (i * 60 / (pts.length - 1)).toFixed(1) + ',' + (15 - (v - lo) / r * 14).toFixed(1)).join(' ')}"/></svg>`; };
     const rec = p => `<tr class="rec"><td colspan="4">${spark(p.spark)} <b class="${vcl[p.verdict] || ''}">${p.verdict || '…'}</b> <small>${p.stop ? 'trail stop ' + px(p.stop) : ''}${p.scale && p.scale.next ? ' · next ' + px(p.scale.next) + ' (' + p.scale.nextLabel + ')' : p.scale && p.scale.nextLabel ? ' · ' + p.scale.nextLabel : p.target ? ' · tgt ' + px(p.target) : ''}${p.scale && p.scale.be ? ' · BE+costs ' + px(p.scale.be) : ''}<br>open ${p.pnl >= 0 ? '+' : '-'}$${Math.abs(p.pnl).toFixed(2)} · realised ${(p.realised || 0) >= 0 ? '+' : '-'}$${Math.abs(p.realised || 0).toFixed(2)}</small> <a class="tk" href="/chart?s=${encodeURIComponent(p.symbol.includes('/') ? p.symbol.replace('/USD', '') + '-USD' : p.symbol)}">chart</a> ${p.watch ? '<small class="wtag">WATCH</small>' : `<button class="wbtn" data-s="${esc(p.symbol.replace('/USD', '').replace('/', ''))}" data-k="${esc(p.wk || '')}">+ watch</button>`}</td></tr>`;
-    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${chartA(p.symbol)}${p.watch ? ' <small class="wtag">WATCH</small>' : ''}</td><td>${px(p.price)}<br><small>in ${p.entry != null ? px(p.entry) : '?'}</small></td><td>${usd(p.value)}<br><small>${p.qty != null ? qf(p.qty) + ' @ ' + usd(p.costBasis ?? p.qty * p.entry) : ''}</small></td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>` + rec(p);
+    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${chartA(p.symbol)} ${atag(p)}${p.watch ? ' <small class="wtag">WATCH</small>' : ''}</td><td>${px(p.price)}<br><small>in ${p.entry != null ? px(p.entry) : '?'}</small></td><td>${usd(p.value)}<br><small>${p.qty != null ? qf(p.qty) + ' @ ' + usd(p.costBasis ?? p.qty * p.entry) : ''}</small></td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>` + rec(p);
     const qf = n => Number(n).toLocaleString('en-US', { maximumFractionDigits: n >= 100 ? 2 : 6 });
     const tot = main.reduce((a, p) => a + p.value, 0), totPnl = main.reduce((a, p) => a + p.pnl, 0);
     const totCost = main.reduce((a, p) => a + (p.costBasis ?? (p.value - p.pnl)), 0), totPct = totCost > 0 ? (tot - totCost) / totCost * 100 : 0;
     box.innerHTML = `<table><tr><th>TICKER</th><th>PRICE</th><th>VALUE</th><th>P/L</th></tr>${main.map(row).join('')}<tr class="tot ${totPnl >= 0 ? 'up' : 'dn'}"><td>TOTAL</td><td></td><td>${usd(tot)}</td><td>${totPnl >= 0 ? '+' : ''}${totPct.toFixed(2)}%<br><small>${totPnl >= 0 ? '+' : ''}${usd(totPnl)}</small></td></tr><tr class="tot ${totPnl >= 0 ? 'up' : 'dn'}"><td colspan="4"><small>Bought in ${usd(totCost)} · now ${usd(tot)} · overall ${totPnl >= 0 ? '+' : ''}${totPct.toFixed(2)}%</small></td></tr></table>` +
-      (dust.length ? `<div class="dust">Dust: ${dust.map(p => chartA(p.symbol) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
+      (dust.length ? `<div class="dust">Dust: ${dust.map(p => chartA(p.symbol) + ' ' + atag(p) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
     box.querySelectorAll('.wbtn').forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await fetch(`/watch-add?s=${encodeURIComponent(b.dataset.s)}&k=${b.dataset.k}`); b.textContent = r.ok ? 'watching' : 'failed'; } catch { b.textContent = 'failed'; b.disabled = false; } });
     fr.style.display = '';
     ageHoldings();

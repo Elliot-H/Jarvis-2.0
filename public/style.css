@@ -205,3 +205,4 @@ a.tk{color:inherit;text-decoration:underline dotted;cursor:pointer}
 .holdings small.up{color:#4dff9a}.holdings small.dn{color:#ff6b6b}
 
 .coin{display:inline-block;margin-left:3px;color:#ffc94d;border:1px solid #ffc94d;border-radius:50%;width:11px;height:11px;line-height:11px;text-align:center;font-size:8px;vertical-align:middle}
+.atag{border:1px solid;padding:0 3px;font-size:8px;letter-spacing:.1em}.atag.st{color:#3fe0ff}.atag.cr{color:#ffb84d}
