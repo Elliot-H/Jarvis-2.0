@@ -122,6 +122,7 @@
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
       case 'holdings': renderHoldings(m); break;
+      case 'watchlist': renderWatchlist(m); break;
       case 'connections': renderConns(m.connections); break;
       case 'meta': break;
       case 'spend': {
@@ -241,6 +242,14 @@
       (dust.length ? `<div class="dust">Dust: ${dust.map(p => chartA(p.symbol) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
     fr.style.display = '';
     ageHoldings();
+  }
+  function renderWatchlist(m) {
+    const fr = $('#watchFrame'), box = $('#watchlist'); if (!fr || !box) return;
+    const list = m.list || [];
+    if (!list.length) { fr.style.display = 'none'; return; }
+    const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
+    box.innerHTML = `<table>${list.map(w => `<tr><td>${chartA(w.symbol)}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.stop ? '<small>stop ' + px(w.stop) + '</small>' : ''}</td></tr>`).join('')}</table>`;
+    fr.style.display = '';
   }
   function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }
   setInterval(ageHoldings, 5000);

@@ -1247,15 +1247,19 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
+function watchlistMsg() {
+  const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
+  return { type: 'watchlist', at: Date.now(), list: state.sigWatch.map(w => ({ symbol: w.symbol, price: px.get(w.symbol) ?? null, stop: w.stop ?? null })) };
+}
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
   if (action === 'list') return state.sigWatch.length ? state.sigWatch.map(w => `${w.symbol} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'Nothing on the sell-warning watch yet (Alpaca positions are watched automatically).';
   if (!sym) return 'Which ticker?';
-  if (action === 'remove') { state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym); saveState(); return `Stopped watching ${sym}.`; }
+  if (action === 'remove') { state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym); saveState(); broadcast(watchlistMsg()); return `Stopped watching ${sym}.`; }
   try {
     const ev = await sig.evaluate(sym);
     const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, addedAt: Date.now() };
-    state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState();
+    state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState(); broadcast(watchlistMsg());
     return `Watching ${sym}: entry ${w.entry}, stop ${w.stop}. I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) { return `Could not add ${sym}: ${e.message}`; }
 };
@@ -1328,7 +1332,7 @@ async function watchTick() {
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
     watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
-    broadcast({ type: 'holdings', ...watch.holdings });
+    broadcast({ type: 'holdings', ...watch.holdings }); broadcast(watchlistMsg());
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
     watch.error = e.message; watch.fails++;
@@ -1999,6 +2003,7 @@ wss.on('connection', ws => {
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
   if (watch.holdings) ws.send(JSON.stringify({ type: 'holdings', ...watch.holdings }));
+  ws.send(JSON.stringify(watchlistMsg()));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
