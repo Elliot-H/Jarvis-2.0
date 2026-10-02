@@ -1156,34 +1156,35 @@ async function tgChatId() {
   try { fs.writeFileSync(TG_FILE, id); } catch {}
   return id;
 }
-async function pushTelegram(title, body, link) {
+async function pushTelegram(title, body, link, watch) {
   try {
     const chat = await tgChatId();
     if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
     const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : '') }), signal: AbortSignal.timeout(10000)
+      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : ''), ...(watch ? { reply_markup: { inline_keyboard: [[{ text: 'Add to watch list', url: watch }]] } } : {}) }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Telegram answered ${r.status}: ${(await r.text()).slice(0, 120)}`;
   } catch (e) { return String(e.message || e).slice(0, 120); }
 }
-async function pushNtfy(title, body, link) {
+async function pushNtfy(title, body, link, watch) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
-    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4', ...(link ? { Click: link } : {}) }, body: String(body).slice(0, link ? 440 : 500) + (link ? `\n${link}` : ''), signal: AbortSignal.timeout(10000) });
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4', ...(link ? { Click: link } : {}), ...(watch ? { Actions: `view, Add to watch list, ${watch}` } : {}) }, body: String(body).slice(0, link ? 440 : 500) + (link ? `\n${link}` : ''), signal: AbortSignal.timeout(10000) });
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
 // Pushover: a notification-only app that lets the Owner upload his own sound (website: Custom Sounds).
 // Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
-async function pushPushover(title, body, link) {
+async function pushPushover(title, body, link, watch) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         token: process.env.PUSHOVER_APP_TOKEN, user: process.env.PUSHOVER_USER_KEY,
-        title: String(title).slice(0, 250), message: String(body).slice(0, 1000) || ' ',
+        title: String(title).slice(0, 250), message: watch ? String(body).slice(0, 800).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + `\n<a href="${watch}">Add to watch list</a>` : String(body).slice(0, 1000) || ' ',
+        ...(watch ? { html: '1' } : {}),
         sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0',
         ...(link ? { url: link, url_title: 'Open chart' } : {})
       }), signal: AbortSignal.timeout(10000)
@@ -1199,6 +1200,11 @@ function chartLink(sym, lv = {}) {
   for (const [k, v] of Object.entries(lv)) if (Number.isFinite(Number(v)) && v != null && v !== '') q.append('lv', `${k}:${Number(v)}`);
   return `${base}/chart?${q}`;
 }
+// One-tap "Add to watch list" for alerts: a signed link (no PIN cookie needed on the tap). It only ever adds the symbol to the sell-warning watch list; it can never buy.
+const watchSig = sym => crypto.createHmac('sha256', SECRET).update('watch:' + sym).digest('hex').slice(0, 24);
+function watchLink(link) {
+  try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/watch-add?s=${encodeURIComponent(sym)}&k=${watchSig(sym)}`; } catch { return ''; }
+}
 // crypto briefs name several coins: link up to three tickers found in the text
 function cryptoLinks(text) {
   const seen = new Set(), out = [];
@@ -1210,23 +1216,23 @@ function cryptoLinks(text) {
   return out.filter(Boolean);
 }
 async function push(title, body, link) {
-  const links = [].concat(link || []).filter(Boolean), first = links[0] || '';
+  const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first);
   const extra = links.slice(1).join('\n'); if (extra) body = `${body}\n${extra}`;
   if (process.env.PUSHOVER_APP_TOKEN && process.env.PUSHOVER_USER_KEY) {
-    const err = await pushPushover(title, body, first);
+    const err = await pushPushover(title, body, first, watch);
     if (!err) return null;
     console.warn('Pushover alert failed:', err);
-    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body, first) : process.env.NTFY_TOPIC ? await pushNtfy(title, body, first) : 'no backup set';
+    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body, first, watch) : process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch) : 'no backup set';
     return backup ? `${err} (backup: ${backup})` : null;
   }
   if (process.env.TELEGRAM_BOT_TOKEN) {
-    const err = await pushTelegram(title, body, first);
+    const err = await pushTelegram(title, body, first, watch);
     if (!err) return null;
     console.warn('Telegram alert failed:', err);
-    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body, first) : 'no ntfy backup set';
+    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch) : 'no ntfy backup set';
     return backup ? `${err} (ntfy backup: ${backup})` : null;
   }
-  return pushNtfy(title, body, first);
+  return pushNtfy(title, body, first, watch);
 }
 handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '');
@@ -1547,6 +1553,14 @@ app.post('/login', (req, res) => {
   res.redirect(303, safeNext(req.query.next) || '/');
 });
 app.get('/health', (_req, res) => res.send('ok'));
+// Alert button target: signed, watch-only (never places a buy).
+app.get('/watch-add', async (req, res) => {
+  const sym = String(req.query.s || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12), k = String(req.query.k || '');
+  const page = (t, ok) => res.status(ok ? 200 : 400).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;background:#02060c;color:#cfefff;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px"><div><h2 style="color:#3fe0ff">${ok ? 'Added to watch list' : 'Not added'}</h2><p>${t}</p><p><a style="color:#3fe0ff" href="/">Open Jarvis</a></p></div>`);
+  const want = watchSig(sym);
+  if (!sym || k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return page('Bad or expired link.', false);
+  try { const r = await handlers.signal_watch({ action: 'add', symbol: sym }); return page(String(r).startsWith('Watching') ? `${sym} is on the watch list. Nothing was bought.` : String(r).replace(/[<>&]/g, ''), String(r).startsWith('Watching')); } catch (e) { return page('Could not add it.', false); }
+});
 // The shop iPhone's Shortcut: token in the URL instead of the PIN cookie.
 const outboxOk = req => String(req.query.token || '') === state.outboxToken;
 app.get('/api/outbox', (req, res) => {
