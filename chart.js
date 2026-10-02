@@ -1,5 +1,6 @@
 // Chart reading: price bars (Yahoo chart API, no key; works for stocks and crypto) -> indicators, trend,
 // support/resistance, volume, candle patterns. Returns facts; the brain explains them. Analysis only, never trades.
+import { coinIdFor } from './crypto.js';
 const FRAMES = {
   '5m': { interval: '5m', range: '5d' }, '15m': { interval: '15m', range: '5d' }, '1h': { interval: '60m', range: '1mo' },
   '1d': { interval: '1d', range: '6mo' }, '1dlong': { interval: '1d', range: '2y' }, '1d5y': { interval: '1d', range: '5y' }, '1w': { interval: '1wk', range: '2y' }, '1mo': { interval: '1mo', range: '10y' }
@@ -13,12 +14,29 @@ export function ySymbol(s) {
   s = names[s] || s;
   const m = s.match(/^([A-Z]{2,6})[\/-]?USD$/);
   if (m && (CRYPTO[m[1]] || s.includes('/') || s.includes('-'))) return m[1] + '-USD';
-  if (CRYPTO[s]) return s + '-USD';
+  if (CRYPTO[s] || coinIdFor(s)) return s + '-USD';   // known coins plus any coin he added (learned ticker -> CoinGecko id)
   return /^[A-Z.\-]{1,6}$/.test(s) ? s.replace('.', '-') : null;
+}
+
+// Crypto candles from Kraken's free public API (same source as the live price feed). Used first for <COIN>-USD; Yahoo is the fallback.
+const KRAKEN_IV = { '5m': 5, '15m': 15, '1h': 60, '1d': 1440, '1dlong': 1440, '1d5y': 1440, '1w': 10080, '1mo': 21600 };
+const KRAKEN_BASE = { BTC: 'XBT', DOGE: 'XDG' };
+async function krakenBars(coin, tf) {
+  const iv = KRAKEN_IV[tf]; if (!iv) return null;
+  const pair = (KRAKEN_BASE[coin] || coin) + 'USD';
+  const r = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${iv}`, { signal: AbortSignal.timeout(15000) });
+  if (!r.ok) return null;
+  const j = await r.json(); if (j.error?.length) return null;
+  const key = Object.keys(j.result || {}).find(k => k !== 'last'); const rows = key ? j.result[key] : null;
+  if (!rows || rows.length < 20) return null;
+  return rows.map(x => ({ t: +x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4], v: +x[6] || 0 }));
 }
 
 export async function bars(sym, tf) {
   const f = FRAMES[tf]; if (!f) throw new Error(`Timeframe must be one of ${Object.keys(FRAMES).join(', ')}.`);
+  if (!/-USD$/.test(String(sym))) sym = ySymbol(sym) || sym;   // a bare coin ticker (NIGHT) means NIGHT-USD, never a stock with that name
+  const cm = String(sym).match(/^([A-Z0-9]{2,10})-USD$/);
+  if (cm) { try { const kb = await krakenBars(cm[1], tf); if (kb) return kb; } catch {} }
   const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=${f.interval}&range=${f.range}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 Jarvis', Accept: 'application/json' }, signal: AbortSignal.timeout(15000)
   });
