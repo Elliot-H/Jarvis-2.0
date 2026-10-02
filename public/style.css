@@ -188,3 +188,12 @@ body[data-muted="1"] #coreState{color:var(--red)}
 .fold:not(.open) > :not(.frame-h){display:none}
 .fold.grow:not(.open){flex:none}
 .col.right .frame.grow.fold:not(.open){height:auto}
+
+.holdings{padding:4px 12px 10px 16px;font-size:12px}
+.holdings table{width:100%;border-collapse:collapse}
+.holdings th{font-size:9px;letter-spacing:.1em;color:var(--dim,#6fa);text-align:left;font-weight:400}
+.holdings td{padding:3px 2px;vertical-align:top}
+.holdings small{opacity:.8}
+.holdings .up td:last-child{color:#4dff9a}.holdings .dn td:last-child{color:#ff6b6b}
+.holdings .tot td{border-top:1px solid var(--cline);font-weight:600}
+.holdings .dust{margin-top:6px;font-size:10px;opacity:.5}

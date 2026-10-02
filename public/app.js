@@ -121,6 +121,7 @@
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
+      case 'holdings': renderHoldings(m); break;
       case 'connections': renderConns(m.connections); break;
       case 'meta': break;
       case 'spend': {
@@ -209,6 +210,25 @@
       box.appendChild(el);
     });
   }
+  let holdAt = 0;
+  const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function renderHoldings(m) {
+    const fr = $('#holdFrame'), box = $('#holdings'); if (!fr || !box) return;
+    const list = m.positions || [];
+    holdAt = m.at || Date.now();
+    if (!list.length) { fr.style.display = 'none'; return; }
+    const usd = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
+    const main = list.filter(p => p.value >= 1).sort((x, y) => y.value - x.value), dust = list.filter(p => p.value < 1);
+    const row = p => `<tr class="${p.pnl >= 0 ? 'up' : 'dn'}"><td>${esc(p.symbol.replace('/USD', ''))}</td><td>${px(p.price)}</td><td>${usd(p.value)}</td><td>${p.pnl >= 0 ? '+' : ''}${p.pnlPct.toFixed(2)}%<br><small>${p.pnl >= 0 ? '+' : ''}${usd(p.pnl)}</small></td></tr>`;
+    const tot = main.reduce((a, p) => a + p.value, 0), totPnl = main.reduce((a, p) => a + p.pnl, 0);
+    box.innerHTML = `<table><tr><th>TICKER</th><th>PRICE</th><th>VALUE</th><th>P/L</th></tr>${main.map(row).join('')}<tr class="tot ${totPnl >= 0 ? 'up' : 'dn'}"><td>TOTAL</td><td></td><td>${usd(tot)}</td><td>${totPnl >= 0 ? '+' : ''}${usd(totPnl)}</td></tr></table>` +
+      (dust.length ? `<div class="dust">Dust: ${dust.map(p => esc(p.symbol.replace('/USD', '')) + ' ' + usd(p.value)).join(' · ')}</div>` : '');
+    fr.style.display = '';
+    ageHoldings();
+  }
+  function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }
+  setInterval(ageHoldings, 5000);
   function mdLite(s) {
     const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
     let html = '', inList = false;

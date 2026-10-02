@@ -266,3 +266,4 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Longer spoken replies + chunked voice (2026-10-02)
 - Persona no longer caps replies at 1-3 sentences (up to ~150 words when needed); talk `maxTokens` 700->1500. `speak()` in public/app.js now voices replies in ~350-char sentence chunks played back to back (short /api/tts URLs, first audio fast, no 2500-char cut-off); a chunk failure falls back to browser speech for the remaining text. Web/server only, no APK reinstall. Not tested on the live phone or Fish.
+- Holdings box (2026-10-02): server.js watchTick broadcasts {type:'holdings'} (positions from trade.positions) every WATCH_INTERVAL_SEC and on WS connect; public/app.js renderHoldings fills the left-column HOLDINGS frame (ticker, price, value, P/L % and $, total; positions under $1 in a dust footer; hidden when none). Untested against live Alpaca.

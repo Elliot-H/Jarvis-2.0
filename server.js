@@ -1313,6 +1313,8 @@ async function watchTick() {
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
+    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct })) };
+    broadcast({ type: 'holdings', ...watch.holdings });
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
     watch.error = e.message; watch.fails++;
@@ -1978,6 +1980,7 @@ wss.on('connection', ws => {
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
+  if (watch.holdings) ws.send(JSON.stringify({ type: 'holdings', ...watch.holdings }));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
