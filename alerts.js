@@ -18,6 +18,7 @@ export const DEFAULTS = {
   newsEveryMin: 20,                                            // news catalyst check on held symbols
   cooldownMin: num(process.env.WATCH_COOLDOWN_MIN, 10),        // repeat spacing for stop / drop
   infoCooldownHours: 6,                                        // repeat spacing for the other alerts
+  trailPct: num(process.env.TRAIL_PCT, 10),                    // trailing stop: % below the highest price seen since entry (stop only ratchets up)
   staleSec: 120                                                // quotes older than this never trigger price alerts
 };
 export const KEYS = Object.keys(DEFAULTS);

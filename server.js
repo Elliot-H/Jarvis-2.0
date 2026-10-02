@@ -77,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1246,9 +1246,26 @@ handlers.phone_alert = async ({ title, message }) => {
 state.sigWatch ||= [];
 // Symbols the Owner removed from the watch list. Hides auto (position) rows and stops their alerts; positions themselves are untouched.
 state.wlHide ||= [];
+state.trail ||= {};
 if (!state.wlHideSeeded) { state.wlHide = [...new Set([...state.wlHide, 'NEAR', 'TXT', 'XRP'])]; state.wlHideSeeded = true; }
 const wlKey = s => String(s || '').toUpperCase().replace('/USD', '').replace('/', '').replace(/USD$/, '');
 const wlHidden = s => state.wlHide.includes(wlKey(s));
+// Trailing stop (alert-level, no broker order): stop = trailPct below the highest price seen since entry; it only ever ratchets up.
+// floor = an explicit stop (resting broker stop or one the Owner named); it can raise the stop, never lower it.
+function trailUpdate(sym, price, entry, floor) {
+  const k = wlKey(sym); if (!k) return null;
+  const pct = acfg().trailPct, t = state.trail[k] ||= { high: 0, stop: null };
+  const p = Number(price) || 0, e = Number(entry) || 0;
+  let changed = false;
+  const hi = Math.max(t.high || 0, p, e);
+  if (hi > (t.high || 0)) { t.high = hi; changed = true; }
+  const cand = t.high * (1 - pct / 100), fl = Number(floor) || 0;
+  const next = Math.max(t.stop || 0, cand, fl);
+  if (next > (t.stop || 0)) { t.stop = Number(next.toPrecision(6)); changed = true; }
+  if (changed) saveState();
+  return t.stop || null;
+}
+const trailStopOf = sym => state.trail[wlKey(sym)]?.stop ?? null;
 // Auto rows: Alpaca positions worth at least $1 (dust stays off the list) that he has not removed.
 const wlAuto = () => (watch.holdings?.positions || []).filter(p => !(p.value < 1) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', ''), entry: p.entry }));
 const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
@@ -1291,13 +1308,13 @@ function holdingsOut() {
   return { type: 'holdings', ...h, positions: h.positions.map(p => {
     const k = p.symbol.replace('/USD', '').replace('/', ''), e = evals.get(k) || wlEval.get(k) || {};
     if (!(p.value < 1) && !wlEval.has(k)) wlRefresh();
-    return { ...p, verdict: e.verdict ?? null, stop: e.stop ?? null, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
+    return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
   }) };
 }
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
@@ -1316,9 +1333,10 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   state.wlHide = state.wlHide.filter(x => x !== wlKey(sym));
   try {
     const ev = await sig.evaluate(sym);
-    const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, addedAt: Date.now() };
+    const w = { symbol: sym, entry: entry ?? ev.price, trail: true, floor: stop ?? null, addedAt: Date.now() };
+    w.stop = trailUpdate(sym, ev.price, w.entry, w.floor);
     state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState(); broadcast(watchlistMsg());
-    return `Watching ${sym}: entry ${w.entry}, stop ${w.stop}. I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
+    return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().trailPct}% under the highest price since entry; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) { return `Could not add ${sym}: ${e.message}`; }
 };
 // During US market hours, every 15 minutes: check watched tickers and Alpaca positions for a sell warning. One alert per ticker per 4 hours.
@@ -1327,17 +1345,17 @@ async function sigTick() {
   const mins = ny.getHours() * 60 + ny.getMinutes();
   if (ny.getDay() === 0 || ny.getDay() === 6 || mins < 9 * 60 + 30 || mins > 16 * 60) return;
   const list = new Map(state.sigWatch.map(w => [w.symbol, w]));
-  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s) && !wlHidden(s)) list.set(s, { symbol: s, stop: null }); } } catch {}
+  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s) && !wlHidden(s)) list.set(s, { symbol: s, stop: trailStopOf(s) }); } } catch {}
   state.sigAlerted ||= {};
   for (const w of list.values()) {
     try {
       if (Date.now() - (state.sigAlerted[w.symbol] || 0) < 4 * 3600e3) continue;
-      const ex = sig.exitSignal(await chart.bars(w.symbol, '1dlong'), w.stop);
+      const wstop = trailStopOf(w.symbol), ex = sig.exitSignal(await chart.bars(w.symbol, '1dlong'), wstop);
       if (!ex.exit) continue;
       state.sigAlerted[w.symbol] = Date.now(); saveState();
-      const msg = `Uptrend break: ${w.symbol} at ${ex.price}, ${ex.reasons.join('; ')}. I would sell now or set the stop at ${w.stop && w.stop > ex.stop ? w.stop : ex.stop}. Rule-based warning, not advice.`;
+      const msg = `Uptrend break: ${w.symbol} at ${ex.price}, ${ex.reasons.join('; ')}. I would sell now or set the stop at ${wstop && wstop > ex.stop ? wstop : ex.stop}. Rule-based warning, not advice.`;
       broadcast({ type: 'activity', text: 'SELL WARNING: ' + msg });
-      await push(`Sell warning: ${w.symbol}`, msg, chartLink(w.symbol, { stop: w.stop && w.stop > ex.stop ? w.stop : ex.stop }));
+      await push(`Sell warning: ${w.symbol}`, msg, chartLink(w.symbol, { stop: wstop && wstop > ex.stop ? wstop : ex.stop }));
     } catch (e) { console.warn('signal check failed', w.symbol, e.message); }
   }
 }
@@ -1372,7 +1390,12 @@ async function watchTick() {
     for (const p of pos) items.set(p.symbol, { sym: p.symbol, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, stop: restStop.get(p.symbol) ?? null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
-    for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it && w.stop && (it.stop == null || w.stop > it.stop)) it.stop = w.stop; }
+    for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it) { it.floor = Math.max(it.floor || 0, w.floor || 0) || null; if (it.entry == null) it.entry = w.entry; } }
+    for (const it of items.values()) {   // trailing stop for every position and watch row: ratchets up with the highest price seen
+      if (!(it.price > 0)) continue;
+      it.stop = trailUpdate(it.sym, it.price, it.entry, Math.max(it.stop || 0, it.floor || 0)) ?? it.stop;
+      const e = wlEval.get(wlKey(it.sym))?.target; it.target = e ?? (it.entry ? it.entry * (1 + 2 * acfg().trailPct / 100) : null);
+    }
     const now = Date.now(), seen = [];
     for (const it of items.values()) {
       if (it.held && wlHidden(it.sym)) continue;
@@ -1380,10 +1403,10 @@ async function watchTick() {
       if (!crypto && !open) continue;
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
       const C = acfg(), h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
-      const stopTxt = it.stop ? `Stop ${fmtP(it.stop)}.` : 'No stop set.';
-      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
-      const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = entry && it.stop && it.stop < entry ? entry + 2 * (entry - it.stop) : null;
-      if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or trail the stop up to ${fmtP(entry)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
+      const stopTxt = it.stop ? `Trailing stop ${fmtP(it.stop)}.` : 'No stop set.';
+      const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = it.target ?? null;
+      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your trailing stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
+      if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or let the trailing stop ride (now ${fmtP(it.stop)}).`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
       if (drop >= C.dropPct && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -C.dropDayPct) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
@@ -1410,7 +1433,7 @@ if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTi
 // The alert loop re-reads the config each round, so thresholds and the interval change by voice (alert_config) with no redeploy.
 const prioritySyms = () => {
   const m = new Map((watch.items || []).map(i => [i.sym, i]));
-  for (const w of state.sigWatch) if (![...m.keys()].some(k => k.replace('/', '') === w.symbol || k === w.symbol)) m.set(w.symbol, { sym: w.symbol, held: false, stop: w.stop, entry: w.entry });
+  for (const w of state.sigWatch) if (![...m.keys()].some(k => k.replace('/', '') === w.symbol || k === w.symbol)) m.set(w.symbol, { sym: w.symbol, held: false, stop: trailStopOf(w.symbol) ?? w.stop, entry: w.entry });
   return [...m.values()].slice(0, 25);
 };
 const alertHist = new Map(), newsSeen = new Set();
@@ -1466,7 +1489,7 @@ handlers.live_status = async () => JSON.stringify({ ...lf.status(), alertRules: 
 handlers.alert_config = async ({ action, key, value }) => {
   if (action === 'set') { const r = alerts.setCfg(state.alertCfg, key, value); if (r.error) return r.error; saveState(); return `Set ${key} to ${value}. Takes effect on the next check, no redeploy. Now: ${JSON.stringify(acfg())}`; }
   if (action === 'reset') { state.alertCfg = {}; saveState(); return 'Alert settings back to defaults.'; }
-  return JSON.stringify({ settings: acfg(), meaning: { intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
+  return JSON.stringify({ settings: acfg(), meaning: { intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
 };
 if (!process.env.JARVIS_SMOKE) {
   lf.start({ priority: prioritySyms, open: marketOpenNow });

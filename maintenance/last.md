@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T18:21:46Z
-REQUEST: Per-holding microchart recommendation in the Holdings box
+TIME: 2026-10-02T18:26:24Z
+REQUEST: Switch investment-watch stops to a trailing stop for every open position
 RESULT:
-Owner, each holding now has a second line with a five-day sparkline, a BUY, WATCH or AVOID verdict, a stop, a target, a chart link and a plus-watch button. Verdicts, stops and targets use the same logic as the alerts and the watch list. The button only adds to the watch list, it never buys. It goes live when Railway redeploys, and no APK reinstall is needed. I only syntax-checked it and could not test it against live data.
+Owner, every open position and watch entry now has a trailing stop, set 10 percent under the highest price seen since entry, and it only ever moves up. The percentage is a setting you can change by voice, trail percent, with no redeploy. The Holdings box and watch list show the current trailing level, and it updates as the price climbs. Alerts keep the same format with verdict, stop, target, chart link and the watch-only button, and new watch entries default to trailing. It goes live when Railway redeploys, no APK reinstall. It is still alert-level only, with no real stop orders at the broker, and I could not test it against live data.

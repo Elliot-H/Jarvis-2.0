@@ -282,3 +282,9 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Holdings microchart recommendation (2026-10-02, maintenance)
 - server.js `holdingsOut()` enriches each position with verdict/stop/target (same `wlEval` + `wlVerdict` as alerts and the watch list), a 5-day 15m sparkline (`sparkFor`, cached 15 min), and a signed `wk` for `/watch-add` (watch only). public/app.js `renderHoldings` adds a second line per holding: sparkline, verdict, stop, target, chart link, "+ watch" button.
+
+## Trailing stops (2026-10-02, maintenance)
+- Every open position and watch row now has an alert-level TRAILING stop: `trailUpdate()` in server.js keeps `state.trail[SYM] = {high, stop}` (in BACKUP_KEYS); stop = `trailPct` (default 10, env `TRAIL_PCT`, change by voice with `alert_config set trailPct N`, no redeploy) below the highest price seen since entry, and it only ever ratchets up. Updated each watchTick from the position's entry and live price; applies from first sight of each position, so existing positions start at 10% under the higher of entry and current price. An explicit stop given to `signal_watch add` or a resting broker stop acts only as a floor.
+- Holdings box shows "trail stop X" and the watch list "trail X" (current level, updates as it rises). Stop-hit, drop, day, target and uptrend-break alerts use it; alert format and chart/watch buttons unchanged. Target for alerts = signal target, else entry +2x trail%.
+- Also fixed a latent bug in watchTick (entry/tgt used before declaration in the stop-hit alert).
+- Still alert-level only: no resting stop orders at the broker. Syntax-checked and ratchet logic unit-tested; not run against live Alpaca.
