@@ -1,7 +1,7 @@
 STATUS: done
-TIME: 2026-10-02T22:13:32Z
-REQUEST: Add STOCK/CRYPTO badge to each holding in the Holdings section
+TIME: 2026-10-02T22:37:30Z
+REQUEST: Make NIGHT crypto token resolve via CoinGecko instead of the stock feeds
 RESULT:
-Every holding now shows a STOCK badge in blue or a CRYPTO badge in orange next to its ticker, including the small dust items.
-Crypto is detected automatically from the USD pair, known crypto tickers like BTC, ETH and SOL, or a crypto flag from the watchlist.
-It goes live when Railway finishes the deploy. Refresh the page; no APK reinstall is needed.
+NIGHT now routes to CoinGecko with id night, so a NIGHT or NIGHT USD quote returns price, 24h and 7d change and volume instead of no data.
+It is added once to the watchlist, so the tile, crypto scan and the alert data pick it up, and it is treated as crypto in charts, news and the HUD.
+Not tested against live CoinGecko from here. It goes live when Railway finishes the deploy; no APK reinstall is needed.
