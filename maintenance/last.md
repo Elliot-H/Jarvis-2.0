@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T19:23:03Z
-REQUEST: Holdings box: show entry price, quantity and cost per position, plus overall % gain/loss vs total buy-in cost
+TIME: 2026-10-02T19:41:14Z
+REQUEST: Watch list rows: add sparkline and daily % change, keep only QTEX/SDEV/SCKT and the stop display
 RESULT:
-Owner, done. Each holding now shows its buy-in price under the current price, and the quantity with total cost under the value. The bottom total row shows the overall percentage gain or loss of current value versus total buy-in cost, plus a line with bought-in total, current total and the percentage. It goes live when Railway redeploys, no APK reinstall. I checked syntax only; I could not test it against the live account.
+Owner, each watch-list row now shows a small five-day sparkline and today's percent change under the price. The stop-loss display is untouched, and I did not add or remove any symbols. I checked syntax only and could not test against live data. It is pushed to my assigned branch, not main, so Railway will not redeploy until it is merged to main. No APK reinstall is needed.
