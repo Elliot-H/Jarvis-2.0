@@ -475,7 +475,7 @@
     stopFillers();
     const g = fillerTopic(text);
     const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
-    const wantAck = !DISPLAY_ONLY && booted && (g || (REQUEST.test(text) || (words > 3 && !CHAT.test(text))));
+    const wantAck = !silent && !DISPLAY_ONLY && booted && (g || (REQUEST.test(text) || (words > 3 && !CHAT.test(text))));
     addActivity('Ack: ' + (wantAck ? 'echoing your request' : 'none (chit-chat)'));
     if (wantAck) playAck(text, g);
     if (!g) return;                                   // no topic: no progress lines either

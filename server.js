@@ -808,7 +808,7 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|silent mode|text only|text-only|stop (talking|speaking)|no more (talking|voice)|stay quiet|be quiet|mute (your )?voice)\b/;
+const SILENT_ON = /\b(go silent|be silent|silent mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
 const SILENT_OFF = /\b(you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
 function silentAnswer(text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
@@ -1101,7 +1101,8 @@ async function localGreeting(memo) {
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
-  if (reason === 'wake') { const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
+  if (reason === 'wake') { if (state.silent) { state.silent = false; saveState(); broadcast({ type: 'silent', on: false }); }   // opening the app always brings the voice back
+  const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
