@@ -837,7 +837,8 @@
     if (booted) return; booted = true;
     $('#boot').classList.add('hide');
     ensureAudio(); audioCtx.resume();
-    await startMicMeter();
+    // Never let the mic permission check hold up startup: if the phone is slow to hand over the mic (app just reopened, wake engine still releasing it), listening must still start.
+    await Promise.race([startMicMeter(), new Promise(r => setTimeout(r, 2500))]);
     initRecognition();
     loadFillers();
     chime(true);
