@@ -1,8 +1,8 @@
 STATUS: done
-TIME: 2026-10-02T22:56:48Z
-REQUEST: Make the HUD watch list show live data for crypto entries like NIGHT via CoinGecko
+TIME: 2026-10-02T23:31:41Z
+REQUEST: Wire the vehicle-start "leaving" trigger into the traveling protocol (truck/R8 OBD)
 RESULT:
-Most of this was already in place: NIGHT is on the watch list as a CoinGecko coin and its tile pulls price and 24 hour change from CoinGecko, not the stock feeds.
-I closed one gap: a coin ticker like NIGHT added to the stock watch list now also triggers the CoinGecko fetch, so that tile no longer stays blank.
-It goes live when Railway deploys this push, and no APK reinstall is needed.
-I could not test against live CoinGecko from here, only a syntax check. If the tile is still blank, the row's note will show the CoinGecko error.
+This is already built and live, Owner, so I changed no code.
+When the OBD dongle sees the engine running after the vehicle has sat for 30 minutes, Jarvis asks once per drive: "Are you leaving the shop, or headed somewhere?" with a few saved places.
+If you name a saved place, he gives the leave reminders for where you are, then that place's bring list and heading reminders, in one to three short sentences. If you just say leaving, you get the leave reminders for your current place.
+It needs a known location and the phone app connected. The truck dongle OBDII is seeded; the R8 only works once you pair its dongle and say add vehicle R8. No APK reinstall needed.
