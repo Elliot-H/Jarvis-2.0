@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-02T16:10:00Z
-REQUEST: Remove PAPER/LIVE mentions from alerts; add one-line suggested action to every alert trigger
+STATUS: done
+TIME: 2026-10-02T16:02:53Z
+REQUEST: Two-part market-data protocol: budgeted live feed scheduler with freshness, plus tunable real-time buy/sell alerts
 RESULT:
-Owner, PAPER and LIVE are gone from alerts, positions, trade read-backs and market replies. Stop hit, sudden drop, down on the day, uptrend break and a new target reached alert now each end with an "I would" suggestion with a stop, target or exit number. Only those five triggers exist in my code, not eight, and your message was cut off after "one or two short spoken". I did not invent the other triggers, such as a fresh high-score signal alert. Tell me the full list and I will add them. It goes live with the Railway deploy, no app reinstall needed.
+Owner, both parts are built and pushed; Railway redeploys on its own and no APK reinstall is needed. Finnhub is the live pulse for your positions and watch list, Twelve Data is backup and crypto, and FMP only does daily fundamentals, each pausing on a rate limit and handing over to the other feed instead of looping. Ask "how live are you" for the seconds-old figure per symbol. Eight alert types go to your phone, each with symbol, trigger, price, percent move, level, quote age and an "I would" line. You can change any threshold by voice. Your earlier 16:10 request removed PAPER and LIVE from alerts, so I followed that over the PAPER and LIVE line in this request; say so if you want it back. Twelve Data is paced to about 600 a day, not a steady 8 a minute, and this was tested with mock data only. Alerts are informational; Jarvis does not trade or place stops.

@@ -21,6 +21,8 @@ import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
 import * as trade from './trade.js';
 import * as md from './marketdata.js';
+import * as lf from './livefeed.js';
+import * as alerts from './alerts.js';
 import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
@@ -75,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1229,13 +1231,15 @@ if (!process.env.JARVIS_SMOKE) setInterval(() => sigTick().catch(e => console.wa
 // 9:30-16:00 ET weekdays, crypto 24/7. Alerts via push(): stop hit (stop from signal_watch or a resting broker stop order),
 // sudden drop (>= WATCH_DROP_PCT within WATCH_DROP_WINDOW_MIN), repeated by cooldown. Read-only: it never places orders.
 const WATCH_SEC = Math.max(20, Number(process.env.WATCH_INTERVAL_SEC || 60));
-const WATCH_DROP_PCT = Number(process.env.WATCH_DROP_PCT || 3), WATCH_DROP_MIN = Number(process.env.WATCH_DROP_WINDOW_MIN || 15), WATCH_COOL_MIN = Number(process.env.WATCH_COOLDOWN_MIN || 10);
+// Thresholds come from the tunable alert config (state.alertCfg, alert_config tool), read on every check: no redeploy needed.
+state.alertCfg ||= {};
+const acfg = () => alerts.cfgOf(state.alertCfg);
 const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0 };
 const isCryptoSym = s => /\/USD$/.test(s);
 const marketOpenNow = () => { const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); const m = ny.getHours() * 60 + ny.getMinutes(); return ny.getDay() > 0 && ny.getDay() < 6 && m >= 570 && m < 960; };
 const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
 async function watchAlert(key, title, msg) {
-  if (Date.now() - (watch.alerted.get(key) || 0) < WATCH_COOL_MIN * 60e3) return;
+  if (Date.now() - (watch.alerted.get(key) || 0) < acfg().cooldownMin * 60e3) return;
   watch.alerted.set(key, Date.now());
   const full = `${msg} Not financial advice.`;
   broadcast({ type: 'activity', text: 'WATCH: ' + full });
@@ -1258,16 +1262,17 @@ async function watchTick() {
       const crypto = isCryptoSym(it.sym) || /USD$/.test(it.sym) && it.sym.length > 5;
       if (!crypto && !open) continue;
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
-      const h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= WATCH_DROP_MIN * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
+      const C = acfg(), h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
       const stopTxt = it.stop ? `Stop ${fmtP(it.stop)}.` : 'No stop set.';
       if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`);
       const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = entry && it.stop && it.stop < entry ? entry + 2 * (entry - it.stop) : null;
       if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or trail the stop up to ${fmtP(entry)}.`);
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
-      if (drop >= WATCH_DROP_PCT && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`);
-      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -2 * WATCH_DROP_PCT) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`);
+      if (drop >= C.dropPct && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`);
+      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -C.dropDayPct) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`);
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
+    watch.items = [...items.values()];
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
     watch.error = e.message; watch.fails++;
@@ -1278,9 +1283,72 @@ async function watchTick() {
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
-  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${WATCH_DROP_PCT}% fall within ${WATCH_DROP_MIN} minutes`, downOnDay: `${2 * WATCH_DROP_PCT}% under yesterday's close`, repeatEveryMinutes: WATCH_COOL_MIN }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
 };
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
+// ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
+// Priority symbols = open Alpaca positions + signal_watch list. Quotes come from Finnhub (live pulse) with Twelve Data as backup/cross-check.
+// The alert loop re-reads the config each round, so thresholds and the interval change by voice (alert_config) with no redeploy.
+const prioritySyms = () => {
+  const m = new Map((watch.items || []).map(i => [i.sym, i]));
+  for (const w of state.sigWatch) if (![...m.keys()].some(k => k.replace('/', '') === w.symbol || k === w.symbol)) m.set(w.symbol, { sym: w.symbol, held: false, stop: w.stop, entry: w.entry });
+  return [...m.values()].slice(0, 25);
+};
+const alertHist = new Map(), newsSeen = new Set();
+async function liveAlert(key, title, body, coolMin) {
+  if (Date.now() - (watch.alerted.get(key) || 0) < coolMin * 60e3) return;
+  watch.alerted.set(key, Date.now());
+  broadcast({ type: 'activity', text: 'ALERT: ' + body });
+  const err = await push(title, body); if (err) console.warn('alert push failed', err);
+}
+async function alertTick() {
+  const C = acfg(), now = Date.now(), items = prioritySyms();
+  for (const it of items) {
+    const q = lf.latest(it.sym); if (!q) continue;
+    const h = (alertHist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3);
+    const t = now - q.ageSec * 1000; if (!h.length || t - h[h.length - 1].t > 1500) h.push({ t, p: q.price });
+    alertHist.set(it.sym, h);
+    const ctx = await alerts.context(it.sym);
+    for (const a of alerts.triggers(it, q, h, ctx, C)) await liveAlert(a.key, a.title, alerts.format(a, q), a.cooldownMin);
+  }
+}
+const alertLoop = () => setTimeout(async () => { try { await alertTick(); } catch (e) { console.warn('alertTick', e.message); } alertLoop(); }, Math.max(5, acfg().intervalSec) * 1000);
+let lastSigAlert = 0, lastNews = 0;
+async function slowAlertTick() {   // new signal (fresh setup with a stop) + news catalyst on held symbols
+  const C = acfg(), now = Date.now();
+  if (marketOpenNow() && now - lastSigAlert > C.newSignalEveryMin * 60e3) {
+    lastSigAlert = now;
+    try {
+      const list = new Set(state.sigWatch.map(w => w.symbol));
+      if (trade.configured()) for (const s of (await trade.trending(10)).all || []) list.add(s);
+      const r = await sig.scan([...list].slice(0, 20), 8);
+      for (const x of r.top) if (x.score >= C.newSignalScore && x.stop) {
+        const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}. Informational only: Jarvis does not trade or place stops for you.`;
+        await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60);
+      }
+    } catch (e) { console.warn('new-signal alert', e.message); }
+  }
+  if (now - lastNews > C.newsEveryMin * 60e3 && md.configured('finnhub')) {
+    lastNews = now;
+    for (const it of prioritySyms().filter(i => i.held && !/\/USD$/.test(i.sym)).slice(0, 8)) try {
+      const q = lf.latest(it.sym);
+      for (const h of alerts.catalysts((await md.news(it.sym)).headlines, newsSeen).slice(0, 1)) {
+        newsSeen.add(h.headline); if (newsSeen.size > 300) newsSeen.delete(newsSeen.values().next().value);
+        await liveAlert(`${it.sym}:news:${h.headline.slice(0, 40)}`, `NEWS: ${it.sym}`, `${it.sym}: INFO, news catalyst on a position you hold: "${h.headline.slice(0, 140)}" (${h.source || 'news'}). ${q ? `Price ${fmtP(q.price)}, quote ${q.ageSec}s old.` : 'No live quote yet.'} I would check the story before acting. Informational only: Jarvis does not trade or place stops for you.`, 24 * 60);
+      }
+    } catch (e) { console.warn('news alert', it.sym, e.message); }
+  }
+}
+handlers.live_status = async () => JSON.stringify({ ...lf.status(), alertRules: acfg(), guide: 'Say how fresh the quotes really are in seconds per symbol and which feed. Be honest: Finnhub free is near-live; Twelve Data is spaced out to fit 800/day. Alerts are informational phone pushes ; Jarvis does not auto-trade and no resting broker stop orders exist.' });
+handlers.alert_config = async ({ action, key, value }) => {
+  if (action === 'set') { const r = alerts.setCfg(state.alertCfg, key, value); if (r.error) return r.error; saveState(); return `Set ${key} to ${value}. Takes effect on the next check, no redeploy. Now: ${JSON.stringify(acfg())}`; }
+  if (action === 'reset') { state.alertCfg = {}; saveState(); return 'Alert settings back to defaults.'; }
+  return JSON.stringify({ settings: acfg(), meaning: { intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
+};
+if (!process.env.JARVIS_SMOKE) {
+  lf.start({ priority: prioritySyms, open: marketOpenNow });
+  setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3);
+}
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');
   if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }

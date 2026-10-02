@@ -19,16 +19,17 @@ function allow(p) {
   if (L.perDay && u.length >= L.perDay) return `${p} daily limit reached (resets at midnight UTC)`;
   return null;
 }
+const kind = (e, k) => { e.kind = k; return e; };   // 'nokey' | 'rate' | 'auth' | 'other': lets the live scheduler fall through instead of retrying
 const cache = new Map();
 async function get(p, url, ttlMs, label) {
   const hit = cache.get(url); if (hit && Date.now() - hit.at < ttlMs) return hit.v;
-  if (!configured(p)) throw new Error(`${p} key not set`);
-  const lim = allow(p); if (lim) throw new Error(lim);
+  if (!configured(p)) throw kind(new Error(`${p} key not set`), 'nokey');
+  const lim = allow(p); if (lim) throw kind(new Error(lim), 'rate');
   used[p].push(Date.now());
   const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
   const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = null; }
-  if (!r.ok) throw new Error(`${label || p} ${r.status}${r.status === 401 || r.status === 403 ? ' (key rejected or endpoint not on the free plan)' : r.status === 402 ? ' (not on the free plan)' : r.status === 429 ? ' (rate limited)' : ''}`);
-  if (j && typeof j === 'object' && !Array.isArray(j) && (j.status === 'error' || j['Error Message'] || (j.error && typeof j.error === 'string'))) throw new Error(`${label || p}: ${j.message || j.error || j['Error Message']}`.slice(0, 200));
+  if (!r.ok) throw kind(new Error(`${label || p} ${r.status}${r.status === 401 || r.status === 403 ? ' (key rejected or endpoint not on the free plan)' : r.status === 402 ? ' (not on the free plan)' : r.status === 429 ? ' (rate limited)' : ''}`), r.status === 429 ? 'rate' : [401, 402, 403].includes(r.status) ? 'auth' : 'other');
+  if (j && typeof j === 'object' && !Array.isArray(j) && (j.status === 'error' || j['Error Message'] || (j.error && typeof j.error === 'string'))) throw kind(new Error(`${label || p}: ${j.message || j.error || j['Error Message']}`.slice(0, 200)), j.code === 429 || /limit|credits/i.test(String(j.message || j.error)) ? 'rate' : j.code === 401 || j.code === 403 ? 'auth' : 'other');
   cache.set(url, { at: Date.now(), v: j }); if (cache.size > 300) cache.delete(cache.keys().next().value);
   return j;
 }
@@ -59,6 +60,23 @@ export async function quote(symbol) {
     errs.push('FMP had no price');
   } catch (e) { errs.push(e.message); }
   throw new Error(errs.length ? errs.join('; ') : 'No data keys are set (FINNHUB_API_KEY, TWELVEDATA_API_KEY, FMP_API_KEY).');
+}
+
+// ---- one feed, no cache, no fallback: used by the live scheduler (livefeed.js). Throws with .kind set (nokey|rate|auth|other).
+export async function quoteFrom(provider, symbol) {
+  const s = provider === 'twelve' ? String(symbol || '').toUpperCase() : sym(symbol);
+  if (!s || !/^[A-Z0-9.\-\/]{1,12}$/.test(s)) throw kind(new Error('Unrecognised symbol.'), 'other');
+  if (provider === 'finnhub') {
+    const j = await get('finnhub', `https://finnhub.io/api/v1/quote?symbol=${s}&token=${KEYS.finnhub()}`, 0, 'Finnhub quote');
+    if (!j || !n(j.c)) throw kind(new Error('Finnhub had no price'), 'other');
+    return { symbol: s, price: j.c, prevClose: n(j.pc), tradeAt: j.t ? j.t * 1000 : null, source: 'Finnhub' };
+  }
+  if (provider === 'twelve') {
+    const j = await get('twelve', `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(s)}&apikey=${KEYS.twelve()}`, 0, 'Twelve Data quote');
+    if (!j || !n(j.close)) throw kind(new Error('Twelve Data had no price'), 'other');
+    return { symbol: s, price: n(j.close), prevClose: n(j.previous_close), tradeAt: n(j.timestamp) ? j.timestamp * 1000 : null, source: 'Twelve Data' };
+  }
+  throw kind(new Error('Unknown feed'), 'other');
 }
 
 // ---- price history (Twelve Data): daily/hourly closes for when Yahoo is unavailable
