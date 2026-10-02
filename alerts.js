@@ -17,6 +17,7 @@ export const DEFAULTS = {
   moverEveryMin: 30,                                           // biggest-mover sweep (stocks + crypto): one candidate per run, silent unless it passes the spike/drop/volume thresholds
   sweepSize: 40,                                               // symbols that get the full signal score per sweep
   targetNearPct: 0.3,                                          // target / resistance: within this % counts as reached
+  volFirstRatio: 1.5,                                          // STAGE 1 (first flag, no price move needed): volume UP at least this x the 20-day average. 0 = off
   unusualVolRatio: 2,                                          // volume > this x the 20-period average
   newsEveryMin: 20,                                            // news catalyst check on held symbols
   cooldownMin: num(process.env.WATCH_COOLDOWN_MIN, 10),        // repeat spacing for stop / drop
@@ -46,7 +47,8 @@ export async function context(sym) {
     const b = await chart.bars(ys, '1d'), f = sig.features(b), px = f.price;
     const avgVol = chart.sma(b.slice(0, -1).map(x => x.v), 20), todayVol = b[b.length - 1].v;
     const res = chart.levels(b, px).resistance.filter(r => r.touches >= 2)[0] || null;
-    const v = { e20: f.e20, macdDown: f.hist < 0 && f.hist < f.histPrev, volRatio: avgVol ? todayVol / avgVol : null, resistance: res?.price ?? null, atr: f.atr };
+    const cl = b.map(x => x.c), ma20 = chart.sma(cl, 20), ma20Prev = chart.sma(cl.slice(0, -5), 20);
+    const v = { ma20, ma20Rising: ma20 != null && ma20Prev != null && ma20 > ma20Prev, e20: f.e20, macdDown: f.hist < 0 && f.hist < f.histPrev, volRatio: avgVol ? todayVol / avgVol : null, resistance: res?.price ?? null, atr: f.atr };
     ctxCache.set(sym, { at: Date.now(), v }); return v;
   } catch { ctxCache.set(sym, { at: Date.now(), v: c?.v || null }); return c?.v || null; }
 }
@@ -77,7 +79,15 @@ export function triggers(item, quote, hist, ctx, cfg) {
   // buy side + info
   const up = Math.max(day ?? -Infinity, win ?? -Infinity);
   if (up >= cfg.spikePct && ctx && (ctx.volRatio ?? 0) >= cfg.spikeVolRatio) add('spike', 'BUY-WATCH, SPIKE UP', `up ${up.toFixed(1)}% on ${ctx.volRatio.toFixed(1)}x average volume`, null, undefined, `I would wait for a pullback, not chase; a stop near ${fp(p * 0.97)}.`);
-  if (ctx && (ctx.volRatio ?? 0) > cfg.unusualVolRatio) add('vol', 'INFO, UNUSUAL VOLUME', `volume is ${ctx.volRatio.toFixed(1)}x the 20-day average`, null, undefined, 'I would check the news before acting.');
+  // Staged buy-side flag, volume FIRST. Stage 1 volume up vs the 20-day average (no price move required); then stage 2 price confirms up
+  // (not down, not fading); then stage 3 trend (price above a rising 20-day MA) and the volume spike ratios. Informational only.
+  const vr = ctx?.volRatio ?? 0;
+  if (cfg.volFirstRatio > 0 && vr >= cfg.volFirstRatio) {
+    const s2 = (day ?? win ?? 0) > 0 && (win == null || win >= 0) && p >= hi * 0.997;
+    const s3a = !!ctx.ma20Rising && p > ctx.ma20, s3b = vr >= cfg.unusualVolRatio, s3 = s2 && s3a;
+    const st = `Stage 1 volume ${vr.toFixed(1)}x the 20-day average: yes. Stage 2 price: ${s2 ? 'confirming up' : (day ?? 0) < 0 || (win ?? 0) < 0 ? 'down, not confirmed' : 'not moving up yet'}. Stage 3 trend: ${s3a ? 'above a rising 20-day MA' : 'not above a rising 20-day MA'}${s3b ? `, spike volume (over ${cfg.unusualVolRatio}x)` : ''}.`;
+    add(s3 ? 'vol1c' : 'vol1', s3 ? 'BUY-WATCH, VOLUME FIRST, CONFIRMED' : 'BUY-WATCH, VOLUME FIRST (EARLY)', st, null, undefined, s3 ? `I would look at an entry near ${fp(p)} with a stop near ${fp(p * 0.97)}.` : s2 ? 'I would wait for the trend to confirm before entering.' : 'I would only watch it for now; no entry until price confirms up.');
+  } else if (cfg.volFirstRatio <= 0 && ctx && vr > cfg.unusualVolRatio) add('vol', 'INFO, UNUSUAL VOLUME', `volume is ${ctx.volRatio.toFixed(1)}x the 20-day average`, null, undefined, 'I would check the news before acting.');
   return out;
 }
 

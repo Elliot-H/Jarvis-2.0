@@ -1560,6 +1560,13 @@ async function moverTick() {
     }
     try { for (const c of (await crypto_.scan({ top: 100 })).coins) if (c.change24h != null && c.price) cands.push({ sym: `${c.symbol}/USD`, price: c.price, move: c.change24h, kind: 'crypto' }); } catch (e) { console.warn('mover crypto', e.message); }
     const top = cands.filter(c => Number.isFinite(c.move)).sort((a, b) => Math.abs(b.move) - Math.abs(a.move))[0];
+    // Stage 1 first: volume UP vs the 20-day average, price move not required (volFirstRatio, tunable via alert_config). Checked on the top 8 gainers.
+    if (C.volFirstRatio > 0) for (const c of cands.filter(x => Number.isFinite(x.move) && x.move >= 0 && !(x.kind === 'stock' && dustKeys().has(wlKey(x.sym)))).sort((a, b) => b.move - a.move).slice(0, 8)) {
+      const cx = await alerts.context(c.sym), r = cx?.volRatio ?? 0; if (r < C.volFirstRatio) continue;
+      const lb = c.sym.replace('/USD', ''), s2 = c.move > 0, s3 = s2 && cx.ma20Rising && c.price > cx.ma20;
+      await liveAlert(`${c.sym}:vol1`, `VOLUME FIRST: ${lb}`, `${lb} volume ${r.toFixed(1)}x the 20-day average (stage 1). Price ${fmtP(c.price)}, ${c.move >= 0 ? '+' : ''}${c.move.toFixed(1)}%: ${s2 ? 'confirming up (stage 2)' : 'not moving yet (stage 2 pending)'}. Trend: ${s3 ? 'above a rising 20-day MA (stage 3)' : 'not confirmed (stage 3 pending)'}. Information only.`, C.infoCooldownHours * 60, chartLink(c.sym));
+      break;
+    }
     if (!top || (top.kind === 'stock' && dustKeys().has(wlKey(top.sym)))) return;
     const ctx = await alerts.context(top.sym), vr = ctx?.volRatio ?? null, up = top.move >= C.spikePct && (vr == null || vr >= C.spikeVolRatio);
     const down = top.move <= -C.dropDayPct, vol = vr != null && vr > C.unusualVolRatio && Math.abs(top.move) >= C.spikePct;
@@ -1598,7 +1605,7 @@ handlers.live_status = async () => JSON.stringify({ ...lf.status(), alertRules: 
 handlers.alert_config = async ({ action, key, value }) => {
   if (action === 'set') { const r = alerts.setCfg(state.alertCfg, key, value); if (r.error) return r.error; saveState(); return `Set ${key} to ${value}. Takes effect on the next check, no redeploy. Now: ${JSON.stringify(acfg())}`; }
   if (action === 'reset') { state.alertCfg = {}; saveState(); return 'Alert settings back to defaults.'; }
-  return JSON.stringify({ settings: acfg(), meaning: { dustUsd: 'open positions worth less than this many dollars are dust: no alerts and no watch-list row (default 1)', intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', moverEveryMin: 'minutes between biggest-mover sweeps, stocks and crypto (default 30)', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
+  return JSON.stringify({ settings: acfg(), meaning: { dustUsd: 'open positions worth less than this many dollars are dust: no alerts and no watch-list row (default 1)', intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', moverEveryMin: 'minutes between biggest-mover sweeps, stocks and crypto (default 30)', targetNearPct: 'how close to target/resistance counts as reached', volFirstRatio: 'STAGE 1, the first flag: volume up at least this x the 20-day average, no price move needed (default 1.5, 0 = off); price, trend and spike volume confirm afterwards', unusualVolRatio: 'volume x the 20-day average (stage 3 spike)', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
 };
 if (!process.env.JARVIS_SMOKE) {
   lf.start({ priority: prioritySyms, open: marketOpenNow });

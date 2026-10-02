@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T21:40:30Z
-REQUEST: mark crypto symbols on the HUD with a small coin badge so Owner can see what trades after hours
+TIME: 2026-10-02T21:47:57Z
+REQUEST: Make volume-up the first alert trigger, then price, then trend and the rest, tunable live
 RESULT:
-Owner, crypto symbols now carry a small gold coin badge next to the ticker. It shows in holdings, the watch list and the ticker links in the signal and crypto panels, and stocks stay unmarked. Crypto is detected by the USD pair format, plus a list of common coins in text panels. It goes live when Railway redeploys; no APK reinstall, but reload the HUD once. It is untested on live data.
+Owner, alerts now fire first on volume rising above its 20-day average, with no price move needed. Price confirming up is checked next, then price above a rising 20-day average with spike volume. The first-flag threshold is volFirstRatio, default 1.5, and you can change it by voice with alert config, no redeploy. The 30-minute mover sweep also checks the top gainers for volume first. It is live once Railway redeploys, no APK reinstall needed. Alerts stay information only, nothing trades. It was tested on sample data, not live feeds.
