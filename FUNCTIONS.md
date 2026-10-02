@@ -66,3 +66,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - WATCH LIST box sits directly under Holdings: every signal_watch symbol as a tappable chart link (price and stop when known). Updates live when symbols are added or removed. Every row (watched and auto position rows) shows BUY/WATCH/AVOID, entry, stop, target and price.
 - 2026-10-02: Holdings box: each holding has a sparkline (5d), live BUY/WATCH/AVOID verdict, stop, target, chart link and a watch-only "+ watch" button (same logic as alerts and the watch list).
 - 2026-10-02: alerts carry Buy + Add to watch list buttons; WATCH LIST box always shown (positions + signal_watch).
+
+- Trailing stop (Assistant): every watch-list row (Alpaca positions, manual rows like QTEX and SCKT, future ones) gets a 10% trailing stop (`TRAIL_PCT`) under the highest price seen, ratcheting up only. Shown as "trail $x" on the Holdings and watch HUD boxes and used by stop-hit alerts. Falls back to the old fixed stop when there is no price data. Alerts only; no broker stop orders.

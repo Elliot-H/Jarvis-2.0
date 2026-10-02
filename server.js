@@ -77,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'trail', 'wlHide', 'wlHideSeeded'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1264,6 +1264,18 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
+// Trailing stop: TRAIL_PCT (default 10) under the highest price seen since the row was first watched; only ever ratchets up.
+// No price data yet (and no stored high) = the caller keeps its old fixed stop.
+const TRAIL_PCT = Math.min(50, Math.max(1, Number(process.env.TRAIL_PCT) || 10));
+const trailKey = sym => String(sym).replace('/USD', '').replace('/', '');
+function trailStop(sym, price, entry) {
+  const k = trailKey(sym); state.trail ||= {};
+  const seed = [price, entry].filter(v => Number.isFinite(v) && v > 0);
+  const hi = Math.max(state.trail[k] || 0, ...seed);
+  if (!hi) return null;
+  if (hi > (state.trail[k] || 0)) { state.trail[k] = hi; saveState(); }
+  return Number((hi * (1 - TRAIL_PCT / 100)).toPrecision(6));
+}
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
 function wlSymbols() { const seen = new Set(state.sigWatch.map(w => w.symbol)); return [...state.sigWatch, ...wlAuto().filter(p => !seen.has(p.symbol))]; }
@@ -1291,13 +1303,13 @@ function holdingsOut() {
   return { type: 'holdings', ...h, positions: h.positions.map(p => {
     const k = p.symbol.replace('/USD', '').replace('/', ''), e = evals.get(k) || wlEval.get(k) || {};
     if (!(p.value < 1) && !wlEval.has(k)) wlRefresh();
-    return { ...p, verdict: e.verdict ?? null, stop: e.stop ?? null, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
+    return { ...p, verdict: e.verdict ?? null, stop: trailStop(k, p.price, p.entry) ?? e.stop ?? null, trail: true, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
   }) };
 }
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStop(w.symbol, px.get(w.symbol), w.entry) ?? w.stop ?? e.stop ?? null, trail: px.get(w.symbol) != null || !!state.trail?.[trailKey(w.symbol)], target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
@@ -1373,6 +1385,7 @@ async function watchTick() {
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it && w.stop && (it.stop == null || w.stop > it.stop)) it.stop = w.stop; }
+    for (const it of items.values()) { const t = trailStop(it.sym, it.price, it.entry); if (t != null) it.stop = t; }   // 10% trailing stop for every row, fixed stop only when there is no price
     const now = Date.now(), seen = [];
     for (const it of items.values()) {
       if (it.held && wlHidden(it.sym)) continue;

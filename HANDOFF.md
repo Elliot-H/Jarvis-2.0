@@ -282,3 +282,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Holdings microchart recommendation (2026-10-02, maintenance)
 - server.js `holdingsOut()` enriches each position with verdict/stop/target (same `wlEval` + `wlVerdict` as alerts and the watch list), a 5-day 15m sparkline (`sparkFor`, cached 15 min), and a signed `wk` for `/watch-add` (watch only). public/app.js `renderHoldings` adds a second line per holding: sparkline, verdict, stop, target, chart link, "+ watch" button.
+
+## Trailing stop (2026-10-02)
+- server.js `trailStop(sym, price, entry)`: high-water mark in `state.trail` (in BACKUP_KEYS), stop = high x (1 - `TRAIL_PCT`/100), default 10%. Applied in `holdingsOut`, `watchlistMsg` and `watchTick` (so alerts use it) for every row, manual sigWatch rows included. No price and no stored high = old fixed stop (`trail:false` in the row). The high starts at max(price, entry) when first seen; it never lowers. HUD label "trail" vs "stop". Alerts only; no resting broker stop orders. Not tested against live data.
