@@ -212,6 +212,7 @@
       box.appendChild(el);
     });
   }
+  const CRYPTO_TK = new Set('BTC ETH SOL XRP ADA DOGE AVAX DOT LINK LTC BNB MATIC TRX SHIB UNI ATOM XLM BCH NEAR APT ARB OP PEPE SUI TON'.split(' '));
   const NOTK = new Set('USD USDT RSI MACD SMA ATR EMA BUY SELL HOLD WATCH STOP THE AND FOR NOT NEW ALL ETF CEO IPO API HUD PNL N/A TODAY'.split(' '));
   function linkTickers(root) {
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
@@ -220,13 +221,14 @@
       if (!/\b[A-Z]{2,5}\b/.test(n.nodeValue)) continue;
       const f = document.createDocumentFragment();
       n.nodeValue.split(/\b([A-Z]{2,5})\b/).forEach((t, i) => {
-        if (i % 2 && !NOTK.has(t)) { const a = document.createElement('a'); a.className = 'tk'; a.href = '/chart?s=' + t; a.textContent = t; f.appendChild(a); } else f.appendChild(document.createTextNode(t));
+        if (i % 2 && !NOTK.has(t)) { const a = document.createElement('a'); a.className = 'tk'; a.href = '/chart?s=' + t; a.textContent = t; f.appendChild(a); if (CRYPTO_TK.has(t)) { const c = document.createElement('span'); c.className = 'coin'; c.title = 'Crypto: trades 24/7'; c.innerHTML = '&#8383;'; f.appendChild(c); } } else f.appendChild(document.createTextNode(t));
       });
       n.replaceWith(f);
     }
   }
   let holdAt = 0;
-  const chartA = sym => { const s = String(sym).replace('/USD', ''); return `<a class="tk" href="/chart?s=${encodeURIComponent(sym.includes('/') ? s + '-USD' : s)}">${esc(s)}</a>`; };
+  const COIN = '<span class="coin" title="Crypto: trades 24/7">&#8383;</span>';
+  const chartA = sym => { const s = String(sym).replace('/USD', ''); return `<a class="tk" href="/chart?s=${encodeURIComponent(sym.includes('/') ? s + '-USD' : s)}">${esc(s)}</a>${/\/USD$/.test(sym) ? COIN : ''}`; };
   const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   function renderHoldings(m) {
     const fr = $('#holdFrame'), box = $('#holdings'); if (!fr || !box) return;
