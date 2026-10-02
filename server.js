@@ -1489,7 +1489,7 @@ async function watchTick() {
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
-  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
 };
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 // ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
@@ -1523,7 +1523,26 @@ async function alertTick() {
   }
 }
 const alertLoop = () => setTimeout(async () => { try { await alertTick(); } catch (e) { console.warn('alertTick', e.message); } alertLoop(); }, Math.max(5, acfg().intervalSec) * 1000);
-let lastSigAlert = 0, lastNews = 0;
+let lastSigAlert = 0, lastNews = 0, lastSweep = 0;
+// Full-market sweep: today's gainers + most active (top 40 each) + a broad liquid universe, narrowed to the stocks that are up
+// today (price >= $2), then the full signal score on the best movers. Alerts reuse the BUY-WATCH path (same cooldown per ticker).
+async function sweepTick() {
+  const C = acfg(), now = Date.now();
+  if (!marketOpenNow() || !trade.configured() || now - lastSweep < C.sweepEveryMin * 60e3) return;
+  lastSweep = now;
+  try {
+    const t = await trade.trending(40), pool = [...new Set([...t.all, ...trade.SWEEP_UNIVERSE, ...state.sigWatch.map(w => w.symbol)])];
+    const snaps = await trade.snapshots(pool);
+    const first = new Set(t.all);
+    const cand = snaps.filter(x => x.price >= 2 && x.changePct > 0).sort((a, b) => (first.has(b.symbol) - first.has(a.symbol)) || b.changePct - a.changePct).slice(0, Math.max(5, C.sweepSize));
+    const r = await sig.scan(cand.map(x => x.symbol), 8), dustK = dustKeys();
+    state.sweep = { at: now, pool: pool.length, candidates: cand.length, top: r.top.map(x => `${x.symbol} ${x.score}`) }; const day = new Date().toDateString(); state.sweepCount = { day, n: (state.sweepCount?.day === day ? state.sweepCount.n : 0) + 1 };
+    for (const x of r.top) if (x.score >= C.newSignalScore && x.stop && !dustK.has(wlKey(x.symbol))) {
+      const body = `${x.symbol}: BUY-WATCH, market sweep found a new uptick setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;
+      await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60, chartLink(x.symbol, { stop: x.stop, target: x.target, entry: x.price }));
+    }
+  } catch (e) { console.warn('market sweep', e.message); }
+}
 async function slowAlertTick() {   // new signal (fresh setup with a stop) + news catalyst on held symbols
   const C = acfg(), now = Date.now();
   if (marketOpenNow() && now - lastSigAlert > C.newSignalEveryMin * 60e3) {
@@ -1561,7 +1580,7 @@ if (!process.env.JARVIS_SMOKE) {
   // After a restart no quotes are held, so the watch list has no daily %: fetch once, and again every 30 min while any is missing.
   const seedDay = () => { const syms = prioritySyms().map(i => i.sym); if (syms.some(s => !lf.latest(s)?.prevClose)) lf.seed(syms).then(() => { broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => {}); };
   setTimeout(seedDay, 8000); setInterval(seedDay, 30 * 60e3);
-  setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3);
+  setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3); setInterval(() => sweepTick().catch(() => {}), 60e3);
 }
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');

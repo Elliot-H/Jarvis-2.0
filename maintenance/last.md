@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T20:24:22Z
-REQUEST: Watch list: refetch daily percent change for every symbol on app load after a restart.
+TIME: 2026-10-02T21:03:04Z
+REQUEST: Scheduled full-market scan at least 20 times a day, keep on-demand scan
 RESULT:
-Owner, the watch list tiles now get their daily percent back after a restart. An earlier fix already pulls previous close from Alpaca; I added a second safety net that fetches one quote per watched stock 8 seconds after boot and retries every 30 minutes if any are missing. It goes live when Railway redeploys, and no APK reinstall is needed. I could only syntax-check it, not run it against live feeds.
+Owner, I added a full-market sweep that runs every 18 minutes during market hours, about 21 times a day. It covers top gainers, most active, and a broad list of liquid stocks, scores the ones that are up, and sends you a buy-watch alert on strong new setups. The on-demand scan still works. It goes live when Railway redeploys; no APK reinstall. It is untested against live Alpaca data, so check the first few alerts.

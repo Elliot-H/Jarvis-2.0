@@ -111,6 +111,20 @@ export async function trending(n = 15) {
   return { gainers: gain.map(x => x.symbol), active: act.map(x => x.symbol), all: [...new Set([...gain, ...act].map(x => x.symbol))] };
 }
 
+// Broader universe for the full-market sweep: liquid large/mid caps across sectors, pre-filtered by one snapshot call.
+export const SWEEP_UNIVERSE = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO AMD INTC MU QCOM TXN ORCL CRM ADBE NFLX PLTR SNOW UBER SHOP COIN HOOD SOFI PYPL SQ V MA JPM BAC WFC GS MS C SCHW UNH LLY JNJ PFE MRK ABBV MRNA BMY GILD CVS XOM CVX COP OXY SLB HAL DVN FCX NEM AA CLF X NUE F GM RIVN LCID NIO BA LMT RTX GE CAT DE HD LOW WMT COST TGT NKE SBUX MCD DIS CMCSA T VZ TMUS KO PEP PG AAL DAL UAL CCL RCL ABNB MAR ROKU SNAP PINS DKNG CHWY ETSY W LYFT DASH AFRM UPST MARA RIOT CLSK SMCI ARM ASML TSM AMAT LRCX ON DELL HPQ IBM CSCO NOW PANW CRWD ZS NET DDOG MDB SPY QQQ IWM XLE XLF XLK XBI ARKK SOXL TQQQ'.split(' ');
+export async function snapshots(symbols) {
+  const out = [], list = symbols.filter(s => /^[A-Z]{1,5}$/.test(s));
+  for (let i = 0; i < list.length; i += 100) {
+    const j = await api(DATA, `/v2/stocks/snapshots?symbols=${list.slice(i, i + 100).join(',')}`);
+    for (const s of Object.keys(j.snapshots || j)) {
+      const x = (j.snapshots || j)[s], p = x?.latestTrade?.p ?? x?.dailyBar?.c, pc = x?.prevDailyBar?.c;
+      if (p > 0 && pc > 0) out.push({ symbol: s, price: p, changePct: (p / pc - 1) * 100, volume: x?.dailyBar?.v || 0 });
+    }
+  }
+  return out;
+}
+
 // Premarket prints (IEX feed, partial but real): used by premarket.js. Read-only.
 export async function stockTrades(symbol, startISO, endISO, limit = 1000) {
   const s = normSymbol(symbol); if (!s || isCrypto(s)) throw new Error("Stocks only.");
