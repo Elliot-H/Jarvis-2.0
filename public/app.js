@@ -47,6 +47,7 @@
   let ws, state = 'idle', level = 0, targetLevel = 0;
   let audioCtx, ttsAnalyser, micAnalyser, freq = new Uint8Array(128);
   let speaking = false, currentAudio = null;
+  let silent = false;   // silent / text-only mode (server-owned): no speech, no filler clips
   let muted = false; try { muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}
 
   // ======================= state =======================
@@ -110,11 +111,12 @@
         if (window.AndroidDevice) { try { window.AndroidDevice.run(JSON.stringify(m)); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); } }
         break;
       case 'backup': try { localStorage.setItem('jarvis.backup', JSON.stringify(m.data)); } catch {} break;
+      case 'silent': silent = !!m.on; if (silent) { stopFillers(); stopSpeaking(true); } chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
       case 'say':
         if (m.memo) saveMemo(m.memo);
         ticker('');
         if (m.text) addLog('jarvis', m.text);
-        if (m.speak && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
+        if (m.speak && !silent && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
         else { stopFillers(); caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
@@ -324,6 +326,7 @@
     return t.replace(/```[\s\S]*?```/g, ' ').replace(/[*_#`>]/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\n+/g, '. ').trim();
   }
   function speak(text) {
+    if (silent) { caption(text); setState('idle', { echo: false }); return; }
     stopSpeaking(false);
     const clean = stripForSpeech(text || '');
     if (!clean) { setState('idle'); resumeListening(); return; }
@@ -436,7 +439,7 @@
     filler.lastIdx[key] = i; return l[i];
   }
   function playFiller(kind, group) {
-    if (DISPLAY_ONLY || !booted || speaking) return;
+    if (silent || DISPLAY_ONLY || !booted || speaking) return;
     if (filler.cur) { if (Date.now() - filler.curAt < 6000) return; filler.cur = null; }   // a clip the phone paused must never block the next one
     const url = pickFiller(kind, group); if (!url) return;
     const a = newClip(url); filler.cur = a; filler.curAt = Date.now();

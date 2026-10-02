@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T16:02:53Z
-REQUEST: Two-part market-data protocol: budgeted live feed scheduler with freshness, plus tunable real-time buy/sell alerts
+TIME: 2026-10-02T16:21:34Z
+REQUEST: Silent / text-only mode toggled by voice, remembered
 RESULT:
-Owner, both parts are built and pushed; Railway redeploys on its own and no APK reinstall is needed. Finnhub is the live pulse for your positions and watch list, Twelve Data is backup and crypto, and FMP only does daily fundamentals, each pausing on a rate limit and handing over to the other feed instead of looping. Ask "how live are you" for the seconds-old figure per symbol. Eight alert types go to your phone, each with symbol, trigger, price, percent move, level, quote age and an "I would" line. You can change any threshold by voice. Your earlier 16:10 request removed PAPER and LIVE from alerts, so I followed that over the PAPER and LIVE line in this request; say so if you want it back. Twelve Data is paced to about 600 a day, not a steady 8 a minute, and this was tested with mock data only. Alerts are informational; Jarvis does not trade or place stops.
+Owner, silent mode is built and pushed; Railway redeploys on its own and no APK reinstall is needed. Say "go silent, text only" and I stop all voice, filler clips included, and reply in text on the HUD. Say "you can talk again" and the voice comes back. The setting is remembered across restarts and redeploys. Checked for syntax only, not tested on a live phone.

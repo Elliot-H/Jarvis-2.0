@@ -77,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -92,6 +92,7 @@ function pushBackup() {
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
 function broadcast(msg) {
+  if (state.silent && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   const s = JSON.stringify(msg);
   for (const c of clients) if (c.readyState === 1) c.send(s);
 }
@@ -806,6 +807,21 @@ async function shopDay(going) {
 // which has the question in its history and calls shop_day itself.
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
+// Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
+const SILENT_ON = /\b(go silent|be silent|silent mode|text only|text-only|stop (talking|speaking)|no more (talking|voice)|stay quiet|be quiet|mute (your )?voice)\b/;
+const SILENT_OFF = /\b(you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
+function silentAnswer(text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (t.split(' ').length > 10) return false;
+  const off = SILENT_OFF.test(t), on = !off && SILENT_ON.test(t);
+  if (!on && !off) return false;
+  state.silent = on; saveState();
+  broadcast({ type: 'silent', on });
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  const reply = on ? 'Silent mode on. I will reply in text only until you say I can talk again.' : 'Voice is back on, sir.';
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
+  return true;
+}
 async function shopAnswer(text) {
   const a = state.shopAsk;
   if (!a?.pending || Date.now() - a.at > 10 * 60e3) return false;
@@ -1883,7 +1899,7 @@ app.get('/api/ack-clip/:id.mp3', (req, res) => { const b = ackClips.get(req.para
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
-  const text = String(req.body?.text || req.query?.text || '').slice(0, 2500);
+  const text = state.silent ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
   if (process.env.FISH_API_KEY && text) return fishTts(text, res);
   if (!key || !text) return res.status(204).end();
   const voice = process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'; // "Daniel" – calm, polished British male
@@ -1924,6 +1940,7 @@ const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) =
 
 wss.on('connection', ws => {
   clients.add(ws);
+  ws.send(JSON.stringify({ type: 'silent', on: !!state.silent }));
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
@@ -1939,7 +1956,7 @@ wss.on('connection', ws => {
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !(await panelAnswer(msg.text.trim())) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
