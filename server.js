@@ -77,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1244,6 +1244,13 @@ handlers.phone_alert = async ({ title, message }) => {
 };
 // ---------- Signals (A24): rule-based scan of trending tickers, stop-loss levels, sell-warning alerts ----------
 state.sigWatch ||= [];
+// Symbols the Owner removed from the watch list. Hides auto (position) rows and stops their alerts; positions themselves are untouched.
+state.wlHide ||= [];
+if (!state.wlHideSeeded) { state.wlHide = [...new Set([...state.wlHide, 'NEAR', 'TXT', 'XRP'])]; state.wlHideSeeded = true; }
+const wlKey = s => String(s || '').toUpperCase().replace('/USD', '').replace('/', '').replace(/USD$/, '');
+const wlHidden = s => state.wlHide.includes(wlKey(s));
+// Auto rows: Alpaca positions worth at least $1 (dust stays off the list) that he has not removed.
+const wlAuto = () => (watch.holdings?.positions || []).filter(p => !(p.value < 1) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', ''), entry: p.entry }));
 const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
 handlers.signal_scan = async ({ symbols, top } = {}) => {
   try {
@@ -1259,7 +1266,7 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
-function wlSymbols() { const seen = new Set(state.sigWatch.map(w => w.symbol)); return [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !seen.has(p.symbol))]; }
+function wlSymbols() { const seen = new Set(state.sigWatch.map(w => w.symbol)); return [...state.sigWatch, ...wlAuto().filter(p => !seen.has(p.symbol))]; }
 function wlRefresh() {
   for (const w of wlSymbols()) {
     const c = wlEval.get(w.symbol);
@@ -1271,13 +1278,23 @@ function wlRefresh() {
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true, entry: (watch.holdings?.positions || []).find(h => h.symbol.replace('/USD', '').replace('/', '') === p.symbol)?.entry }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
-  if (action === 'list') return state.sigWatch.length ? state.sigWatch.map(w => `${w.symbol} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'Nothing on the sell-warning watch yet (Alpaca positions are watched automatically).';
+  if (action === 'list') {
+    const rows = watchlistMsg(true).list;
+    return (rows.length ? 'Watch list (the same rows his HUD shows): ' + rows.map(w => `${w.symbol}${w.auto ? ' (auto, from his positions)' : ''} ${w.verdict || ''} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'The watch list is empty.') + (state.wlHide.length ? ` Removed by him: ${state.wlHide.join(', ')}.` : '');
+  }
   if (!sym) return 'Which ticker?';
-  if (action === 'remove') { state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym); saveState(); broadcast(watchlistMsg()); return `Stopped watching ${sym}.`; }
+  if (action === 'remove') {
+    const held = (watch.holdings?.positions || []).some(p => wlKey(p.symbol) === wlKey(sym));
+    state.sigWatch = state.sigWatch.filter(w => w.symbol !== sym);
+    if (held && !state.wlHide.includes(wlKey(sym))) state.wlHide.push(wlKey(sym));
+    saveState(); broadcast(watchlistMsg());
+    return `Removed ${sym} from the watch list${held ? ' (it is still in his positions; no more alerts on it)' : ''}.`;
+  }
+  state.wlHide = state.wlHide.filter(x => x !== wlKey(sym));
   try {
     const ev = await sig.evaluate(sym);
     const w = { symbol: sym, entry: entry ?? ev.price, stop: stop ?? ev.stop, addedAt: Date.now() };
@@ -1291,7 +1308,7 @@ async function sigTick() {
   const mins = ny.getHours() * 60 + ny.getMinutes();
   if (ny.getDay() === 0 || ny.getDay() === 6 || mins < 9 * 60 + 30 || mins > 16 * 60) return;
   const list = new Map(state.sigWatch.map(w => [w.symbol, w]));
-  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s)) list.set(s, { symbol: s, stop: null }); } } catch {}
+  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s) && !wlHidden(s)) list.set(s, { symbol: s, stop: null }); } } catch {}
   state.sigAlerted ||= {};
   for (const w of list.values()) {
     try {
@@ -1339,6 +1356,7 @@ async function watchTick() {
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it && w.stop && (it.stop == null || w.stop > it.stop)) it.stop = w.stop; }
     const now = Date.now(), seen = [];
     for (const it of items.values()) {
+      if (it.held && wlHidden(it.sym)) continue;
       const crypto = isCryptoSym(it.sym) || /USD$/.test(it.sym) && it.sym.length > 5;
       if (!crypto && !open) continue;
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
