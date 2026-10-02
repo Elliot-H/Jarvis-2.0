@@ -74,6 +74,7 @@ function loadState() {
   catch { return { stats: {}, panels: {}, sessionId: null }; }
 }
 const state = loadState();
+let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's backup before stamping anything newer
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
@@ -84,6 +85,7 @@ function pushBackup() {
   let j; try { if (!clients) return; j = JSON.stringify(backupOf()); } catch { return; }
   if (lastBackup === null) { lastBackup = j; return; }      // first call after boot just records the starting point
   if (j === lastBackup) return;
+  if (freshBoot) { lastBackup = j; return; }   // never stamp or broadcast an empty memory over the phone's copy
   lastBackup = j; state.backupStamp = Date.now();
   try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
   broadcast({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } });
@@ -1313,7 +1315,9 @@ async function realisedRefresh(pos) {
 }
 const trailStopOf = sym => state.trail[wlKey(sym)]?.stop ?? null;
 // Auto rows: Alpaca positions worth at least the dust threshold (dust stays off the list) that he has not removed.
-const wlAuto = () => (watch.holdings?.positions || []).filter(p => !isDustVal(p.value) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', ''), entry: p.entry }));
+// The HUD watch list holds only what he added with signal_watch; holdings are never auto-added, and a held symbol is not shown in it.
+const wlAuto = () => [];
+const wlRows = () => state.sigWatch.filter(w => !(watch.holdings?.positions || []).some(p => wlKey(p.symbol) === wlKey(w.symbol)));
 const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
 handlers.signal_scan = async ({ symbols, top } = {}) => {
   try {
@@ -1329,7 +1333,8 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
-function wlSymbols() { const seen = new Set(state.sigWatch.map(w => w.symbol)); return [...state.sigWatch, ...wlAuto().filter(p => !seen.has(p.symbol))]; }
+// Symbols to evaluate: his watch rows plus open positions (the Holdings box shows their verdicts). Only wlRows() is shown in the watch list.
+function wlSymbols() { const pos = (watch.holdings?.positions || []).filter(p => !isDustVal(p.value) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })); const seen = new Set(wlRows().map(w => w.symbol)); return [...wlRows(), ...pos.filter(p => !seen.has(p.symbol))]; }
 function wlRefresh() {
   for (const w of wlSymbols()) {
     const c = wlEval.get(w.symbol);
@@ -1362,13 +1367,13 @@ function watchlistMsg(noRefresh) {
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
   const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price), spark: sparkFor(w.symbol) }; }) };
+  return { type: 'watchlist', at: Date.now(), list: wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price), spark: sparkFor(w.symbol) }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
   if (action === 'list') {
     const rows = watchlistMsg(true).list;
-    return (rows.length ? 'Watch list (the same rows his HUD shows): ' + rows.map(w => `${w.symbol}${w.auto ? ' (auto, from his positions)' : ''} ${w.verdict || ''} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'The watch list is empty.') + (state.wlHide.length ? ` Removed by him: ${state.wlHide.join(', ')}.` : '');
+    return (rows.length ? 'Watch list (the same rows his HUD shows): ' + rows.map(w => `${w.symbol} ${w.verdict || ''} entry ${w.entry ?? '?'} stop ${w.stop ?? '?'}`).join('; ') : 'The watch list is empty.') + (state.wlHide.length ? ` Removed by him: ${state.wlHide.join(', ')}.` : '');
   }
   if (!sym) return 'Which ticker?';
   if (action === 'remove') {
@@ -2146,6 +2151,7 @@ const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) =
 wss.on('connection', ws => {
   clients.add(ws);
   ws.send(JSON.stringify({ type: 'silent', on: !!state.silent }));
+  if (freshBoot) setTimeout(() => { if (freshBoot) { freshBoot = false; lastBackup = ''; saveState(); } }, 8000);   // no restore came: phone has no backup, start fresh
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
@@ -2155,11 +2161,12 @@ wss.on('connection', ws => {
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
-    if (msg.type === 'restore' && msg.data && Number(msg.data.stamp) > (state.backupStamp || 0)) {
+    if (msg.type === 'restore' && msg.data && (freshBoot || Number(msg.data.stamp) > (state.backupStamp || 0))) {
+      freshBoot = false;
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
-      console.log('  restored memory from the phone backup'); ensureSeedPlaces();
+      console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
