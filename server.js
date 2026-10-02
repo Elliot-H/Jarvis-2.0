@@ -1294,7 +1294,7 @@ function scaleInfo(sym) {
   return { tier, next, nextLabel: next ? `sell 1/3 at +${tier + 1}R` : (ent && r ? 'runner on trail' : null), r: r ?? null, be: tier >= 1 && ent ? Number((ent * (1 + acfg().costPct / 100)).toPrecision(6)) : null };
 }
 // Realised P&L per symbol from filled sell orders since the symbol was first tracked (read-only; refreshed every 5 min).
-watch.realised = new Map(); watch.realisedAt = 0;
+// (watch.realised / watch.realisedAt are initialised where `watch` is declared, below)
 async function realisedRefresh(pos) {
   if (Date.now() - watch.realisedAt < 300e3) return;
   watch.realisedAt = Date.now();
@@ -1411,7 +1411,7 @@ const WATCH_SEC = Math.max(20, Number(process.env.WATCH_INTERVAL_SEC || 60));
 // Thresholds come from the tunable alert config (state.alertCfg, alert_config tool), read on every check: no redeploy needed.
 state.alertCfg ||= {};
 const acfg = () => alerts.cfgOf(state.alertCfg);
-const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0 };
+const watch = { running: false, lastRun: null, lastOk: null, error: null, fails: 0, seen: [], hist: new Map(), alerted: new Map(), failAlerted: 0, realised: new Map(), realisedAt: 0 };
 const isCryptoSym = s => /\/USD$/.test(s);
 const marketOpenNow = () => { const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); const m = ny.getHours() * 60 + ny.getMinutes(); return ny.getDay() > 0 && ny.getDay() < 6 && m >= 570 && m < 960; };
 const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
