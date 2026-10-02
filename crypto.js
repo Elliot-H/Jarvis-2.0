@@ -56,6 +56,17 @@ async function scanFresh({ top = 25, watch = [] } = {}) {
   return { coins, movers, at: new Date().toISOString() };
 }
 
+/** Turn whatever he said (NIGHT, midnight, "Midnight NIGHT") into a CoinGecko id. Exact symbol match wins; best market-cap rank breaks ties. */
+export async function resolveId(q) {
+  q = String(q || '').trim(); if (!q) return null;
+  const d = await get('/search?query=' + encodeURIComponent(q));
+  const coins = d.coins || [], lq = q.toLowerCase();
+  const exact = coins.filter(c => String(c.symbol || '').toLowerCase() === lq || String(c.id || '') === lq || String(c.name || '').toLowerCase() === lq);
+  const pool = exact.length ? exact : coins;
+  pool.sort((a, b) => (a.market_cap_rank ?? 1e9) - (b.market_cap_rank ?? 1e9));
+  return pool[0] ? { id: pool[0].id, name: pool[0].name, symbol: pool[0].symbol, rank: pool[0].market_cap_rank ?? null } : null;
+}
+
 /** Trending searches on CoinGecko: a rough "what is getting attention" signal. */
 export async function trending() {
   const d = await get('/search/trending');

@@ -446,7 +446,12 @@ Object.assign(handlers, {
     catch (e) { return `Could not get trending coins: ${e.message}.`; }
   },
   crypto_watch: async ({ action, ids = [] }) => {
-    const clean = ids.map(i => String(i).toLowerCase().trim()).filter(i => /^[a-z0-9-]{1,60}$/.test(i));
+    let clean = ids.map(i => String(i).toLowerCase().trim()).filter(i => /^[a-z0-9-]{1,60}$/.test(i));
+    if (action === 'add') {   // symbols like NIGHT are not CoinGecko ids: look each one up so the watch row gets real data
+      const found = [], missed = [];
+      for (const q of clean) { try { const r = await crypto_.resolveId(q); if (r) found.push(r.id); else missed.push(q); } catch (e) { missed.push(q); if (/rate limiting/i.test(e.message)) return e.message; } }
+      clean = found; if (missed.length && !found.length) return `CoinGecko has no coin matching ${missed.join(', ')}.`;
+    }
     if (action === 'add') state.watchlist = [...new Set([...state.watchlist, ...clean])].slice(0, 25);
     if (action === 'remove') state.watchlist = state.watchlist.filter(i => !clean.includes(i));
     saveState(); cgPx.at = 0; broadcast(watchlistMsg(true));
