@@ -18,6 +18,7 @@ export function shape(c) {
     change24h: pct(c.price_change_percentage_24h_in_currency ?? c.price_change_percentage_24h),
     change7d: pct(c.price_change_percentage_7d_in_currency),
     marketCapB: c.market_cap ? Math.round(c.market_cap / 1e7) / 100 : null,
+    volume24hM: c.total_volume ? Math.round(c.total_volume / 1e4) / 100 : null,
     volumeToCap: c.market_cap && c.total_volume ? Math.round((c.total_volume / c.market_cap) * 100) / 100 : null,
     fromAthPct: pct(c.ath_change_percentage)
   };
@@ -60,7 +61,7 @@ async function scanFresh({ top = 25, watch = [] } = {}) {
 export async function byIds(ids) {
   ids = [...new Set((ids || []).map(i => String(i).toLowerCase().trim()).filter(Boolean))].slice(0, 25); if (!ids.length) return [];
   try {
-    const more = await get(`/coins/markets?vs_currency=usd&ids=${encodeURIComponent(ids.join(','))}&sparkline=false&price_change_percentage=24h`);
+    const more = await get(`/coins/markets?vs_currency=usd&ids=${encodeURIComponent(ids.join(','))}&sparkline=false&price_change_percentage=24h,7d`);
     if (more.length) return more.map(shape);
   } catch (e) { if (!/CoinGecko/.test(e.message)) throw e; }
   const sp = await get(`/simple/price?ids=${encodeURIComponent(ids.join(','))}&vs_currencies=usd&include_24hr_change=true`);
@@ -68,8 +69,13 @@ export async function byIds(ids) {
 }
 
 /** Turn whatever he said (NIGHT, midnight, "Midnight NIGHT") into a CoinGecko id. Exact symbol match wins; best market-cap rank breaks ties. */
+// Tickers that look like stocks but are coins: routed straight to CoinGecko (never the equity feeds).
+export const COIN_IDS = { NIGHT: 'night' };
+export const coinIdFor = q => COIN_IDS[String(q || '').toUpperCase().replace(/[\s\/-]*USD[T]?$/, '').replace(/[^A-Z0-9]/g, '')] || null;
+
 export async function resolveId(q) {
   q = String(q || '').trim(); if (!q) return null;
+  const known = coinIdFor(q); if (known) return { id: known, name: known.toUpperCase(), symbol: known, rank: null };
   const d = await get('/search?query=' + encodeURIComponent(q));
   const coins = d.coins || [], lq = q.toLowerCase();
   const exact = coins.filter(c => String(c.symbol || '').toLowerCase() === lq || String(c.id || '') === lq || String(c.name || '').toLowerCase() === lq);

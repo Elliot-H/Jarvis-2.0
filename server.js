@@ -78,7 +78,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -434,6 +434,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
 const TALK = brainConfig();
 state.watchlist ||= [];
+if (!state.watchlist.includes('night') && !state.nightSeeded) { state.watchlist.push('night'); state.nightSeeded = true; }   // NIGHT is a coin (CoinGecko id night), not a stock
 Object.assign(handlers, {
   crypto_scan: async ({ top } = {}) => {
     try {
@@ -538,7 +539,7 @@ Object.assign(handlers, {
 // Free market-data feeds (Finnhub, Twelve Data, Financial Modeling Prep). Analysis only.
 const mdFail = e => `Market data problem: ${e.message}. Tell the Owner plainly; if a key is missing say which one.`;
 Object.assign(handlers, {
-  stock_quote: async ({ symbol }) => { try { return JSON.stringify(await md.quote(symbol)); } catch (e) { return mdFail(e); } },
+  stock_quote: async ({ symbol }) => { const cid = crypto_.coinIdFor(symbol); if (cid) { try { const c = (await crypto_.byIds([cid]))[0]; return c ? JSON.stringify({ ...c, kind: 'crypto', source: 'CoinGecko' }) : 'CoinGecko has no quote for ' + symbol + ' right now.'; } catch (e) { return `Could not get ${symbol} from CoinGecko: ${e.message}`; } } try { return JSON.stringify(await md.quote(symbol)); } catch (e) { return mdFail(e); } },
   stock_fundamentals: async ({ symbol }) => { try { return JSON.stringify(await md.fundamentals(symbol)); } catch (e) { return mdFail(e); } },
   stock_news: async ({ symbol }) => { try { return JSON.stringify(await md.news(symbol)); } catch (e) { return mdFail(e); } },
   stock_earnings: async ({ symbol }) => { try { return JSON.stringify(await md.earnings(symbol)); } catch (e) { return mdFail(e); } },

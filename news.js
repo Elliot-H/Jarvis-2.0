@@ -1,5 +1,5 @@
 // Ticker news: the brain's own web search does the searching; this builds the search plan and the rules.
-const CRYPTO = new Set(['BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'ADA', 'AVAX', 'LINK', 'LTC', 'DOT', 'BNB', 'SHIB', 'MATIC', 'USDT', 'USDC', 'TRX', 'TON', 'PEPE', 'UNI', 'ATOM', 'NEAR', 'BCH', 'XLM', 'ARB', 'OP', 'APT', 'SUI']);
+const CRYPTO = new Set(['BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'ADA', 'AVAX', 'LINK', 'LTC', 'DOT', 'BNB', 'SHIB', 'MATIC', 'USDT', 'USDC', 'TRX', 'TON', 'PEPE', 'UNI', 'ATOM', 'NEAR', 'BCH', 'XLM', 'ARB', 'OP', 'APT', 'SUI', 'NIGHT']);
 
 export function normSymbol(sym) {
   return String(sym || '').toUpperCase().replace(/[-\/]?USD[T]?$/, '').replace(/[^A-Z0-9.]/g, '').slice(0, 12);

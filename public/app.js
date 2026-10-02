@@ -212,7 +212,7 @@
       box.appendChild(el);
     });
   }
-  const CRYPTO_TK = new Set('BTC ETH SOL XRP ADA DOGE AVAX DOT LINK LTC BNB MATIC TRX SHIB UNI ATOM XLM BCH NEAR APT ARB OP PEPE SUI TON'.split(' '));
+  const CRYPTO_TK = new Set('BTC ETH SOL XRP ADA DOGE AVAX DOT LINK LTC BNB MATIC TRX SHIB UNI ATOM XLM BCH NEAR APT ARB OP PEPE SUI TON NIGHT'.split(' '));
   const NOTK = new Set('USD USDT RSI MACD SMA ATR EMA BUY SELL HOLD WATCH STOP THE AND FOR NOT NEW ALL ETF CEO IPO API HUD PNL N/A TODAY'.split(' '));
   function linkTickers(root) {
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), nodes = [];
