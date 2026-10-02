@@ -476,6 +476,14 @@ Object.assign(handlers, {
 // Trading (Alpaca). Guardrails: propose -> Owner confirms in a LATER user turn; per-order and per-day caps; PAPER unless ALPACA_LIVE=1.
 state.tradeLog ||= [];
 let pendingTrade = null;
+// Buy offers staged by alerts: a BUY-WATCH or dip alert leaves a $50 offer ready, so "buy it" is one step from the confirm.
+// An offer never trades by itself: it only tells Jarvis what he can propose; the Owner must still say confirm.
+let armedBuys = []; const ARM_MS = 60 * 60e3, ARM_DOLLARS = Math.min(50, Number(process.env.TRADE_MAX_ORDER || 50));
+function armBuy(symbol, title, price) {
+  const sym = trade.normSymbol(symbol); if (!sym) return;
+  armedBuys = armedBuys.filter(a => a.symbol !== sym && Date.now() - a.at < ARM_MS);
+  armedBuys.push({ symbol: sym, title, price, dollars: ARM_DOLLARS, at: Date.now() }); armedBuys = armedBuys.slice(-5);
+}
 const tradeFail = e => `Trading problem: ${e.message} Tell the Owner plainly.`;
 const spentToday = () => { const d = new Date().toDateString(); return state.tradeLog.filter(t => new Date(t.at).toDateString() === d && t.side === 'buy').reduce((a, t) => a + t.dollars, 0); };
 Object.assign(handlers, {
@@ -508,6 +516,12 @@ Object.assign(handlers, {
       state.tradeLog.push({ ...t, orderId: o.id, status: o.status, mode: trade.mode(), at: new Date().toISOString() }); state.tradeLog = state.tradeLog.slice(-200); saveState();
       return `Placed: ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
     } catch (e) { return tradeFail(e); }
+  },
+  armed_buys: async () => {
+    const now = Date.now(); armedBuys = armedBuys.filter(a => now - a.at < ARM_MS);
+    if (!armedBuys.length) return 'No buy offers are ready. No recent alert has one.';
+    const left = Math.max(0, trade.MAX_DAY - spentToday());
+    return JSON.stringify({ offers: armedBuys.map(a => ({ symbol: a.symbol, alert: a.title, alertPrice: a.price, minutesAgo: Math.round((now - a.at) / 60000), dollars: Math.min(a.dollars, trade.MAX_ORDER, left) })), dailyBuyLeft: left, guide: 'He is answering a buy alert. Take the newest offer unless he named a symbol; call trade_propose with the offer dollars (he can ask for another multiple of 50 up to the per-order limit), then read it back and wait for confirm in his NEXT message. If dailyBuyLeft is 0 say the daily limit is used.' });
   },
   trade_cancel: async ({ all } = {}) => {
     pendingTrade = null;
@@ -1340,6 +1354,10 @@ const alertHist = new Map(), newsSeen = new Set();
 async function liveAlert(key, title, body, coolMin, link) {
   if (Date.now() - (watch.alerted.get(key) || 0) < coolMin * 60e3) return;
   watch.alerted.set(key, Date.now());
+  if (/^(BUY-WATCH|SUDDEN DROP|DOWN ON THE DAY)/i.test(title) && trade.configured()) {
+    const sm = String(title).match(/:\s*([A-Z.\-\/]{1,9})\s*$/);
+    if (sm) { armBuy(sm[1], title, null); body += ` Ready: open Jarvis and say "buy it" for $${ARM_DOLLARS}; you still confirm.`; }
+  }
   broadcast({ type: 'activity', text: 'ALERT: ' + body });
   const err = await push(title, body, link); if (err) console.warn('alert push failed', err);
 }
