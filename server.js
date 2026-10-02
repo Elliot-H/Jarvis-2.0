@@ -1429,15 +1429,28 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
+// Written call for a watch row: action word (BUY/HOLD/SELL/WATCH/AVOID), trend/bias, confidence and the reasoning in plain English.
+// A row with an entry price is treated as a position he holds (HOLD/SELL); otherwise BUY/WATCH/AVOID.
+function wlCall(ev, entry) {
+  const sc = ev.score, trend = sc >= 75 ? 'uptrend' : sc >= 55 ? 'mixed, leaning up' : sc >= 35 ? 'weak, leaning down' : 'downtrend';
+  const conf = ev.exitWarning ? 'high' : (sc >= 75 && ev.history?.samples >= 5 && ev.history.winRatePct >= 55) || sc < 35 ? 'high' : sc >= 75 || sc < 45 || (sc >= 55 && sc < 65) ? 'medium' : 'low';
+  const held = entry > 0;
+  const action = ev.exitWarning ? (held ? 'SELL' : 'AVOID') : held ? (sc >= 55 ? 'HOLD' : 'SELL') : sc >= 75 ? 'BUY' : sc >= 55 ? 'WATCH' : 'AVOID';
+  const lv = [ev.stop != null ? 'stop ' + ev.stop : '', ev.target != null ? 'target ' + ev.target : ''].filter(Boolean).join(', ');
+  const parts = ev.exitWarning ? ev.exitWarning.slice(0, 2) : [...(ev.reasons || []).slice(0, 2), ...((sc < 75 ? ev.missing : []) || []).slice(0, 2 - Math.min(2, (ev.reasons || []).length))];
+  const bt = ev.history?.samples >= 5 ? ` Same rule won ${ev.history.winRatePct}% of ${ev.history.samples} past tries here.` : '';
+  const why = `${action}: ${trend}, ${conf} confidence (score ${sc}/100). ${parts.length ? parts.join('; ') + '.' : ''}${lv ? ' Levels: ' + lv + '.' : ''}${bt}`.replace(/\s+/g, ' ').trim();
+  return { action, trend, conf, why };
+}
 function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
 // Symbols to evaluate: his watch rows plus open positions (the Holdings box shows their verdicts). Only wlRows() is shown in the watch list.
-function wlSymbols() { const pos = (watch.holdings?.positions || []).filter(p => !isDustVal(p.value) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })); const seen = new Set(wlRows().map(w => w.symbol)); return [...wlRows(), ...pos.filter(p => !seen.has(p.symbol))]; }
+function wlSymbols() { const pos = (watch.holdings?.positions || []).filter(p => !isDustVal(p.value) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })); const seen = new Set(wlRows().map(w => w.symbol)); const cry = (state.watchlist || []).map(id => (cgPx.byId.get(id) || state.cgLast?.[id])?.symbol).filter(Boolean).map(x => ({ symbol: String(x).toUpperCase() })); const rows = [...wlRows(), ...pos.filter(p => !seen.has(p.symbol))]; for (const c of cry) if (!rows.some(r => r.symbol === c.symbol)) rows.push(c); return rows; }
 function wlRefresh() {
   for (const w of wlSymbols()) {
     const c = wlEval.get(w.symbol);
     if (c && (c.busy || Date.now() - c.at < 15 * 60e3)) continue;
     wlEval.set(w.symbol, { ...(c || {}), at: Date.now(), busy: true });
-    sig.evaluate(w.symbol).then(ev => { wlEval.set(w.symbol, { at: Date.now(), verdict: wlVerdict(ev), target: ev.target, stop: ev.stop }); broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => { wlEval.set(w.symbol, { ...(wlEval.get(w.symbol) || {}), at: Date.now(), busy: false }); });
+    sig.evaluate(w.symbol).then(ev => { wlEval.set(w.symbol, { at: Date.now(), verdict: wlVerdict(ev), target: ev.target, stop: ev.stop, call: wlCall(ev, state.sigWatch.find(x => x.symbol === w.symbol)?.entry) }); broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => { wlEval.set(w.symbol, { ...(wlEval.get(w.symbol) || {}), at: Date.now(), busy: false }); });
   }
 }
 // Holdings box extras: 5-day sparkline (15m closes, cached 15 min), live verdict/stop/target (same wlEval + wlVerdict as alerts and the watch list), signed watch-only link.
@@ -1494,9 +1507,9 @@ function watchlistMsg(noRefresh) {
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
   const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
-  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
+  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, call: e.call || null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
   const have = new Set(stocks.map(w => wlKey(w.symbol)));
-  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: null, target: null, verdict: null, spark: null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: wlEval.get(c?.symbol)?.stop ?? null, target: wlEval.get(c?.symbol)?.target ?? null, verdict: wlEval.get(c?.symbol)?.verdict ?? null, call: wlEval.get(c?.symbol)?.call || null, spark: null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
   return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {

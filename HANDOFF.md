@@ -324,3 +324,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Coin tickers on the stock watch list (2026-10-02)
 - `cgRefresh` (server.js) now also fetches CoinGecko ids for `state.sigWatch` symbols that `crypto.coinIdFor` knows (NIGHT), so a NIGHT row there gets a live price/24h change instead of blank. Add more tickers to `COIN_IDS` in crypto.js. Syntax-checked only.
+
+## Watch list written verdicts (2026-10-02, maintenance)
+- server.js `wlCall(ev, entry)` builds a written call per watch row: action (BUY/HOLD/SELL/WATCH/AVOID; HOLD/SELL when the row has an entry price, SELL/AVOID on an exit warning), trend, confidence, plain-English reasons, stop/target, back-test line. Stored in `wlEval[sym].call`, sent as `call` in `watchlistMsg` rows; app.js `renderWatchlist` prints it as a second line under every row. Crypto watchlist coins (NIGHT) are now evaluated too (`wlSymbols`) so they get a call; if Yahoo has no candles for a coin, that row shows price only. Spoken replies unchanged. Untested live; syntax-checked and wlCall unit-run. No APK reinstall.
