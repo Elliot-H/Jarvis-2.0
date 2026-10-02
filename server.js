@@ -434,7 +434,8 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
 const TALK = brainConfig();
 state.watchlist ||= [];
-if (!state.watchlist.includes('night') && !state.nightSeeded) { state.watchlist.push('night'); state.nightSeeded = true; }   // NIGHT is a coin (CoinGecko id night), not a stock
+state.watchlist = state.watchlist.map(i => i === 'night' ? 'midnight' : i);   // NIGHT's CoinGecko id is "midnight" (older builds saved "night", which has no data)
+if (!state.watchlist.includes('midnight') && !state.nightSeeded) { state.watchlist.push('midnight'); state.nightSeeded = true; }   // NIGHT is a coin, not a stock
 Object.assign(handlers, {
   crypto_scan: async ({ top } = {}) => {
     try {
@@ -1455,7 +1456,14 @@ function cgRefresh() {
   const ids = [...new Set([...(state.watchlist || []), ...(state.sigWatch || []).map(w => crypto_.coinIdFor(w.symbol)).filter(Boolean)])];   // coin tickers on the stock watch list (NIGHT) also use CoinGecko
   if (cgPx.busy || cgFresh() || !ids.length) return;
   cgPx.busy = true;
-  crypto_.byIds(ids).then(coins => {
+  crypto_.byIds(ids).then(async coins => {
+    // Heal bad ids: an old phone backup restored after a redeploy can bring back a ticker that is not a CoinGecko id (e.g. "night" instead of "midnight").
+    const got = new Set(coins.map(c => c.id)), bad = (state.watchlist || []).filter(i => !got.has(i));
+    let changed = false;
+    for (const q of bad) {
+      try { const r = await crypto_.resolveId(q); if (r && r.id !== q) { state.watchlist = [...new Set(state.watchlist.map(i => i === q ? r.id : i))]; changed = true; console.log(`crypto watch: "${q}" is now ${r.id}`); } } catch (e) { console.warn('crypto resolve', q, e.message); }
+    }
+    if (changed) { saveState(); cgPx.busy = false; cgPx.at = 0; return cgRefresh(); }
     if (!coins.length) throw new Error('CoinGecko returned no coins for ' + ids.join(', '));
     for (const c of coins) { const o = state.cgLast[c.id]; if (o && c.name === c.id) { c.symbol = o.symbol; c.name = o.name; } }   // lighter fallback endpoint has no names: keep the saved ones
     for (const c of coins) state.cgLast[c.id] = { symbol: c.symbol, name: c.name, price: c.price, change24h: c.change24h, at: Date.now() };
@@ -2344,7 +2352,7 @@ wss.on('connection', ws => {
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
-      console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
+      state.watchlist = (state.watchlist || []).map(i => i === 'night' ? 'midnight' : i); console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }

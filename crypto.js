@@ -70,7 +70,7 @@ export async function byIds(ids) {
 
 /** Turn whatever he said (NIGHT, midnight, "Midnight NIGHT") into a CoinGecko id. Exact symbol match wins; best market-cap rank breaks ties. */
 // Tickers that look like stocks but are coins: routed straight to CoinGecko (never the equity feeds).
-export const COIN_IDS = { NIGHT: 'night' };
+export const COIN_IDS = { NIGHT: 'midnight' };   // CoinGecko API id verified on the coin page: coingecko.com/en/coins/midnight
 export const coinIdFor = q => COIN_IDS[String(q || '').toUpperCase().replace(/[\s\/-]*USD[T]?$/, '').replace(/[^A-Z0-9]/g, '')] || null;
 
 export async function resolveId(q) {
