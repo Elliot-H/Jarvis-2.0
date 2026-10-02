@@ -250,7 +250,7 @@
     if (!list.length) { box.innerHTML = '<small>Nothing on the watch list yet.</small>'; return; }
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
     const vc = { BUY: 'up', WATCH: '', AVOID: 'dn' };
-    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}${w.auto ? ' <small>auto</small>' : ''}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.stop ? 'stop ' + px(w.stop) : ''}${w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
+    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}${w.auto ? ' <small>auto</small>' : ''}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.entry ? 'in ' + px(w.entry) : ''}${w.stop ? ' · stop ' + px(w.stop) : ''}${w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
     fr.style.display = '';
   }
   function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }

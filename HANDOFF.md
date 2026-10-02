@@ -276,3 +276,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Watch box always on + Buy button on alerts (2026-10-02)
 - HUD WATCH LIST frame is always visible (placeholder when empty) and lists signal_watch symbols plus Alpaca positions (tagged "auto"). `sigWatch` added to BACKUP_KEYS so QTEX/SDEV/SCKT survive a data/ wipe once the phone has synced.
 - Every alert with a chart link now has two buttons: Buy (`/?buy=SYM`; HUD asks Jarvis to start the buy flow, still needs the Owner's spoken confirm in a later turn) and Add to watch list. ntfy `Actions` (two, `;` separated), Telegram inline row, Pushover HTML links. Login page returns to `/?buy=SYM`. If an alert has no chart link (no PUBLIC_URL / RAILWAY_PUBLIC_DOMAIN) neither button appears. Untested against real push services; syntax-checked only. No APK reinstall.
+
+## Watch list rows complete (2026-10-02, maintenance)
+- Every watch list row (signal_watch symbols AND Alpaca positions tagged auto) now gets a verdict, stop and target: `wlRefresh` evaluates all of `wlSymbols()`, not just sigWatch. Rows also show entry (sigWatch entry, or the position's avg entry via `holdings.positions[].entry`). Row: symbol, price, BUY/WATCH/AVOID, "in X · stop Y · tgt Z". Same BUY/WATCH/AVOID wording as the alerts. Untested live; syntax-checked only. No APK reinstall.

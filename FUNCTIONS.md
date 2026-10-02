@@ -63,5 +63,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 
 - Live holdings box (HUD, left column): every open Alpaca position with ticker, price, value, P/L % and $, refreshed on each Investment Watch tick; dust under $1 in a footer. (Work/HUD)
 - Holdings and watch-panel tickers open their chart when tapped; holdings show a WATCH tag for signal-watched symbols.
-- WATCH LIST box sits directly under Holdings: every signal_watch symbol as a tappable chart link (price and stop when known). Updates live when symbols are added or removed.
+- WATCH LIST box sits directly under Holdings: every signal_watch symbol as a tappable chart link (price and stop when known). Updates live when symbols are added or removed. Every row (watched and auto position rows) shows BUY/WATCH/AVOID, entry, stop, target and price.
 - 2026-10-02: alerts carry Buy + Add to watch list buttons; WATCH LIST box always shown (positions + signal_watch).

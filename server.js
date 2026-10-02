@@ -1259,8 +1259,9 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
+function wlSymbols() { const seen = new Set(state.sigWatch.map(w => w.symbol)); return [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !seen.has(p.symbol))]; }
 function wlRefresh() {
-  for (const w of state.sigWatch) {
+  for (const w of wlSymbols()) {
     const c = wlEval.get(w.symbol);
     if (c && (c.busy || Date.now() - c.at < 15 * 60e3)) continue;
     wlEval.set(w.symbol, { ...(c || {}), at: Date.now(), busy: true });
@@ -1270,7 +1271,7 @@ function wlRefresh() {
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true, entry: (watch.holdings?.positions || []).find(h => h.symbol.replace('/USD', '').replace('/', '') === p.symbol)?.entry }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
@@ -1352,7 +1353,7 @@ async function watchTick() {
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
-    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
+    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, entry: p.entry, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
     broadcast({ type: 'holdings', ...watch.holdings }); broadcast(watchlistMsg());
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
