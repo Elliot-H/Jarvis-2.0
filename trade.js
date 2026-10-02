@@ -107,8 +107,8 @@ export async function trending(n = 15) {
     api(DATA, `/v1beta1/screener/stocks/most-actives?by=volume&top=${n}`).catch(() => ({}))
   ]);
   const ok = x => x?.symbol && /^[A-Z]{1,5}$/.test(x.symbol) && (x.price == null || x.price >= 2);
-  const gain = (m.gainers || []).filter(ok), act = (a.most_actives || []).filter(ok);
-  return { gainers: gain.map(x => x.symbol), active: act.map(x => x.symbol), all: [...new Set([...gain, ...act].map(x => x.symbol))] };
+  const gain = (m.gainers || []).filter(ok), lose = (m.losers || []).filter(ok), act = (a.most_actives || []).filter(ok);
+  return { gainers: gain.map(x => x.symbol), active: act.map(x => x.symbol), losers: lose.map(x => x.symbol), all: [...new Set([...gain, ...act].map(x => x.symbol))] };
 }
 
 // Broader universe for the full-market sweep: liquid large/mid caps across sectors, pre-filtered by one snapshot call.

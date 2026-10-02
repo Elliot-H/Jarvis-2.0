@@ -1543,6 +1543,31 @@ async function sweepTick() {
     }
   } catch (e) { console.warn('market sweep', e.message); }
 }
+// Biggest-mover sweep (stocks + crypto), every moverEveryMin (30). Takes the SINGLE biggest absolute mover across Alpaca stocks
+// (gainers, losers, active, universe; market hours only) and the top-100 coins (24h, 24/7). It is presented only if it passes the
+// Owner's alert thresholds (spikePct with spikeVolRatio volume, or dropDayPct down, or unusualVolRatio volume with a spikePct move).
+// Otherwise nothing at all: no message, no push, no voice. One short line when it qualifies.
+let lastMover = 0;
+async function moverTick() {
+  const C = acfg(), now = Date.now();
+  if (now - lastMover < C.moverEveryMin * 60e3) return;
+  lastMover = now;
+  try {
+    const cands = [];
+    if (marketOpenNow() && trade.configured()) {
+      const t = await trade.trending(40), pool = [...new Set([...t.all, ...(t.losers || []), ...trade.SWEEP_UNIVERSE, ...state.sigWatch.map(w => w.symbol)])];
+      for (const x of await trade.snapshots(pool)) if (x.price >= 2) cands.push({ sym: x.symbol, price: x.price, move: x.changePct, kind: 'stock' });
+    }
+    try { for (const c of (await crypto_.scan({ top: 100 })).coins) if (c.change24h != null && c.price) cands.push({ sym: `${c.symbol}/USD`, price: c.price, move: c.change24h, kind: 'crypto' }); } catch (e) { console.warn('mover crypto', e.message); }
+    const top = cands.filter(c => Number.isFinite(c.move)).sort((a, b) => Math.abs(b.move) - Math.abs(a.move))[0];
+    if (!top || (top.kind === 'stock' && dustKeys().has(wlKey(top.sym)))) return;
+    const ctx = await alerts.context(top.sym), vr = ctx?.volRatio ?? null, up = top.move >= C.spikePct && (vr == null || vr >= C.spikeVolRatio);
+    const down = top.move <= -C.dropDayPct, vol = vr != null && vr > C.unusualVolRatio && Math.abs(top.move) >= C.spikePct;
+    if (!(up || down || vol)) return;
+    const label = top.sym.replace('/USD', ''), sign = top.move >= 0 ? '+' : '';
+    await liveAlert(`${top.sym}:mover`, `MOVER: ${label}`, `${label} ${sign}${top.move.toFixed(1)}%${top.kind === 'crypto' ? ' (24h)' : ' today'}, price ${fmtP(top.price)}${vr != null ? `, volume ${vr.toFixed(1)}x average` : ''}.`, C.infoCooldownHours * 60, chartLink(top.sym));
+  } catch (e) { console.warn('mover sweep', e.message); }
+}
 async function slowAlertTick() {   // new signal (fresh setup with a stop) + news catalyst on held symbols
   const C = acfg(), now = Date.now();
   if (marketOpenNow() && now - lastSigAlert > C.newSignalEveryMin * 60e3) {
@@ -1573,14 +1598,14 @@ handlers.live_status = async () => JSON.stringify({ ...lf.status(), alertRules: 
 handlers.alert_config = async ({ action, key, value }) => {
   if (action === 'set') { const r = alerts.setCfg(state.alertCfg, key, value); if (r.error) return r.error; saveState(); return `Set ${key} to ${value}. Takes effect on the next check, no redeploy. Now: ${JSON.stringify(acfg())}`; }
   if (action === 'reset') { state.alertCfg = {}; saveState(); return 'Alert settings back to defaults.'; }
-  return JSON.stringify({ settings: acfg(), meaning: { dustUsd: 'open positions worth less than this many dollars are dust: no alerts and no watch-list row (default 1)', intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
+  return JSON.stringify({ settings: acfg(), meaning: { dustUsd: 'open positions worth less than this many dollars are dust: no alerts and no watch-list row (default 1)', intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', moverEveryMin: 'minutes between biggest-mover sweeps, stocks and crypto (default 30)', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
 };
 if (!process.env.JARVIS_SMOKE) {
   lf.start({ priority: prioritySyms, open: marketOpenNow });
   // After a restart no quotes are held, so the watch list has no daily %: fetch once, and again every 30 min while any is missing.
   const seedDay = () => { const syms = prioritySyms().map(i => i.sym); if (syms.some(s => !lf.latest(s)?.prevClose)) lf.seed(syms).then(() => { broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => {}); };
   setTimeout(seedDay, 8000); setInterval(seedDay, 30 * 60e3);
-  setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3); setInterval(() => sweepTick().catch(() => {}), 60e3);
+  setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3); setInterval(() => sweepTick().catch(() => {}), 60e3); setInterval(() => moverTick().catch(() => {}), 60e3);
 }
 async function cryptoBrief(slot) {
   const blocked = overBudget('chat');

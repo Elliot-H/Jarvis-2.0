@@ -14,6 +14,7 @@ export const DEFAULTS = {
   newSignalScore: 75,                                          // fresh signal_scan setup: min score (needs a defined stop)
   newSignalEveryMin: 15,
   sweepEveryMin: 18,                                           // full-market sweep (gainers, most active, broad universe), market hours: ~21 a day
+  moverEveryMin: 30,                                           // biggest-mover sweep (stocks + crypto): one candidate per run, silent unless it passes the spike/drop/volume thresholds
   sweepSize: 40,                                               // symbols that get the full signal score per sweep
   targetNearPct: 0.3,                                          // target / resistance: within this % counts as reached
   unusualVolRatio: 2,                                          // volume > this x the 20-period average
