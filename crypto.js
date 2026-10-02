@@ -70,7 +70,7 @@ export async function byIds(ids) {
 
 /** Turn whatever he said (NIGHT, midnight, "Midnight NIGHT") into a CoinGecko id. Exact symbol match wins; best market-cap rank breaks ties. */
 // Tickers that look like stocks but are coins: routed straight to CoinGecko (never the equity feeds).
-export const COIN_IDS = { NIGHT: 'midnight' };   // CoinGecko API id verified on the coin page: coingecko.com/en/coins/midnight
+export const COIN_IDS = { NIGHT: 'midnight-3' };   // Midnight (Cardano, rank ~87): coingecko.com/en/coins/midnight-3. NOT 'midnight' (a tiny Polygon meme coin) and not 'night'.
 // Coins he adds later are learned automatically (symbol -> CoinGecko id) and kept in state.coinIds, so no code change is needed per ticker.
 export const learnCoin = (symbol, id) => { COIN_IDS[String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, '')] = id; };
 export const coinIdFor = q => COIN_IDS[String(q || '').toUpperCase().replace(/[\s\/-]*USD[T]?$/, '').replace(/[^A-Z0-9]/g, '')] || null;

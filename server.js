@@ -434,8 +434,8 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
 const TALK = brainConfig();
 state.watchlist ||= [];
-state.watchlist = state.watchlist.map(i => i === 'night' ? 'midnight' : i);   // NIGHT's CoinGecko id is "midnight" (older builds saved "night", which has no data)
-if (!state.watchlist.includes('midnight') && !state.nightSeeded) { state.watchlist.push('midnight'); state.nightSeeded = true; }   // NIGHT is a coin, not a stock
+state.watchlist = [...new Set(state.watchlist.map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))];   // NIGHT = Midnight on Cardano = CoinGecko id "midnight-3" ("night" has no data, "midnight" is a Polygon meme coin)
+if (!state.watchlist.includes('midnight-3') && !state.nightSeeded) { state.watchlist.push('midnight-3'); state.nightSeeded = true; }   // NIGHT is a coin, not a stock
 Object.assign(handlers, {
   crypto_scan: async ({ top } = {}) => {
     try {
@@ -2367,7 +2367,7 @@ wss.on('connection', ws => {
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
-      state.watchlist = (state.watchlist || []).map(i => i === 'night' ? 'midnight' : i); console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
+      state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
