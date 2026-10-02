@@ -77,7 +77,7 @@ const state = loadState();
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'silent', 'sigWatch'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1162,28 +1162,28 @@ async function pushTelegram(title, body, link, watch) {
     if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
     const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : ''), ...(watch ? { reply_markup: { inline_keyboard: [[{ text: 'Add to watch list', url: watch }]] } } : {}) }), signal: AbortSignal.timeout(10000)
+      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : ''), ...(watch ? { reply_markup: { inline_keyboard: [[{ text: 'Buy', url: buy }, { text: 'Add to watch list', url: watch }]] } } : {}) }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Telegram answered ${r.status}: ${(await r.text()).slice(0, 120)}`;
   } catch (e) { return String(e.message || e).slice(0, 120); }
 }
-async function pushNtfy(title, body, link, watch) {
+async function pushNtfy(title, body, link, watch, buy) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
-    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4', ...(link ? { Click: link } : {}), ...(watch ? { Actions: `view, Add to watch list, ${watch}` } : {}) }, body: String(body).slice(0, link ? 440 : 500) + (link ? `\n${link}` : ''), signal: AbortSignal.timeout(10000) });
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4', ...(link ? { Click: link } : {}), ...(watch ? { Actions: `view, Buy, ${buy}; view, Add to watch list, ${watch}` } : {}) }, body: String(body).slice(0, link ? 440 : 500) + (link ? `\n${link}` : ''), signal: AbortSignal.timeout(10000) });
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
 // Pushover: a notification-only app that lets the Owner upload his own sound (website: Custom Sounds).
 // Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
-async function pushPushover(title, body, link, watch) {
+async function pushPushover(title, body, link, watch, buy) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         token: process.env.PUSHOVER_APP_TOKEN, user: process.env.PUSHOVER_USER_KEY,
-        title: String(title).slice(0, 250), message: watch ? String(body).slice(0, 800).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + `\n<a href="${watch}">Add to watch list</a>` : String(body).slice(0, 1000) || ' ',
+        title: String(title).slice(0, 250), message: watch ? String(body).slice(0, 800).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + `\n<a href="${buy}">Buy</a> | <a href="${watch}">Add to watch list</a>` : String(body).slice(0, 1000) || ' ',
         ...(watch ? { html: '1' } : {}),
         sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0',
         ...(link ? { url: link, url_title: 'Open chart' } : {})
@@ -1205,6 +1205,10 @@ const watchSig = sym => crypto.createHmac('sha256', SECRET).update('watch:' + sy
 function watchLink(link) {
   try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/watch-add?s=${encodeURIComponent(sym)}&k=${watchSig(sym)}`; } catch { return ''; }
 }
+// Buy button: opens the HUD, which asks Jarvis to start the buy flow; nothing is bought until the Owner confirms by voice in a later turn.
+function buyLink(link) {
+  try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/?buy=${encodeURIComponent(sym)}`; } catch { return ''; }
+}
 // crypto briefs name several coins: link up to three tickers found in the text
 function cryptoLinks(text) {
   const seen = new Set(), out = [];
@@ -1216,23 +1220,23 @@ function cryptoLinks(text) {
   return out.filter(Boolean);
 }
 async function push(title, body, link) {
-  const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first);
+  const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first), buy = buyLink(first);
   const extra = links.slice(1).join('\n'); if (extra) body = `${body}\n${extra}`;
   if (process.env.PUSHOVER_APP_TOKEN && process.env.PUSHOVER_USER_KEY) {
-    const err = await pushPushover(title, body, first, watch);
+    const err = await pushPushover(title, body, first, watch, buy);
     if (!err) return null;
     console.warn('Pushover alert failed:', err);
-    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body, first, watch) : process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch) : 'no backup set';
+    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body, first, watch, buy) : process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch, buy) : 'no backup set';
     return backup ? `${err} (backup: ${backup})` : null;
   }
   if (process.env.TELEGRAM_BOT_TOKEN) {
-    const err = await pushTelegram(title, body, first, watch);
+    const err = await pushTelegram(title, body, first, watch, buy);
     if (!err) return null;
     console.warn('Telegram alert failed:', err);
-    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch) : 'no ntfy backup set';
+    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body, first, watch, buy) : 'no ntfy backup set';
     return backup ? `${err} (ntfy backup: ${backup})` : null;
   }
-  return pushNtfy(title, body, first, watch);
+  return pushNtfy(title, body, first, watch, buy);
 }
 handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '');
@@ -1266,7 +1270,7 @@ function wlRefresh() {
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: state.sigWatch.map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, price: px.get(w.symbol) ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...(watch.holdings?.positions || []).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', '') })).filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
@@ -1535,7 +1539,7 @@ const TOKEN = crypto.createHmac('sha256', SECRET).update('ok:' + PIN).digest('he
 const readCookie = req => Object.fromEntries(String(req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p.length === 2))['jarvis_auth'];
 const authed = req => !PIN || readCookie(req) === TOKEN;
 const tries = new Map();
-const safeNext = n => (/^\/chart\?[\w=&.%:+\-]{1,300}$/.test(String(n || '')) ? String(n) : '');
+const safeNext = n => (/^\/(chart)?\?[\w=&.%:+\-]{1,300}$/.test(String(n || '')) ? String(n) : '');
 const loginPage = (err = '', next = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J.A.R.V.I.S.</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="theme-color" content="#02060c">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle,#06223a,#01050a 70%);color:#cfefff;font-family:system-ui,sans-serif}
 form{display:flex;flex-direction:column;gap:14px;align-items:center;padding:16px}h1{font-weight:800;letter-spacing:.3em;color:#3fe0ff;text-shadow:0 0 14px rgba(63,224,255,.6);margin:0 0 10px}
@@ -1586,7 +1590,7 @@ app.use((req, res, next) => {
   const BT = String(process.env.BENCH_TOKEN || '');
   if (BT.length >= 16 && /^\/api\/(bench|talk-model)$/.test(req.path) && String(req.query.token || req.headers['x-bench-token'] || '') === BT) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'locked' });
-  res.status(401).send(loginPage('', req.path === '/chart' ? safeNext(req.originalUrl) : ''));
+  res.status(401).send(loginPage('', (req.path === '/chart' || (req.path === '/' && req.query.buy)) ? safeNext(req.originalUrl) : ''));
 });
 app.get('/chart', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'chart.html')));
 app.get('/api/chart', async (req, res) => {

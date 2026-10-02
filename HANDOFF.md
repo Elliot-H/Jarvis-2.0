@@ -272,3 +272,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Alert "Add to watch list" button (2026-10-02)
 - `push()` derives the symbol from the alert's chart link and adds a signed one-tap action (`watchLink`, HMAC with SECRET): ntfy action button, Telegram inline button, Pushover HTML link. Target `GET /watch-add?s=SYM&k=SIG` (public route, signature-checked) only calls `signal_watch add`; it never buys. Applies to every alert that has a chart link (BUY-WATCH, dips/drops, sell warnings, targets, news). Untested against the real push services.
+
+## Watch box always on + Buy button on alerts (2026-10-02)
+- HUD WATCH LIST frame is always visible (placeholder when empty) and lists signal_watch symbols plus Alpaca positions (tagged "auto"). `sigWatch` added to BACKUP_KEYS so QTEX/SDEV/SCKT survive a data/ wipe once the phone has synced.
+- Every alert with a chart link now has two buttons: Buy (`/?buy=SYM`; HUD asks Jarvis to start the buy flow, still needs the Owner's spoken confirm in a later turn) and Add to watch list. ntfy `Actions` (two, `;` separated), Telegram inline row, Pushover HTML links. Login page returns to `/?buy=SYM`. If an alert has no chart link (no PUBLIC_URL / RAILWAY_PUBLIC_DOMAIN) neither button appears. Untested against real push services; syntax-checked only. No APK reinstall.

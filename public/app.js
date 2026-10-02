@@ -246,10 +246,11 @@
   function renderWatchlist(m) {
     const fr = $('#watchFrame'), box = $('#watchlist'); if (!fr || !box) return;
     const list = m.list || [];
-    if (!list.length) { fr.style.display = 'none'; return; }
+    fr.style.display = '';
+    if (!list.length) { box.innerHTML = '<small>Nothing on the watch list yet.</small>'; return; }
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
     const vc = { BUY: 'up', WATCH: '', AVOID: 'dn' };
-    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.stop ? 'stop ' + px(w.stop) : ''}${w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
+    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}${w.auto ? ' <small>auto</small>' : ''}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.stop ? 'stop ' + px(w.stop) : ''}${w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
     fr.style.display = '';
   }
   function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }
@@ -829,6 +830,9 @@
     uttTimer = setTimeout(flush, pending?.wakeOnly ? 1100 : silenceFor(pending?.text));
   }
 
+  // Alert "Buy" button lands here as /?buy=SYM: hand it to Jarvis once connected; he proposes and waits for the Owner's spoken confirm.
+  const BUY_SYM = (params.get('buy') || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
+  if (BUY_SYM) { try { history.replaceState(null, '', location.pathname); } catch {} const t = setInterval(() => { if (ws && ws.readyState === 1) { clearInterval(t); addLog('user', 'Buy ' + BUY_SYM); send({ type: 'ask', text: `I want to buy ${BUY_SYM}. Start the buy flow and wait for my confirmation.` }); } }, 1000); setTimeout(() => clearInterval(t), 60000); }
   function submit(text) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
