@@ -260,3 +260,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Silent / text-only mode (2026-10-02)
 - `state.silent` (BACKUP_KEYS). Server `broadcast()` forces `speak:false` on every `say` while silent; `silentAnswer()` in server.js toggles it by voice before any AI call; client (`public/app.js`) gets `{type:"silent",on}`, blocks `speak()` and filler clips, chip shows TEXT ONLY. `/api/tts` returns 204 while silent.
+
+## Chart links on alerts (2026-10-02)
+- Every outgoing investment push (stop/drop/day/target/resistance/spike/volume, new buy-watch signal, news catalyst, sell warning, crypto briefs) carries a tappable link to `/chart?s=SYM&lv=stop:1.2&lv=target:3` (public/chart.html: candlesticks, 5m/15m/1h/1d/1w, dashed lines for Jarvis's stop/target/entry plus swing support/resistance; data from `/api/chart`, Yahoo bars). Built by `chartLink()` in server.js; `push(title, body, link)` sends it as Pushover `url`, ntfy `Click`, and appended text on Telegram. Needs `PUBLIC_URL` (or Railway's `RAILWAY_PUBLIC_DOMAIN`, set automatically); without a base URL no link is added. Page is PIN-protected; the login form returns to the chart after the PIN. Yahoo blocked from the build sandbox, so the chart data was not tested live.

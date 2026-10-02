@@ -1139,56 +1139,77 @@ async function tgChatId() {
   try { fs.writeFileSync(TG_FILE, id); } catch {}
   return id;
 }
-async function pushTelegram(title, body) {
+async function pushTelegram(title, body, link) {
   try {
     const chat = await tgChatId();
     if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
     const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500) }), signal: AbortSignal.timeout(10000)
+      body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : '') }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Telegram answered ${r.status}: ${(await r.text()).slice(0, 120)}`;
   } catch (e) { return String(e.message || e).slice(0, 120); }
 }
-async function pushNtfy(title, body) {
+async function pushNtfy(title, body, link) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';
   try {
-    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4' }, body: String(body).slice(0, 500), signal: AbortSignal.timeout(10000) });
+    const r = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, { method: 'POST', headers: { Title: encodeURIComponent(String(title).slice(0, 80)).replace(/%20/g, ' '), Tags: 'chart_with_upwards_trend', Priority: process.env.NTFY_PRIORITY || '4', ...(link ? { Click: link } : {}) }, body: String(body).slice(0, link ? 440 : 500) + (link ? `\n${link}` : ''), signal: AbortSignal.timeout(10000) });
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
 // Pushover: a notification-only app that lets the Owner upload his own sound (website: Custom Sounds).
 // Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
-async function pushPushover(title, body) {
+async function pushPushover(title, body, link) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         token: process.env.PUSHOVER_APP_TOKEN, user: process.env.PUSHOVER_USER_KEY,
         title: String(title).slice(0, 250), message: String(body).slice(0, 1000) || ' ',
-        sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0'
+        sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0',
+        ...(link ? { url: link, url_title: 'Open chart' } : {})
       }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Pushover answered ${r.status}: ${(await r.text()).slice(0, 160)}`;
   } catch (e) { return String(e.message || e).slice(0, 120); }
 }
-async function push(title, body) {
+// Chart link for alerts: the app's own /chart page (candles + levels), built from the alert's symbol. Needs PUBLIC_URL (Railway sets RAILWAY_PUBLIC_DOMAIN itself).
+const publicBase = () => (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/+$/, '');
+function chartLink(sym, lv = {}) {
+  const base = publicBase(), s = String(sym || '').trim(); if (!base || !s) return '';
+  const q = new URLSearchParams({ s });
+  for (const [k, v] of Object.entries(lv)) if (Number.isFinite(Number(v)) && v != null && v !== '') q.append('lv', `${k}:${Number(v)}`);
+  return `${base}/chart?${q}`;
+}
+// crypto briefs name several coins: link up to three tickers found in the text
+function cryptoLinks(text) {
+  const seen = new Set(), out = [];
+  for (const w of String(text).match(/[A-Za-z]{2,10}/g) || []) {
+    const y = chart.ySymbol(w); if (!y || !y.endsWith('-USD') || seen.has(y)) continue;
+    if (!/^[A-Z]{2,6}$/.test(w) && !/^(bitcoin|ethereum|solana|dogecoin)$/i.test(w)) continue;
+    seen.add(y); out.push(chartLink(y)); if (out.length >= 3) break;
+  }
+  return out.filter(Boolean);
+}
+async function push(title, body, link) {
+  const links = [].concat(link || []).filter(Boolean), first = links[0] || '';
+  const extra = links.slice(1).join('\n'); if (extra) body = `${body}\n${extra}`;
   if (process.env.PUSHOVER_APP_TOKEN && process.env.PUSHOVER_USER_KEY) {
-    const err = await pushPushover(title, body);
+    const err = await pushPushover(title, body, first);
     if (!err) return null;
     console.warn('Pushover alert failed:', err);
-    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body) : process.env.NTFY_TOPIC ? await pushNtfy(title, body) : 'no backup set';
+    const backup = process.env.TELEGRAM_BOT_TOKEN ? await pushTelegram(title, body, first) : process.env.NTFY_TOPIC ? await pushNtfy(title, body, first) : 'no backup set';
     return backup ? `${err} (backup: ${backup})` : null;
   }
   if (process.env.TELEGRAM_BOT_TOKEN) {
-    const err = await pushTelegram(title, body);
+    const err = await pushTelegram(title, body, first);
     if (!err) return null;
     console.warn('Telegram alert failed:', err);
-    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body) : 'no ntfy backup set';
+    const backup = process.env.NTFY_TOPIC ? await pushNtfy(title, body, first) : 'no ntfy backup set';
     return backup ? `${err} (ntfy backup: ${backup})` : null;
   }
-  return pushNtfy(title, body);
+  return pushNtfy(title, body, first);
 }
 handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '');
@@ -1237,7 +1258,7 @@ async function sigTick() {
       state.sigAlerted[w.symbol] = Date.now(); saveState();
       const msg = `Uptrend break: ${w.symbol} at ${ex.price}, ${ex.reasons.join('; ')}. I would sell now or set the stop at ${w.stop && w.stop > ex.stop ? w.stop : ex.stop}. Rule-based warning, not advice.`;
       broadcast({ type: 'activity', text: 'SELL WARNING: ' + msg });
-      await push(`Sell warning: ${w.symbol}`, msg);
+      await push(`Sell warning: ${w.symbol}`, msg, chartLink(w.symbol, { stop: w.stop && w.stop > ex.stop ? w.stop : ex.stop }));
     } catch (e) { console.warn('signal check failed', w.symbol, e.message); }
   }
 }
@@ -1254,12 +1275,12 @@ const watch = { running: false, lastRun: null, lastOk: null, error: null, fails:
 const isCryptoSym = s => /\/USD$/.test(s);
 const marketOpenNow = () => { const ny = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); const m = ny.getHours() * 60 + ny.getMinutes(); return ny.getDay() > 0 && ny.getDay() < 6 && m >= 570 && m < 960; };
 const fmtP = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
-async function watchAlert(key, title, msg) {
+async function watchAlert(key, title, msg, link) {
   if (Date.now() - (watch.alerted.get(key) || 0) < acfg().cooldownMin * 60e3) return;
   watch.alerted.set(key, Date.now());
   const full = `${msg} Not financial advice.`;
   broadcast({ type: 'activity', text: 'WATCH: ' + full });
-  const err = await push(title, full); if (err) console.warn('watch push failed', err);
+  const err = await push(title, full, link); if (err) console.warn('watch push failed', err);
 }
 async function watchTick() {
   if (!trade.configured()) return;
@@ -1280,12 +1301,12 @@ async function watchTick() {
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
       const C = acfg(), h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
       const stopTxt = it.stop ? `Stop ${fmtP(it.stop)}.` : 'No stop set.';
-      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`);
+      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = entry && it.stop && it.stop < entry ? entry + 2 * (entry - it.stop) : null;
-      if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or trail the stop up to ${fmtP(entry)}.`);
+      if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or trail the stop up to ${fmtP(entry)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
-      if (drop >= C.dropPct && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`);
-      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -C.dropDayPct) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`);
+      if (drop >= C.dropPct && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
+      else if (it.prevClose && (it.price - it.prevClose) / it.prevClose * 100 <= -C.dropDayPct) await watchAlert(it.sym + ':day', `DOWN ON THE DAY: ${it.sym}`, `Down on the day: ${it.sym} at ${fmtP(it.price)}, ${((it.price - it.prevClose) / it.prevClose * 100).toFixed(1)}% vs yesterday's close. ${stopTxt} I would trim, or exit under ${fmtP(it.stop ?? it.price * 0.97)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
     }
     for (const k of [...watch.hist.keys()]) if (!items.has(k)) watch.hist.delete(k);
     watch.items = [...items.values()];
@@ -1311,11 +1332,11 @@ const prioritySyms = () => {
   return [...m.values()].slice(0, 25);
 };
 const alertHist = new Map(), newsSeen = new Set();
-async function liveAlert(key, title, body, coolMin) {
+async function liveAlert(key, title, body, coolMin, link) {
   if (Date.now() - (watch.alerted.get(key) || 0) < coolMin * 60e3) return;
   watch.alerted.set(key, Date.now());
   broadcast({ type: 'activity', text: 'ALERT: ' + body });
-  const err = await push(title, body); if (err) console.warn('alert push failed', err);
+  const err = await push(title, body, link); if (err) console.warn('alert push failed', err);
 }
 async function alertTick() {
   const C = acfg(), now = Date.now(), items = prioritySyms();
@@ -1325,7 +1346,7 @@ async function alertTick() {
     const t = now - q.ageSec * 1000; if (!h.length || t - h[h.length - 1].t > 1500) h.push({ t, p: q.price });
     alertHist.set(it.sym, h);
     const ctx = await alerts.context(it.sym);
-    for (const a of alerts.triggers(it, q, h, ctx, C)) await liveAlert(a.key, a.title, alerts.format(a, q), a.cooldownMin);
+    for (const a of alerts.triggers(it, q, h, ctx, C)) { const lm = String(a.level || '').match(/^(.*?)\s+([\d.]+)$/); await liveAlert(a.key, a.title, alerts.format(a, q), a.cooldownMin, chartLink(it.sym, { stop: it.stop, target: it.target, entry: it.entry, ...(lm ? { [lm[1].replace(/\s+/g, '_')]: lm[2] } : {}) })); }
   }
 }
 const alertLoop = () => setTimeout(async () => { try { await alertTick(); } catch (e) { console.warn('alertTick', e.message); } alertLoop(); }, Math.max(5, acfg().intervalSec) * 1000);
@@ -1340,7 +1361,7 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
       const r = await sig.scan([...list].slice(0, 20), 8);
       for (const x of r.top) if (x.score >= C.newSignalScore && x.stop) {
         const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;
-        await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60);
+        await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60, chartLink(x.symbol, { stop: x.stop, target: x.target, entry: x.price }));
       }
     } catch (e) { console.warn('new-signal alert', e.message); }
   }
@@ -1350,7 +1371,7 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
       const q = lf.latest(it.sym);
       for (const h of alerts.catalysts((await md.news(it.sym)).headlines, newsSeen).slice(0, 1)) {
         newsSeen.add(h.headline); if (newsSeen.size > 300) newsSeen.delete(newsSeen.values().next().value);
-        await liveAlert(`${it.sym}:news:${h.headline.slice(0, 40)}`, `NEWS: ${it.sym}`, `${it.sym}: INFO, news catalyst on a position you hold: "${h.headline.slice(0, 140)}" (${h.source || 'news'}). ${q ? `Price ${fmtP(q.price)}, quote ${q.ageSec}s old.` : 'No live quote yet.'} I would check the story before acting.`, 24 * 60);
+        await liveAlert(`${it.sym}:news:${h.headline.slice(0, 40)}`, `NEWS: ${it.sym}`, `${it.sym}: INFO, news catalyst on a position you hold: "${h.headline.slice(0, 140)}" (${h.source || 'news'}). ${q ? `Price ${fmtP(q.price)}, quote ${q.ageSec}s old.` : 'No live quote yet.'} I would check the story before acting.`, 24 * 60, chartLink(it.sym));
       }
     } catch (e) { console.warn('news alert', it.sym, e.message); }
   }
@@ -1378,7 +1399,7 @@ async function cryptoBrief(slot) {
   } else prompt = BRIEF_PROMPTS[slot]();
   console.log(`crypto ${slot} brief starting`);
   const text = await ask(prompt, { spoken: false, origin: 'system', label: `Crypto ${slot} brief` });
-  if (text && !/spending limit|allowance|out of|could not|problem finishing/i.test(text)) await push(`Crypto ${slot}`, text);
+  if (text && !/spending limit|allowance|out of|could not|problem finishing/i.test(text)) await push(`Crypto ${slot}`, text, cryptoLinks(text));
 }
 function briefTick() {
   if (BRAIN !== 'openrouter' || !TALK.apiKey) return;
@@ -1470,12 +1491,13 @@ const TOKEN = crypto.createHmac('sha256', SECRET).update('ok:' + PIN).digest('he
 const readCookie = req => Object.fromEntries(String(req.headers.cookie || '').split(';').map(c => c.trim().split('=')).filter(p => p.length === 2))['jarvis_auth'];
 const authed = req => !PIN || readCookie(req) === TOKEN;
 const tries = new Map();
-const loginPage = (err = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J.A.R.V.I.S.</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="theme-color" content="#02060c">
+const safeNext = n => (/^\/chart\?[\w=&.%:+\-]{1,300}$/.test(String(n || '')) ? String(n) : '');
+const loginPage = (err = '', next = '') => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>J.A.R.V.I.S.</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png"><meta name="theme-color" content="#02060c">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle,#06223a,#01050a 70%);color:#cfefff;font-family:system-ui,sans-serif}
 form{display:flex;flex-direction:column;gap:14px;align-items:center;padding:16px}h1{font-weight:800;letter-spacing:.3em;color:#3fe0ff;text-shadow:0 0 14px rgba(63,224,255,.6);margin:0 0 10px}
 input{font-size:28px;letter-spacing:.4em;text-align:center;width:220px;padding:12px;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff;outline:0}
 button{font-size:14px;letter-spacing:.3em;padding:14px 34px;background:transparent;color:#3fe0ff;border:1px solid #3fe0ff}p{color:#ff4d5e;margin:0;min-height:1em}</style></head>
-<body><form method="post" action="/login"><h1>J.A.R.V.I.S.</h1><input name="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus aria-label="PIN"><p>${err}</p><button>UNLOCK</button></form></body></html>`;
+<body><form method="post" action="/login${next ? `?next=${encodeURIComponent(next)}` : ''}"><h1>J.A.R.V.I.S.</h1><input name="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus aria-label="PIN"><p>${err}</p><button>UNLOCK</button></form></body></html>`;
 app.post('/login', (req, res) => {
   const ip = req.ip, now = Date.now();
   const t = (tries.get(ip) || []).filter(x => now - x < 10 * 60_000);
@@ -1484,7 +1506,7 @@ app.post('/login', (req, res) => {
   if (!ok) { t.push(now); tries.set(ip, t); return res.status(401).send(loginPage('Wrong PIN.')); }
   tries.delete(ip);
   res.setHeader('Set-Cookie', `jarvis_auth=${TOKEN}; Path=/; Max-Age=${60 * 60 * 24 * 180}; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`);
-  res.redirect(303, '/');
+  res.redirect(303, safeNext(req.query.next) || '/');
 });
 app.get('/health', (_req, res) => res.send('ok'));
 // The shop iPhone's Shortcut: token in the URL instead of the PIN cookie.
@@ -1512,7 +1534,16 @@ app.use((req, res, next) => {
   const BT = String(process.env.BENCH_TOKEN || '');
   if (BT.length >= 16 && /^\/api\/(bench|talk-model)$/.test(req.path) && String(req.query.token || req.headers['x-bench-token'] || '') === BT) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'locked' });
-  res.status(401).send(loginPage());
+  res.status(401).send(loginPage('', req.path === '/chart' ? safeNext(req.originalUrl) : ''));
+});
+app.get('/chart', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'chart.html')));
+app.get('/api/chart', async (req, res) => {
+  try {
+    const y = chart.ySymbol(req.query.s); if (!y) return res.status(400).json({ error: 'Unknown symbol.' });
+    const tf = ['5m', '15m', '1h', '1d', '1w'].includes(req.query.tf) ? req.query.tf : '1d';
+    const b = await chart.bars(y, tf), px = b[b.length - 1].c;
+    res.json({ symbol: y, tf, bars: b.slice(-120), price: px, ...chart.levels(b, px) });
+  } catch (e) { res.status(502).json({ error: String(e.message || e).slice(0, 200) }); }
 });
 app.use(express.static(path.join(__dirname, 'public')));
 

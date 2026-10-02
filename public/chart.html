@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis · Chart</title>
+<style>
+body{margin:0;background:#01050a;color:#cfefff;font-family:system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px}
+h1{font-size:18px;letter-spacing:.2em;color:#3fe0ff;margin:0 8px 0 0}
+button{background:transparent;color:#3fe0ff;border:1px solid #1d5a70;padding:6px 10px;font-size:13px}button.on{background:#0b3a4f;border-color:#3fe0ff}
+canvas{display:block;width:100%;height:calc(100vh - 100px)}
+#msg{padding:0 12px;color:#8fb;font-size:13px;min-height:1.2em}#msg.err{color:#ff4d5e}
+</style></head><body>
+<header><h1 id="t">CHART</h1><span id="tfs"></span></header><div id="msg"></div><canvas id="c"></canvas>
+<script>
+const P = new URLSearchParams(location.search), SYM = P.get('s') || '';
+const LV = P.getAll('lv').map(x => { const i = x.lastIndexOf(':'); return { name: x.slice(0, i).replace(/_/g, ' '), price: Number(x.slice(i + 1)) }; }).filter(l => l.name && Number.isFinite(l.price));
+let tf = '1d', data = null;
+const $ = id => document.getElementById(id), cv = $('c'), fmt = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
+$('tfs').innerHTML = ['5m', '15m', '1h', '1d', '1w'].map(f => `<button data-f="${f}" class="${f === tf ? 'on' : ''}">${f}</button>`).join('');
+$('tfs').onclick = e => { const f = e.target.dataset.f; if (!f) return; tf = f; [...$('tfs').children].forEach(b => b.classList.toggle('on', b.dataset.f === f)); load(); };
+async function load() {
+  $('msg').className = ''; $('msg').textContent = 'Loading...';
+  try {
+    const r = await fetch(`/api/chart?s=${encodeURIComponent(SYM)}&tf=${tf}`), j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    data = j; $('t').textContent = j.symbol; $('msg').textContent = `Last ${fmt(j.price)} · ${j.bars.length} candles · dashed lines: Jarvis levels (stop/target/entry) and swing support/resistance`; draw();
+  } catch (e) { $('msg').className = 'err'; $('msg').textContent = 'Could not load chart: ' + e.message; }
+}
+function draw() {
+  if (!data) return;
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const b = data.bars, lines = [...LV.map(l => ({ ...l, c: /stop/i.test(l.name) ? '#ff4d5e' : /target|resist/i.test(l.name) ? '#4dff9a' : '#ffd24d' })),
+    ...data.support.map(l => ({ name: 'support', price: l.price, c: '#3f8fe0' })), ...data.resistance.map(l => ({ name: 'resistance', price: l.price, c: '#9a7fe0' }))];
+  let lo = Math.min(...b.map(x => x.l)), hi = Math.max(...b.map(x => x.h));
+  for (const l of LV) { lo = Math.min(lo, l.price); hi = Math.max(hi, l.price); }
+  const pad = (hi - lo) * .05 || 1; lo -= pad; hi += pad;
+  const R = 62, y = v => H - 8 - (v - lo) / (hi - lo) * (H - 16), w = (W - R) / b.length;
+  g.strokeStyle = '#0d2a38'; g.fillStyle = '#6aa'; g.font = '11px system-ui'; g.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) { const v = lo + (hi - lo) * i / 5; g.beginPath(); g.moveTo(0, y(v)); g.lineTo(W - R, y(v)); g.stroke(); g.fillText(fmt(v), W - R + 4, y(v) + 4); }
+  b.forEach((k, i) => { const x = i * w + w / 2, up = k.c >= k.o; g.strokeStyle = g.fillStyle = up ? '#3fe07a' : '#ff5d6e';
+    g.beginPath(); g.moveTo(x, y(k.h)); g.lineTo(x, y(k.l)); g.stroke(); const t = y(Math.max(k.o, k.c)), h = Math.max(1, Math.abs(y(k.o) - y(k.c))); g.fillRect(x - w * .35, t, w * .7, h); });
+  g.font = '12px system-ui'; g.setLineDash([6, 4]);
+  for (const l of lines) { if (l.price < lo || l.price > hi) continue; g.strokeStyle = g.fillStyle = l.c; g.beginPath(); g.moveTo(0, y(l.price)); g.lineTo(W - R, y(l.price)); g.stroke(); g.fillText(`${l.name} ${fmt(l.price)}`, 4, y(l.price) - 3); }
+  g.setLineDash([]);
+}
+addEventListener('resize', draw); load();
+</script></body></html>
