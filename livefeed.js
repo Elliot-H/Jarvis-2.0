@@ -96,6 +96,14 @@ export function start({ priority, open, onQuote: cb }) {
   timer = setInterval(tick, 1000); slowTimer = setInterval(() => slowStep().catch(() => {}), 5 * 60e3);
   setTimeout(() => slowStep().catch(() => {}), 20e3);
 }
+// One-shot fill for symbols with no quote yet (app restart, market closed): gets price + prevClose so the daily % shows.
+export async function seed(syms) {
+  for (const sym of syms) {
+    if (q.get(sym)?.prevClose || isCrypto(sym)) continue;
+    try { const r = await md.quote(sym); if (r?.price) record(sym, { price: r.price, prevClose: r.prevClose ?? null, tradeAt: r.asOf ? Date.parse(r.asOf) || null : null, source: r.source }, 'seed'); }
+    catch (e) { console.warn('seed quote', sym, e.message); }
+  }
+}
 export function stop() { clearInterval(timer); clearInterval(slowTimer); timer = slowTimer = null; }
 
 /** Latest quote with freshness: ageSec = seconds since we fetched it; tradeAgeSec = seconds since the exchange print (when given). */

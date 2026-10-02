@@ -71,3 +71,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - 2026-10-02: Jarvis watch list rows (QTEX, SDEV, SCKT) now show a 5-day sparkline and the daily % change; list contents and stops unchanged.
 - 2026-10-02: HUD watch list = only tickers added via signal_watch; persists across restarts (phone-backup restore race fixed); holdings are never auto-added and held symbols are not shown in it.
 - 2026-10-02: Watch list rule: every row shows day % (standing rule); rows stay until the Owner removes them or the ticker is bought, then it is dropped from the watch list automatically and shows in Holdings. Survives full app close via server state plus phone backup.
+- 2026-10-02: Watch list day % now refills after an app/server restart: livefeed.js `seed()` fetches one quote (price + previous close) per watched stock 8 s after boot and every 30 min while any is missing, then re-broadcasts the watch list and holdings.

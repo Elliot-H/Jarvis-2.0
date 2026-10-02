@@ -1558,6 +1558,9 @@ handlers.alert_config = async ({ action, key, value }) => {
 };
 if (!process.env.JARVIS_SMOKE) {
   lf.start({ priority: prioritySyms, open: marketOpenNow });
+  // After a restart no quotes are held, so the watch list has no daily %: fetch once, and again every 30 min while any is missing.
+  const seedDay = () => { const syms = prioritySyms().map(i => i.sym); if (syms.some(s => !lf.latest(s)?.prevClose)) lf.seed(syms).then(() => { broadcast(watchlistMsg(true)); if (watch.holdings) broadcast(holdingsOut()); }).catch(() => {}); };
+  setTimeout(seedDay, 8000); setInterval(seedDay, 30 * 60e3);
   setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3);
 }
 async function cryptoBrief(slot) {
