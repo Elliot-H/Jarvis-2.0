@@ -68,6 +68,11 @@ export async function orders() {
   const o = await api(BASE, '/v2/orders?status=open&limit=100');
   return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, status: x.status }));
 }
+// Read-only: filled SELL orders (newest first) so realised P&L can be shown per position.
+export async function sellFills(limit = 200) {
+  const o = await api(BASE, `/v2/orders?status=closed&direction=desc&limit=${limit}`);
+  return o.filter(x => x.side === 'sell' && +x.filled_qty > 0 && x.filled_avg_price).map(x => ({ symbol: x.symbol, qty: +x.filled_qty, price: +x.filled_avg_price, at: Date.parse(x.filled_at || x.updated_at) || 0 }));
+}
 export async function cancelAll() { await api(BASE, '/v2/orders', { method: 'DELETE' }); return 'All open orders cancelled.'; }
 
 export async function place({ symbol, side, dollars }) {

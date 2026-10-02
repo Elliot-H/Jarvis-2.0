@@ -19,6 +19,8 @@ export const DEFAULTS = {
   cooldownMin: num(process.env.WATCH_COOLDOWN_MIN, 10),        // repeat spacing for stop / drop
   infoCooldownHours: 6,                                        // repeat spacing for the other alerts
   trailPct: num(process.env.TRAIL_PCT, 10),                    // trailing stop: % below the highest price seen since entry (stop only ratchets up)
+  atrMult: 2,                                                  // trailing stop distance in ATRs (14-day) below the highest price; per-ticker via its own volatility
+  costPct: 0.2,                                                // after the first scale-out the stop never sits under entry + this % (breakeven plus costs)
   staleSec: 120                                                // quotes older than this never trigger price alerts
 };
 export const KEYS = Object.keys(DEFAULTS);

@@ -288,3 +288,10 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - Holdings box shows "trail stop X" and the watch list "trail X" (current level, updates as it rises). Stop-hit, drop, day, target and uptrend-break alerts use it; alert format and chart/watch buttons unchanged. Target for alerts = signal target, else entry +2x trail%.
 - Also fixed a latent bug in watchTick (entry/tgt used before declaration in the stop-hit alert).
 - Still alert-level only: no resting stop orders at the broker. Syntax-checked and ratchet logic unit-tested; not run against live Alpaca.
+
+## Volatility-aware trailing stop + scale-out ladder (2026-10-02, maintenance)
+- Replaces the fixed-% trail. `trailUpdate()` in server.js: stop = highest price since entry minus `atrMult` (2) x the symbol's own 14-day ATR (`volFor`, daily bars, cached 6h), or just under the 10-day swing low (minus 0.5 ATR) if higher; ratchets up only. No ATR data -> old `trailPct` fallback. Existing trails are reset once (`t.v=2`) so volatile names are not shaken out by the old 10%.
+- Ladder: R = atrMult x ATR at first sight. Tier 1 at entry+1R, tier 2 at entry+2R; alert "SCALE OUT n" says "I would sell a third" (with share count) and the last third rides the trail. From tier 1 the stop floor is entry*(1+`costPct` 0.2%) (breakeven plus costs). Both knobs via `alert_config`. Alert-level only; nothing is sold.
+- HUD: Holdings rows show trail stop, next scale-out level, breakeven+costs level, open P&L and realised P&L (`trade.sellFills` read-only, filled sells since the symbol was first tracked; refreshed 5 min). Watch list rows show the next level.
+- NOT DONE: real resting stop / scale-out limit orders at Alpaca. Needs the Owner's explicit OK in an interactive session (order-placing code; see Investment Watch note). Plan unchanged: `trade.placeStop` + `stop_propose` via the pendingTrade/trade_confirm flow; whole shares only for stops; crypto stop_limit.
+- Untested live (Alpaca/Yahoo blocked); syntax-checked, ratchet/tier logic unit-tested with stub ATR.

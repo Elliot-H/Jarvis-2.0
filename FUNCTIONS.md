@@ -67,3 +67,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - 2026-10-02: Holdings box: each holding has a sparkline (5d), live BUY/WATCH/AVOID verdict, stop, target, chart link and a watch-only "+ watch" button (same logic as alerts and the watch list).
 - 2026-10-02: alerts carry Buy + Add to watch list buttons; WATCH LIST box always shown (positions + signal_watch).
 - 2026-10-02: Trailing stops: every position and watch row has a trailing stop (default 10% under the highest price since entry, only ratchets up; `trailPct` via alert_config or TRAIL_PCT). Holdings and watch list show the current trail level; alerts use it. Alert-level only, no broker stop orders.
+- 2026-10-02: Position management: ATR-based trailing stop per ticker (2x ATR / swing low, ratchets up), scale-out ladder (sell a third at +1R and +2R as alerts, stop to breakeven+costs after +1R), Holdings shows trail stop, next level, open vs realised P&L. Broker-side resting orders not built (needs Owner OK).

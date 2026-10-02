@@ -1250,20 +1250,63 @@ state.trail ||= {};
 if (!state.wlHideSeeded) { state.wlHide = [...new Set([...state.wlHide, 'NEAR', 'TXT', 'XRP'])]; state.wlHideSeeded = true; }
 const wlKey = s => String(s || '').toUpperCase().replace('/USD', '').replace('/', '').replace(/USD$/, '');
 const wlHidden = s => state.wlHide.includes(wlKey(s));
-// Trailing stop (alert-level, no broker order): stop = trailPct below the highest price seen since entry; it only ever ratchets up.
+// Volatility-aware trailing stop (alert-level, no broker order). stop = highest price since entry minus atrMult x that symbol's own 14-day ATR,
+// or just under its latest swing low if that is higher. It only ever ratchets up. Without ATR data it falls back to trailPct.
+// Scale-out ladder: R = atrMult x ATR at first sight (entry-based risk). Tier 1 at entry+1R and tier 2 at entry+2R: "I would sell a third";
+// from tier 1 the stop floor is entry + costPct (breakeven plus costs). The rest rides the trail. Informational only: nothing is ever sold here.
 // floor = an explicit stop (resting broker stop or one the Owner named); it can raise the stop, never lower it.
+const vol = new Map(); // symbol key -> { at, atr, swing, busy }
+function volFor(sym) {
+  const k = wlKey(sym), c = vol.get(k);
+  if (!c || (!c.busy && Date.now() - c.at > 6 * 3600e3)) {
+    vol.set(k, { ...(c || {}), at: Date.now(), busy: true });
+    chart.bars(chart.ySymbol(sym) || sym, '1dlong').then(b => { const a = chart.atr(b, 14), lows = b.slice(-10).map(x => x.l); vol.set(k, { at: Date.now(), atr: a || null, swing: lows.length ? Math.min(...lows) : null }); }).catch(() => vol.set(k, { ...(vol.get(k) || {}), at: Date.now(), busy: false }));
+  }
+  return vol.get(k) || {};
+}
 function trailUpdate(sym, price, entry, floor) {
   const k = wlKey(sym); if (!k) return null;
-  const pct = acfg().trailPct, t = state.trail[k] ||= { high: 0, stop: null };
-  const p = Number(price) || 0, e = Number(entry) || 0;
+  const C = acfg(), t = state.trail[k] ||= { high: 0, stop: null };
+  const p = Number(price) || 0, e = Number(entry) || 0, v = volFor(sym);
   let changed = false;
+  if (t.v !== 2) { t.v = 2; t.stop = null; t.since = t.since || Date.now(); changed = true; }   // one-time move from the fixed-% trail to the ATR trail
   const hi = Math.max(t.high || 0, p, e);
   if (hi > (t.high || 0)) { t.high = hi; changed = true; }
-  const cand = t.high * (1 - pct / 100), fl = Number(floor) || 0;
+  if (!t.entry && e) { t.entry = e; changed = true; }
+  if (!t.r && t.entry && v.atr) { t.r = Number((C.atrMult * v.atr).toPrecision(6)); changed = true; }
+  const ent = t.entry || e;
+  const tier = t.r && ent ? (t.high >= ent + 2 * t.r ? 2 : t.high >= ent + t.r ? 1 : 0) : 0;
+  if (tier > (t.tier || 0)) { t.tier = tier; changed = true; }
+  let cand = t.high * (1 - C.trailPct / 100);
+  if (v.atr) { cand = t.high - C.atrMult * v.atr; if (v.swing) cand = Math.max(cand, v.swing - 0.5 * v.atr); }
+  let fl = Number(floor) || 0;
+  if ((t.tier || 0) >= 1 && ent) fl = Math.max(fl, ent * (1 + C.costPct / 100));
   const next = Math.max(t.stop || 0, cand, fl);
   if (next > (t.stop || 0)) { t.stop = Number(next.toPrecision(6)); changed = true; }
   if (changed) saveState();
   return t.stop || null;
+}
+// Next scale-out level and plan text for a symbol (null r = ATR not known yet).
+function scaleInfo(sym) {
+  const t = state.trail[wlKey(sym)]; if (!t) return null;
+  const ent = t.entry, r = t.r, tier = t.tier || 0;
+  const next = ent && r && tier < 2 ? Number((ent + (tier + 1) * r).toPrecision(6)) : null;
+  return { tier, next, nextLabel: next ? `sell 1/3 at +${tier + 1}R` : (ent && r ? 'runner on trail' : null), r: r ?? null, be: tier >= 1 && ent ? Number((ent * (1 + acfg().costPct / 100)).toPrecision(6)) : null };
+}
+// Realised P&L per symbol from filled sell orders since the symbol was first tracked (read-only; refreshed every 5 min).
+watch.realised = new Map(); watch.realisedAt = 0;
+async function realisedRefresh(pos) {
+  if (Date.now() - watch.realisedAt < 300e3) return;
+  watch.realisedAt = Date.now();
+  try {
+    const fills = await trade.sellFills(), out = new Map();
+    for (const p of pos) {
+      const k = wlKey(p.symbol), t = state.trail[k], since = t?.since || 0;
+      const r = fills.filter(f => wlKey(f.symbol) === k && f.at >= since).reduce((a, f) => a + f.qty * (f.price - p.entry), 0);
+      if (r) out.set(k, Number(r.toFixed(2)));
+    }
+    watch.realised = out;
+  } catch (e) { console.warn('realised', e.message); }
 }
 const trailStopOf = sym => state.trail[wlKey(sym)]?.stop ?? null;
 // Auto rows: Alpaca positions worth at least $1 (dust stays off the list) that he has not removed.
@@ -1308,13 +1351,13 @@ function holdingsOut() {
   return { type: 'holdings', ...h, positions: h.positions.map(p => {
     const k = p.symbol.replace('/USD', '').replace('/', ''), e = evals.get(k) || wlEval.get(k) || {};
     if (!(p.value < 1) && !wlEval.has(k)) wlRefresh();
-    return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
+    const sc = scaleInfo(k); return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, scale: sc, realised: watch.realised.get(k) ?? 0, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
   }) };
 }
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');
@@ -1336,7 +1379,7 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
     const w = { symbol: sym, entry: entry ?? ev.price, trail: true, floor: stop ?? null, addedAt: Date.now() };
     w.stop = trailUpdate(sym, ev.price, w.entry, w.floor);
     state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState(); broadcast(watchlistMsg());
-    return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().trailPct}% under the highest price since entry; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
+    return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().atrMult}x this ticker's ATR under the highest price since entry, or its swing low; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) { return `Could not add ${sym}: ${e.message}`; }
 };
 // During US market hours, every 15 minutes: check watched tickers and Alpaca positions for a sell warning. One alert per ticker per 4 hours.
@@ -1387,15 +1430,16 @@ async function watchTick() {
     const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
     const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
     const items = new Map();   // key = Alpaca symbol form
-    for (const p of pos) items.set(p.symbol, { sym: p.symbol, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, stop: restStop.get(p.symbol) ?? null });
+    for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, stop: restStop.get(p.symbol) ?? null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it) { it.floor = Math.max(it.floor || 0, w.floor || 0) || null; if (it.entry == null) it.entry = w.entry; } }
     for (const it of items.values()) {   // trailing stop for every position and watch row: ratchets up with the highest price seen
       if (!(it.price > 0)) continue;
       it.stop = trailUpdate(it.sym, it.price, it.entry, Math.max(it.stop || 0, it.floor || 0)) ?? it.stop;
-      const e = wlEval.get(wlKey(it.sym))?.target; it.target = e ?? (it.entry ? it.entry * (1 + 2 * acfg().trailPct / 100) : null);
+      const e = wlEval.get(wlKey(it.sym))?.target; const sc = scaleInfo(it.sym); it.target = sc?.next ?? e ?? (it.entry ? it.entry * (1 + 2 * acfg().trailPct / 100) : null);
     }
+    realisedRefresh(pos);
     const now = Date.now(), seen = [];
     for (const it of items.values()) {
       if (it.held && wlHidden(it.sym)) continue;
@@ -1405,6 +1449,12 @@ async function watchTick() {
       const C = acfg(), h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
       const stopTxt = it.stop ? `Trailing stop ${fmtP(it.stop)}.` : 'No stop set.';
       const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = it.target ?? null;
+      const tr = state.trail[wlKey(it.sym)];
+      if (it.held && tr && (tr.tier || 0) > (tr.notified || 0) && (crypto || open)) {
+        const third = it.qty > 0 ? ` (about ${(it.qty / 3).toFixed(it.qty / 3 >= 10 ? 0 : 3)} of ${it.qty} held)` : '';
+        tr.notified = tr.tier; saveState();
+        await watchAlert(it.sym + ':scale' + tr.tier, `SCALE OUT ${tr.tier}: ${it.sym}`, `${it.sym} at ${fmtP(it.price)} reached +${tr.tier}R (entry ${fmtP(tr.entry)}, 1R is ${fmtP(tr.r)}). I would sell a third${third} to lock in profit.${tr.tier === 1 ? ` Stop moves up to at least breakeven plus costs, ${fmtP(it.stop)}, so this winner cannot turn into a loser.` : ' The last third rides the trailing stop.'} Trailing stop ${fmtP(it.stop)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
+      }
       if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your trailing stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or let the trailing stop ride (now ${fmtP(it.stop)}).`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
