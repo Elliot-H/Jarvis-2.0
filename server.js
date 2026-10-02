@@ -965,15 +965,22 @@ function guessNext(fromKey) {
       && state.workDay?.day !== c.day && state.shopAsk?.day !== c.day) { state.shopAsk = { day: c.day, at: Date.now(), pending: false }; return shop; }
   return null;
 }
+// Departure log (last 60): every vehicle-start and leave decision, fired or skipped, with the reason. GET /api/depart-log.
+function dlog(event, detail) {
+  const e = { t: new Date().toISOString(), event, ...detail };
+  (state.departLog ||= []).push(e); state.departLog = state.departLog.slice(-60); saveState();
+  console.log('depart:', JSON.stringify(e));
+}
 let pendingSay = null;
 // Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
-function deliver(text, title = 'Jarvis') {
+function deliver(text, title = 'Jarvis', alsoPush = false) {
   text = text.replace(/\s+/g, ' ').trim(); if (!text) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
   if (clients.size) {
     pendingSay = { text, at: Date.now() };
     setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, busy ? 6000 : 2500);
+    if (alsoPush) push(title, text).catch(e => console.warn('depart push', e.message)); // a connected but backgrounded app cannot speak: also notify the phone
   } else push(title, text).catch(() => {});
 }
 const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
@@ -998,7 +1005,8 @@ function onMove() {
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
-    const dep = state.departed && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : null; // vehicle start already handled this departure
+    const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : null; // only an ANSWERED vehicle-start question counts as handled
+    dlog('leave', { place: prev.name, vehicleHandled: !!dep, arrivedAt: pl ? pl.name : null, quiet: quietNow(), clients: clients.size });
     if (!dep) parts.push(...eventLines('leave', prev.name, Math.random, true));
     const dest = pl || dep ? null : guessNext(prevKey);
     if (!pl && !dep) parts.push(askChecklist(prev.name, dest)); // every departure from a saved place: ask what to bring, right now
@@ -1023,7 +1031,9 @@ function onMove() {
   }
   saveState();
   const text = parts.filter(Boolean).join(' ');
-  if (text && (!quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t)))) deliver(text, prev && !pl ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis');
+  const leaving = !!prev && !pl, speak = !!text && (leaving || !quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t))); // a departure is always announced, even in quiet hours
+  if (prev) dlog('leave-announce', { place: prev.name, spoken: speak, text: text.slice(0, 120) });
+  if (speak) deliver(text, leaving ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis', leaving);
 }
 // Departure checklist: asked aloud the moment he leaves a saved place; his answer becomes bring items for the destination.
 const CHECK_ITEMS = 'Tools, food, gas, anything for the dogs, anything for Princess?';
@@ -2075,6 +2085,7 @@ app.post('/api/followups', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.get('/api/depart-log', (_req, res) => res.json(state.departLog || []));
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 
 // Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to
@@ -2435,7 +2446,8 @@ async function obdScan(v, why = 'auto') {
   v.lastTry = Date.now(); saveState();
   const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
-  if (!d.ok) { if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
+  if (!d.ok) { if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
+    if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
   v.lastOk = Date.now();
   const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
   const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
@@ -2444,10 +2456,13 @@ async function obdScan(v, why = 'auto') {
   else if (d.mil && !prev.mil) lines.push(`The ${v.name}'s check engine light has come on, sir.`);
   const off = !d.rpm;
   // Battery trend: resting readings only (engine off and not run for 2 h, so no surface charge from driving)
-  if (!off && why === 'auto' && (!v.lastRun || now - v.lastRun > DEPART_GAP) && (!v.lastDepart || now - v.lastDepart > DEPART_GAP) && state.at !== undefined) { // vehicle came alive: first departure trigger, once per drive
-    v.lastDepart = now; lines.unshift(vehicleDeparture(v));
+  if (!off && why === 'auto') { // vehicle came alive: first departure trigger, once per drive
+    // A new start = never seen running, OR seen off/unreachable since it last ran (key off, then restart even a minute later), OR a long gap.
+    const newStart = !v.lastRun || v.sawOff || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < 3 * 60e3; // 3 min: no double ask from one start
+    dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
+    if (newStart && !recent) { v.lastDepart = now; lines.unshift(vehicleDeparture(v)); }
   }
-  if (!off) v.lastRun = now;
+  if (off) { if (v.lastRun) v.sawOff = true; } else { v.lastRun = now; v.sawOff = false; }
   if (off && d.volts && (!v.lastRun || now - v.lastRun > 2 * 3600e3)) {
     v.volts = [...(v.volts || []).filter(x => now - x.t < 14 * 86400e3), { t: now, v: d.volts }].slice(-200);
     const drop = voltDropPerDay(v.volts);
@@ -2459,7 +2474,7 @@ async function obdScan(v, why = 'auto') {
   if (off && d.volts && d.volts < Number(process.env.OBD_LOW_VOLTS || 12.2) && once('volts', 24)) lines.push(`The ${v.name}'s battery is resting at ${d.volts.toFixed(1)} volts, sir. Might be worth putting the tender on it.`);
   if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
   saveState();
-  if (lines.length && why === 'auto') deliver(lines.join(' '), v.name);
+  if (lines.length && why === 'auto') deliver(lines.join(' '), v.name, lines.some(l => /headed somewhere|Where are you headed/.test(l)));
   return { ok: true, data: d, news: lines };
 }
 // The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the Owner's.

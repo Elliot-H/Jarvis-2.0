@@ -327,3 +327,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Watch list written verdicts (2026-10-02, maintenance)
 - server.js `wlCall(ev, entry)` builds a written call per watch row: action (BUY/HOLD/SELL/WATCH/AVOID; HOLD/SELL when the row has an entry price, SELL/AVOID on an exit warning), trend, confidence, plain-English reasons, stop/target, back-test line. Stored in `wlEval[sym].call`, sent as `call` in `watchlistMsg` rows; app.js `renderWatchlist` prints it as a second line under every row. Crypto watchlist coins (NIGHT) are now evaluated too (`wlSymbols`) so they get a call; if Yahoo has no candles for a coin, that row shows price only. Spoken replies unchanged. Untested live; syntax-checked and wlCall unit-run. No APK reinstall.
+
+## Departure trigger fix (2026-10-02)
+- Bug: key off then restart within `DEPART_GAP_MIN` (30) never re-fired the vehicle-start ask (gate was time since last seen running). Now a start counts if never seen running, OR seen off/unreachable since (`v.sawOff`, set when a scan shows rpm 0 or the dongle drops), OR gap > 30 min. 3-min guard stops a double ask.
+- `state.departed` now suppresses the normal leave announcement only once the vehicle-start question was ANSWERED; unanswered = the leave announcement still fires. Leave announcements ignore quiet hours and always `push()` too (`deliver(..., alsoPush)`), since a connected-but-backgrounded app can't speak.
+- Debug: `dlog()` keeps the last 60 departure decisions (vehicle-start with rpm/volts/newStart/fired, vehicle-unreachable, leave, leave-announce with spoken/text) in `state.departLog`; open `/api/depart-log`. Also in server logs as `depart: {...}`.
