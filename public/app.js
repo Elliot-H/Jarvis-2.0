@@ -392,15 +392,18 @@
     const chunks = [];
     for (const piece of clean.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [clean]) {
       const last = chunks.length - 1;
-      if (last >= 0 && chunks[last].length + piece.length <= 350) chunks[last] += piece; else chunks.push(piece);
+      if (last >= 0 && chunks[last].length + piece.length <= (last === 0 ? 170 : 350)) chunks[last] += piece; else chunks.push(piece);   // short first chunk: voice starts sooner
     }
     if (cfg.elevenlabs) {
       ensureAudio();
+      const ahead = new Set();
       const playChunk = i => {
         if (!speaking) return;
         if (i >= chunks.length) return done();
         const a = newClip(); a.crossOrigin = 'anonymous';
         a.src = '/api/tts?text=' + encodeURIComponent(chunks[i].trim());
+        // Make the next chunk's voice now (server keeps it), so it is ready the moment this one ends: no gap in long replies.
+        for (const j of [i + 1, i + 2]) if (j < chunks.length && !ahead.has(j)) { ahead.add(j); fetch('/api/tts?prefetch=1&text=' + encodeURIComponent(chunks[j].trim())).catch(() => {}); }
         currentAudio = a;
         if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
         a.onended = () => playChunk(i + 1);

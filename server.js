@@ -1977,7 +1977,23 @@ async function fishFetch(text) {
   }
   return last;
 }
-async function fishTts(text, res) {
+// Voice clips for the next sentence chunks are made ahead while the current one plays, so long replies have no gap between chunks.
+const ttsCache = new Map();
+function ttsAhead(text) {
+  let e = ttsCache.get(text);
+  if (!e) {
+    e = { at: Date.now(), p: (async () => { const o = await fishFetch(text); if (!o.r) return { fail: o }; return { buf: Buffer.from(await o.r.arrayBuffer()), model: o.model }; })().catch(err => ({ fail: { body: String(err.message || err) } })) };
+    ttsCache.set(text, e);
+    for (const [k, v] of ttsCache) if (Date.now() - v.at > 300e3 || ttsCache.size > 40) ttsCache.delete(k);
+  }
+  return e.p.then(r => { if (r.fail) ttsCache.delete(text); return r; });
+}
+async function fishTts(text, res, prefetch) {
+  if (prefetch) { await ttsAhead(text); return res.status(204).end(); }
+  if (ttsCache.has(text)) {
+    const r = await ttsAhead(text);
+    if (r.buf) { voiceStatus = { ok: true, reason: '', model: r.model, at: new Date().toISOString() }; res.setHeader('Content-Type', 'audio/mpeg'); return res.end(r.buf); }
+  }
   const out = await fishFetch(text);
   if (!out.r) {
     voiceStatus = { ok: false, reason: out.status ? explainFishError(out.status, out.body) : out.body, at: new Date().toISOString() };
@@ -2113,7 +2129,7 @@ app.get('/api/ack-clip/:id.mp3', (req, res) => { const b = ackClips.get(req.para
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
   const text = state.silent ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
-  if (process.env.FISH_API_KEY && text) return fishTts(text, res);
+  if (process.env.FISH_API_KEY && text) return fishTts(text, res, req.query?.prefetch === '1');
   if (!key || !text) return res.status(204).end();
   const voice = process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'; // "Daniel" – calm, polished British male
   try {
