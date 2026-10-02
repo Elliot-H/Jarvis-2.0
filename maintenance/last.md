@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T18:26:24Z
-REQUEST: Switch investment-watch stops to a trailing stop for every open position
+TIME: 2026-10-02T18:26:56Z
+REQUEST: 10% trailing stop on every watch-list row incl. manual ones, shown on HUD, ratchet up only, fixed stop fallback
 RESULT:
-Owner, every open position and watch entry now has a trailing stop, set 10 percent under the highest price seen since entry, and it only ever moves up. The percentage is a setting you can change by voice, trail percent, with no redeploy. The Holdings box and watch list show the current trailing level, and it updates as the price climbs. Alerts keep the same format with verdict, stop, target, chart link and the watch-only button, and new watch entries default to trailing. It goes live when Railway redeploys, no APK reinstall. It is still alert-level only, with no real stop orders at the broker, and I could not test it against live data.
+Owner, this was already covered by the trailing stop change that landed a moment earlier, so I changed nothing more. Every position and every watch row, including QTEX, SCKT and future ones, gets a 10 percent trailing stop that only moves up. The Holdings and watch boxes show it as the trail level. If there is no price data it keeps the old fixed stop. It goes live when Railway redeploys, no APK reinstall, and it is alert-level only with no broker stop orders.
