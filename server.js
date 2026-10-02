@@ -78,7 +78,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -538,9 +538,20 @@ Object.assign(handlers, {
   }
 });
 // Free market-data feeds (Finnhub, Twelve Data, Financial Modeling Prep). Analysis only.
+state.coinIds ||= {}; for (const [k, v] of Object.entries(state.coinIds)) crypto_.learnCoin(k, v);
+// A ticker the stock feeds do not know: look it up as a coin on CoinGecko (exact symbol match), remember it, and return its quote.
+async function coinFallback(symbol) {
+  try {
+    const q = String(symbol || '').replace(/[^A-Za-z0-9]/g, ''); if (!q) return null;
+    const r = await crypto_.resolveId(q); if (!r || String(r.symbol || '').toUpperCase() !== q.toUpperCase()) return null;
+    crypto_.learnCoin(q, r.id); state.coinIds[q.toUpperCase()] = r.id; saveState();
+    const c = (await crypto_.byIds([r.id]))[0];
+    return c ? { ...c, id: r.id, kind: 'crypto', source: 'CoinGecko' } : null;
+  } catch { return null; }
+}
 const mdFail = e => `Market data problem: ${e.message}. Tell the Owner plainly; if a key is missing say which one.`;
 Object.assign(handlers, {
-  stock_quote: async ({ symbol }) => { const cid = crypto_.coinIdFor(symbol); if (cid) { try { const c = (await crypto_.byIds([cid]))[0]; return c ? JSON.stringify({ ...c, kind: 'crypto', source: 'CoinGecko' }) : 'CoinGecko has no quote for ' + symbol + ' right now.'; } catch (e) { return `Could not get ${symbol} from CoinGecko: ${e.message}`; } } try { return JSON.stringify(await md.quote(symbol)); } catch (e) { return mdFail(e); } },
+  stock_quote: async ({ symbol }) => { const cid = crypto_.coinIdFor(symbol); if (cid) { try { const c = (await crypto_.byIds([cid]))[0]; return c ? JSON.stringify({ ...c, kind: 'crypto', source: 'CoinGecko' }) : 'CoinGecko has no quote for ' + symbol + ' right now.'; } catch (e) { return `Could not get ${symbol} from CoinGecko: ${e.message}`; } } try { return JSON.stringify(await md.quote(symbol)); } catch (e) { const c = await coinFallback(symbol); return c ? JSON.stringify(c) : mdFail(e); } },
   stock_fundamentals: async ({ symbol }) => { try { return JSON.stringify(await md.fundamentals(symbol)); } catch (e) { return mdFail(e); } },
   stock_news: async ({ symbol }) => { try { return JSON.stringify(await md.news(symbol)); } catch (e) { return mdFail(e); } },
   stock_earnings: async ({ symbol }) => { try { return JSON.stringify(await md.earnings(symbol)); } catch (e) { return mdFail(e); } },
@@ -1503,7 +1514,11 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
     w.stop = trailUpdate(sym, ev.price, w.entry, w.floor);
     state.sigWatch = [...state.sigWatch.filter(x => x.symbol !== sym), w].slice(-20); saveState(); broadcast(watchlistMsg());
     return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().atrMult}x this ticker's ATR under the highest price since entry, or its swing low; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
-  } catch (e) { return `Could not add ${sym}: ${e.message}`; }
+  } catch (e) {
+    const c = await coinFallback(sym);   // not a stock: it may be a coin; any coin works, no per-ticker setup
+    if (c) { state.watchlist = [...new Set([...state.watchlist, c.id])].slice(0, 25); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `${sym} is a crypto coin (${c.name}). Added to the HUD watch list; price and 24h move come from CoinGecko.`; }
+    return `Could not add ${sym}: ${e.message}`;
+  }
 };
 // During US market hours, every 15 minutes: check watched tickers and Alpaca positions for a sell warning. One alert per ticker per 4 hours.
 async function sigTick() {
