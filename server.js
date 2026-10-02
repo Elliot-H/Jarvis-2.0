@@ -1247,9 +1247,20 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
 };
-function watchlistMsg() {
+const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
+function wlVerdict(ev) { return ev.exitWarning ? 'AVOID' : ev.score >= 75 ? 'BUY' : ev.score >= 55 ? 'WATCH' : 'AVOID'; }
+function wlRefresh() {
+  for (const w of state.sigWatch) {
+    const c = wlEval.get(w.symbol);
+    if (c && (c.busy || Date.now() - c.at < 15 * 60e3)) continue;
+    wlEval.set(w.symbol, { ...(c || {}), at: Date.now(), busy: true });
+    sig.evaluate(w.symbol).then(ev => { wlEval.set(w.symbol, { at: Date.now(), verdict: wlVerdict(ev), target: ev.target, stop: ev.stop }); broadcast(watchlistMsg(true)); }).catch(() => { wlEval.set(w.symbol, { ...(wlEval.get(w.symbol) || {}), at: Date.now(), busy: false }); });
+  }
+}
+function watchlistMsg(noRefresh) {
+  if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: state.sigWatch.map(w => ({ symbol: w.symbol, price: px.get(w.symbol) ?? null, stop: w.stop ?? null })) };
+  return { type: 'watchlist', at: Date.now(), list: state.sigWatch.map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, price: px.get(w.symbol) ?? null, stop: w.stop ?? e.stop ?? null, target: e.target ?? null, verdict: e.verdict ?? null }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');

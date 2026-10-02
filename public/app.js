@@ -248,7 +248,8 @@
     const list = m.list || [];
     if (!list.length) { fr.style.display = 'none'; return; }
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
-    box.innerHTML = `<table>${list.map(w => `<tr><td>${chartA(w.symbol)}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.stop ? '<small>stop ' + px(w.stop) + '</small>' : ''}</td></tr>`).join('')}</table>`;
+    const vc = { BUY: 'up', WATCH: '', AVOID: 'dn' };
+    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.stop ? 'stop ' + px(w.stop) : ''}${w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
     fr.style.display = '';
   }
   function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }
