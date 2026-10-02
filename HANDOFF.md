@@ -317,3 +317,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## NIGHT routed to crypto (2026-10-02)
 - NIGHT (CoinGecko id `night`) is a coin, not a stock. `crypto.js` `COIN_IDS`/`coinIdFor` map such tickers to CoinGecko; `stock_quote` for NIGHT / "NIGHT USD" now returns the CoinGecko quote (price, 24h, 7d, volume) instead of the equity feeds. `resolveId` short-circuits to the id; `night` is seeded once into the watchlist (`state.nightSeeded`) so the tile, crypto_scan and crypto_trending data include it. NIGHT added to the crypto ticker sets in chart.js, news.js and public/app.js. Add other stock-looking coins to `COIN_IDS`. Untested live (network blocked).
+
+## Vehicle start = departure trigger (2026-10-02)
+- `obdScan` (server.js): engine seen running (rpm>0) after >`DEPART_GAP_MIN` (30) of not running -> `vehicleDeparture()` asks once per drive "Are you leaving X, or headed somewhere? <up to 3 places>?" (pendingQ type `depart`). While parked and in range the dongle is polled every `OBD_WATCH_MIN` (2) so a start is caught fast.
+- `departAnswer`: a named place -> leave reminders for the current place + `bringLine(dest)` + `heading` reminders (same lines as `heading_to`); "leaving" with no place -> guessNext or leave reminders only; "no/staying" -> "Very good, sir." `state.departed` stops the normal leave-the-perimeter checklist from asking again for 45 min. Tested: syntax and boot only, not with a real dongle.

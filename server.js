@@ -719,6 +719,7 @@ async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
+  if (q.type === 'depart') return departAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
@@ -984,17 +985,18 @@ function onMove() {
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
-    parts.push(...eventLines('leave', prev.name, Math.random, true));
-    const dest = pl ? null : guessNext(prevKey);
-    if (!pl) parts.push(askChecklist(prev.name, dest)); // every departure from a saved place: ask what to bring, right now
+    const dep = state.departed && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : null; // vehicle start already handled this departure
+    if (!dep) parts.push(...eventLines('leave', prev.name, Math.random, true));
+    const dest = pl || dep ? null : guessNext(prevKey);
+    if (!pl && !dep) parts.push(askChecklist(prev.name, dest)); // every departure from a saved place: ask what to bring, right now
     if (dest) {
       if (placeKey(dest.name) === 'shop') state.workDay = { day: c.day, on: true }; // checklist replaces the "Headed to the shop?" question
-    } else if (!pl) { // not a guessable trip: mention anything waiting to be brought somewhere
+    } else if (!pl && !dep) { // not a guessable trip: mention anything waiting to be brought somewhere
       const other = state.places.find(p => p.name !== prev.name && bringFor(p.name).length);
       if (other) parts.push(bringLine(other.name));
     }
     if (!pl && dest) { const b = bringLine(dest.name); if (b) parts.push(b); }
-    if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
+    if (!pl && !dep && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
   }
   if (pl && rearmed) { // arrived somewhere
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
@@ -1064,6 +1066,38 @@ async function destAnswer(q, text) {
   else reply = ['Very good, sir.', bringLine(q.place), ...eventLines('heading', q.place)].filter(Boolean).join(' ');
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
   return true;
+}
+// Vehicle start = he is about to leave (first departure trigger). Asked once per drive, answered here with no AI call.
+const DEPART_YES = /^(yes|yeah|yep|yup|leaving|i'?m leaving|heading out|headed out|taking off|on my way|going)\b/, DEPART_NO = /^(no|nope|nah|not yet|staying|just (?:warming|starting|checking)|not leaving)\b/;
+function vehicleDeparture(v) {
+  const here = currentPlace(), opts = [];
+  const nextGuess = here ? guessNext(placeKey(here.name)) : null;
+  for (const p of [nextGuess, ...state.places.filter(x => !here || x.name !== here.name).sort((a, b) => bringFor(b.name).length - bringFor(a.name).length)])
+    if (p && !opts.includes(p.name) && opts.length < 3) opts.push(p.name);
+  state.pendingQ = { type: 'depart', from: here ? here.name : '', vehicle: v.name, at: Date.now() };
+  state.departed = { place: here ? here.name : '', at: Date.now(), answered: false };
+  saveState();
+  const lead = here ? `Are you leaving ${placeKey(here.name) === 'shop' ? 'the shop' : here.kind === 'home' ? 'home' : here.name}, or headed somewhere?` : 'Where are you headed, sir?';
+  return opts.length ? `${lead} ${listJoin(opts)}?` : lead;
+}
+async function departAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  const finish = () => { state.pendingQ = null; if (state.departed) state.departed.answered = true; if (q.from) state.lastCheck = { from: q.from, at: Date.now(), answered: true }; saveState(); };
+  if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 10) { state.pendingQ = null; saveState(); return false; }
+  if (DEPART_NO.test(t)) { state.pendingQ = null; state.departed = null; saveState(); return say('Very good, sir.'); }
+  let dest = state.places.find(p => p.name !== q.from && new RegExp(`\\b${placeKey(p.name).replace(/[^a-z0-9 ]/g, '')}\\b`).test(t)) || findPlace(t.replace(/^(?:i'?m )?(?:going |headed |heading |leaving )?(?:to |for )?(?:the )?/, ''));
+  if (dest && q.from && dest.name === q.from) dest = null;
+  if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
+  if (!dest) { // leaving, destination unknown: still give the leave reminders for here
+    if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
+    finish();
+    const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
+    return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' '));
+  }
+  finish();
+  const parts = [...(q.from ? eventLines('leave', q.from, Math.random, true) : []), bringLine(dest.name), ...eventLines('heading', dest.name, Math.random, true)].filter(Boolean);
+  return say((parts.length ? parts.slice(0, 3) : ['Very good, sir.']).join(' '));
 }
 handlers.heading_to = async ({ place }) => {
   const p = findPlace(place);
@@ -2351,6 +2385,7 @@ function deviceAction(action, args = {}, timeout = 20000) {
 // After each good scan: new trouble codes, a low resting battery (R8 sitting) and low fuel become one short remark.
 state.vehicles ||= [];
 const OBD_EVERY = Number(process.env.OBD_EVERY_MIN || 20) * 60e3;
+const OBD_WATCH = Number(process.env.OBD_WATCH_MIN || 2) * 60e3, DEPART_GAP = Number(process.env.DEPART_GAP_MIN || 30) * 60e3; // parked + in range: look every 2 min so engine start is caught fast
 const vFind = name => state.vehicles.find(v => norm(v.name) === norm(name)) || (state.vehicles.length === 1 && !name ? state.vehicles[0] : null)
   || state.vehicles.find(v => norm(v.name).includes(norm(name || '#')) || norm(name || '#').includes(norm(v.name)));
 async function obdScan(v, why = 'auto') {
@@ -2366,6 +2401,9 @@ async function obdScan(v, why = 'auto') {
   else if (d.mil && !prev.mil) lines.push(`The ${v.name}'s check engine light has come on, sir.`);
   const off = !d.rpm;
   // Battery trend: resting readings only (engine off and not run for 2 h, so no surface charge from driving)
+  if (!off && why === 'auto' && (!v.lastRun || now - v.lastRun > DEPART_GAP) && (!v.lastDepart || now - v.lastDepart > DEPART_GAP) && state.at !== undefined) { // vehicle came alive: first departure trigger, once per drive
+    v.lastDepart = now; lines.unshift(vehicleDeparture(v));
+  }
   if (!off) v.lastRun = now;
   if (off && d.volts && (!v.lastRun || now - v.lastRun > 2 * 3600e3)) {
     v.volts = [...(v.volts || []).filter(x => now - x.t < 14 * 86400e3), { t: now, v: d.volts }].slice(-200);
@@ -2389,7 +2427,7 @@ if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) 
 async function obdTick() {
   if (!deviceClients.size || busy) return;
   for (const v of state.vehicles) {
-    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_EVERY : OBD_RETRY;
+    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? (v.last && !v.last.rpm ? OBD_WATCH : OBD_EVERY) : OBD_RETRY;
     if (!v.lastTry || Date.now() - v.lastTry > gap) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
   }
 }

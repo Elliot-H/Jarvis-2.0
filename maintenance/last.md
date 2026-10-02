@@ -1,7 +1,8 @@
 STATUS: done
-TIME: 2026-10-02T22:37:30Z
-REQUEST: Make NIGHT crypto token resolve via CoinGecko instead of the stock feeds
+TIME: 2026-10-02T22:54:39Z
+REQUEST: Use vehicle OBD engine start as the first departure trigger (ask where he is going, then bring list and leave reminders)
 RESULT:
-NIGHT now routes to CoinGecko with id night, so a NIGHT or NIGHT USD quote returns price, 24h and 7d change and volume instead of no data.
-It is added once to the watchlist, so the tile, crypto scan and the alert data pick it up, and it is treated as crypto in charts, news and the HUD.
-Not tested against live CoinGecko from here. It goes live when Railway finishes the deploy; no APK reinstall is needed.
+When Jarvis sees the truck's engine running, he asks once per drive whether you are leaving where you are or headed somewhere, and offers your saved places.
+Your answer gets the leave reminders for your current place plus the bring list and heading reminders for the destination, in one or two sentences.
+It will not repeat while the truck keeps running, and the normal leaving-the-area checklist skips so you are not asked twice.
+It goes live when Railway deploys this push, no APK reinstall needed because the OBD reading already exists in the app. I only checked that it boots, not with a real dongle.
