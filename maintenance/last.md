@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-02T18:29:25Z
-REQUEST: ATR-aware trailing stop, scale-out tranches with breakeven ratchet, per-position stop/next level/realised vs open P&L, real broker stop orders
+STATUS: done
+TIME: 2026-10-02T19:05:00Z
+REQUEST: Never alert on dust positions (under a small dollar threshold), independent of the watch list
 RESULT:
-Owner, parts one to three are built. The trailing stop now follows two times that ticker's own ATR or its swing low and only moves up, and it resets once so old ten percent stops do not shake you out. Alerts tell you to sell a third at plus one R and plus two R, and after the first one the stop moves to breakeven plus costs. Holdings shows the trail stop, next scale-out level, open and realised profit. It goes live when Railway redeploys, no APK reinstall. I did not build real stop and limit orders at Alpaca, because that is order-placing code and needs your yes in an interactive session, so say so and I will add it with your confirm step.
+Owner, done. Any open position worth under one dollar is now ignored by every alert: stop hit, sudden drop, target, scale-out, sell warning, spike and news. That covers stocks and crypto, with or without a watch-list row. Dust also no longer appears as an automatic watch-list row. The one dollar line is adjustable by voice through alert settings or the DUST_USD variable. It goes live when Railway redeploys, no APK reinstall. I checked syntax only; the server could not boot here because packages are not installed.

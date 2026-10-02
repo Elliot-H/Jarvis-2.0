@@ -295,3 +295,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - HUD: Holdings rows show trail stop, next scale-out level, breakeven+costs level, open P&L and realised P&L (`trade.sellFills` read-only, filled sells since the symbol was first tracked; refreshed 5 min). Watch list rows show the next level.
 - NOT DONE: real resting stop / scale-out limit orders at Alpaca. Needs the Owner's explicit OK in an interactive session (order-placing code; see Investment Watch note). Plan unchanged: `trade.placeStop` + `stop_propose` via the pendingTrade/trade_confirm flow; whole shares only for stops; crypto stop_limit.
 - Untested live (Alpaca/Yahoo blocked); syntax-checked, ratchet/tier logic unit-tested with stub ATR.
+
+## Dust filter (2026-10-02)
+- `dustUsd` in alerts.js DEFAULTS (default $1, `DUST_USD` env, tunable by voice via alert_config). server.js `isDustVal`/`dustKeys` skip held positions under it in watchTick (stop/target/scale/drop), sigTick (sell warning), prioritySyms (live alerts, news), new-signal alerts and the auto watch-list rows. Independent of the watch list and of wlHide. Holdings box still shows a one-line dust summary (info only).

@@ -1250,6 +1250,9 @@ state.trail ||= {};
 if (!state.wlHideSeeded) { state.wlHide = [...new Set([...state.wlHide, 'NEAR', 'TXT', 'XRP'])]; state.wlHideSeeded = true; }
 const wlKey = s => String(s || '').toUpperCase().replace('/USD', '').replace('/', '').replace(/USD$/, '');
 const wlHidden = s => state.wlHide.includes(wlKey(s));
+// Dust: an open position worth less than dustUsd (default $1, alert_config / DUST_USD). Independent of the watch list; no alerts, no watch-list row.
+const isDustVal = v => v < alerts.cfgOf(state.alertCfg).dustUsd;
+const dustKeys = () => new Set((watch.holdings?.positions || []).filter(p => isDustVal(p.value)).map(p => wlKey(p.symbol)));
 // Volatility-aware trailing stop (alert-level, no broker order). stop = highest price since entry minus atrMult x that symbol's own 14-day ATR,
 // or just under its latest swing low if that is higher. It only ever ratchets up. Without ATR data it falls back to trailPct.
 // Scale-out ladder: R = atrMult x ATR at first sight (entry-based risk). Tier 1 at entry+1R and tier 2 at entry+2R: "I would sell a third";
@@ -1309,8 +1312,8 @@ async function realisedRefresh(pos) {
   } catch (e) { console.warn('realised', e.message); }
 }
 const trailStopOf = sym => state.trail[wlKey(sym)]?.stop ?? null;
-// Auto rows: Alpaca positions worth at least $1 (dust stays off the list) that he has not removed.
-const wlAuto = () => (watch.holdings?.positions || []).filter(p => !(p.value < 1) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', ''), entry: p.entry }));
+// Auto rows: Alpaca positions worth at least the dust threshold (dust stays off the list) that he has not removed.
+const wlAuto = () => (watch.holdings?.positions || []).filter(p => !isDustVal(p.value) && !wlHidden(p.symbol)).map(p => ({ symbol: p.symbol.replace('/USD', '').replace('/', ''), entry: p.entry }));
 const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
 handlers.signal_scan = async ({ symbols, top } = {}) => {
   try {
@@ -1350,8 +1353,8 @@ function holdingsOut() {
   const evals = new Map(wlSymbols().map(w => [w.symbol, wlEval.get(w.symbol) || {}]));
   return { type: 'holdings', ...h, positions: h.positions.map(p => {
     const k = p.symbol.replace('/USD', '').replace('/', ''), e = evals.get(k) || wlEval.get(k) || {};
-    if (!(p.value < 1) && !wlEval.has(k)) wlRefresh();
-    const sc = scaleInfo(k); return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, scale: sc, realised: watch.realised.get(k) ?? 0, target: e.target ?? null, spark: p.value < 1 ? null : sparkFor(k), wk: watchSig(k) };
+    if (!isDustVal(p.value) && !wlEval.has(k)) wlRefresh();
+    const sc = scaleInfo(k); return { ...p, verdict: e.verdict ?? null, stop: trailStopOf(k) ?? null, trail: true, scale: sc, realised: watch.realised.get(k) ?? 0, target: e.target ?? null, spark: isDustVal(p.value) ? null : sparkFor(k), wk: watchSig(k) };
   }) };
 }
 function watchlistMsg(noRefresh) {
@@ -1388,7 +1391,7 @@ async function sigTick() {
   const mins = ny.getHours() * 60 + ny.getMinutes();
   if (ny.getDay() === 0 || ny.getDay() === 6 || mins < 9 * 60 + 30 || mins > 16 * 60) return;
   const list = new Map(state.sigWatch.map(w => [w.symbol, w]));
-  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s) && !wlHidden(s)) list.set(s, { symbol: s, stop: trailStopOf(s) }); } } catch {}
+  try { if (trade.configured()) for (const p of await trade.positions()) { const s = String(p.symbol || '').replace('/USD', ''); if (/^[A-Z]{1,5}$/.test(s) && !list.has(s) && !wlHidden(s) && !isDustVal(p.value)) list.set(s, { symbol: s, stop: trailStopOf(s) }); } } catch {}
   state.sigAlerted ||= {};
   for (const w of list.values()) {
     try {
@@ -1430,7 +1433,7 @@ async function watchTick() {
     const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
     const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
     const items = new Map();   // key = Alpaca symbol form
-    for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, stop: restStop.get(p.symbol) ?? null });
+    for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, value: p.value, stop: restStop.get(p.symbol) ?? null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it) { it.floor = Math.max(it.floor || 0, w.floor || 0) || null; if (it.entry == null) it.entry = w.entry; } }
@@ -1443,6 +1446,7 @@ async function watchTick() {
     const now = Date.now(), seen = [];
     for (const it of items.values()) {
       if (it.held && wlHidden(it.sym)) continue;
+      if (it.held && isDustVal(it.value)) continue;   // dust position: never alert
       const crypto = isCryptoSym(it.sym) || /USD$/.test(it.sym) && it.sym.length > 5;
       if (!crypto && !open) continue;
       seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
@@ -1482,8 +1486,8 @@ if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTi
 // Priority symbols = open Alpaca positions + signal_watch list. Quotes come from Finnhub (live pulse) with Twelve Data as backup/cross-check.
 // The alert loop re-reads the config each round, so thresholds and the interval change by voice (alert_config) with no redeploy.
 const prioritySyms = () => {
-  const m = new Map((watch.items || []).map(i => [i.sym, i]));
-  for (const w of state.sigWatch) if (![...m.keys()].some(k => k.replace('/', '') === w.symbol || k === w.symbol)) m.set(w.symbol, { sym: w.symbol, held: false, stop: trailStopOf(w.symbol) ?? w.stop, entry: w.entry });
+  const dust = dustKeys(), m = new Map((watch.items || []).filter(i => !(i.held && isDustVal(i.value))).map(i => [i.sym, i]));
+  for (const w of state.sigWatch) if (!dust.has(wlKey(w.symbol)) && (![...m.keys()].some(k => k.replace('/', '') === w.symbol || k === w.symbol))) m.set(w.symbol, { sym: w.symbol, held: false, stop: trailStopOf(w.symbol) ?? w.stop, entry: w.entry });
   return [...m.values()].slice(0, 25);
 };
 const alertHist = new Map(), newsSeen = new Set();
@@ -1518,7 +1522,8 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
       const list = new Set(state.sigWatch.map(w => w.symbol));
       if (trade.configured()) for (const s of (await trade.trending(10)).all || []) list.add(s);
       const r = await sig.scan([...list].slice(0, 20), 8);
-      for (const x of r.top) if (x.score >= C.newSignalScore && x.stop) {
+      const dustK = dustKeys();
+      for (const x of r.top) if (x.score >= C.newSignalScore && x.stop && !dustK.has(wlKey(x.symbol))) {
         const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;
         await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60, chartLink(x.symbol, { stop: x.stop, target: x.target, entry: x.price }));
       }
@@ -1539,7 +1544,7 @@ handlers.live_status = async () => JSON.stringify({ ...lf.status(), alertRules: 
 handlers.alert_config = async ({ action, key, value }) => {
   if (action === 'set') { const r = alerts.setCfg(state.alertCfg, key, value); if (r.error) return r.error; saveState(); return `Set ${key} to ${value}. Takes effect on the next check, no redeploy. Now: ${JSON.stringify(acfg())}`; }
   if (action === 'reset') { state.alertCfg = {}; saveState(); return 'Alert settings back to defaults.'; }
-  return JSON.stringify({ settings: acfg(), meaning: { intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
+  return JSON.stringify({ settings: acfg(), meaning: { dustUsd: 'open positions worth less than this many dollars are dust: no alerts and no watch-list row (default 1)', intervalSec: 'seconds between alert checks', dropPct: 'sudden drop % within dropWindowMin minutes', dropDayPct: 'drop % under yesterday close', spikePct: 'spike up %, with volume at least spikeVolRatio x average', newSignalScore: 'min signal_scan score for a buy-watch', targetNearPct: 'how close to target/resistance counts as reached', unusualVolRatio: 'volume x the 20-day average', trailPct: 'trailing stop: % below the highest price since entry (default 10); the stop only ever moves up',cooldownMin: 'repeat spacing for stop/drop', infoCooldownHours: 'repeat spacing for other alerts', staleSec: 'quotes older than this never trigger price alerts' } });
 };
 if (!process.env.JARVIS_SMOKE) {
   lf.start({ priority: prioritySyms, open: marketOpenNow });
