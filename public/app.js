@@ -47,6 +47,7 @@
   let ws, state = 'idle', level = 0, targetLevel = 0;
   let audioCtx, ttsAnalyser, micAnalyser, freq = new Uint8Array(128);
   let speaking = false, currentAudio = null;
+  let muted = false; try { muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}
 
   // ======================= state =======================
   const LABEL = { idle: 'STANDBY', listening: 'LISTENING', thinking: 'PROCESSING', speaking: 'SPEAKING', offline: 'OFFLINE' };
@@ -65,6 +66,7 @@
       `Say "${window.AndroidWake ? 'Hey ' + cap(cfg.wakeWord) : cap(cfg.wakeWord)}" or press SPACE`;
     if (echo && !DISPLAY_ONLY && ws?.readyState === 1 && (s === 'listening' || s === 'speaking' || s === 'idle'))
       ws.send(JSON.stringify({ type: 'state', state: s }));
+    if (muted) paintMute();
   }
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -246,15 +248,19 @@
     o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t + .25);
   }
   const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  let micStream = null;
+  function stopMicMeter() { try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {} micStream = null; micAnalyser = null; }
   async function startMicMeter() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      if (muted) { stream.getTracks().forEach(t => t.stop()); return false; }
       if (MOBILE) {
         // Phones only let ONE thing use the mic. Keep it free for speech recognition.
         stream.getTracks().forEach(t => t.stop());
         chip('#chipMic', 'ok', 'MIC');
         return true;
       }
+      micStream = stream;
       const src = audioCtx.createMediaStreamSource(stream);
       micAnalyser = audioCtx.createAnalyser(); micAnalyser.fftSize = 256; micAnalyser.smoothingTimeConstant = .8;
       src.connect(micAnalyser);
@@ -499,6 +505,27 @@
 
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Hard mute: "stop listening" shuts the recognizer, the wake engine and the mic meter. Only a manual tap (mic button, core, SPACE) lifts it; kept across reloads.
+  const MUTE_RE = /\b(stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|shut (off|down) (the )?mic(rophone)?)\b/i;
+  function paintMute() {
+    document.body.dataset.muted = muted ? '1' : '';
+    if (muted) { chip('#chipMic', 'bad', 'MIC MUTED'); $('#coreState').textContent = 'MUTED'; $('#coreHint').textContent = 'Mic is off. Tap the mic button to wake ' + cfg.userTitle; }
+    $('#micBtn').classList.toggle('muted', muted);
+  }
+  function muteMic(speak = true) {
+    muted = true; try { localStorage.setItem('jarvis.muted', '1'); } catch {}
+    recWanted = false; mode = 'passive'; manualMicUntil = 0; pending = null; carry = ''; lastHeard = '';
+    clearTimeout(activeTimer); clearTimeout(uttTimer); stopMicMeter();
+    try { rec && rec.abort(); } catch {}
+    try { window.AndroidWake && window.AndroidWake.stop(); } catch {} wakeOn = false;
+    setState('idle'); paintMute(); addActivity('Microphone muted by voice. Tap the mic button to wake it.');
+    if (speak) send({ type: 'mic_muted' });
+  }
+  function unmuteMic() {
+    muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {}
+    paintMute(); chip('#chipMic', 'ok', 'MIC'); setState('idle'); addActivity('Microphone on.');
+    micNotBefore = 0; recBackoff = 0; startMicMeter(); if (rec) { recWanted = true; manualMicUntil = Date.now() + 15000; goActive(); }
+  }
   let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
   // Every mic start goes through here so a cooldown is honoured no matter who asks (the phone's recognizer refuses
   // requests that come too fast, and hammering it makes it refuse for longer).
@@ -511,7 +538,7 @@
   const WAKE_FIRST = !!window.AndroidWake && params.get('wake') !== 'speech';
   function startMic() {
     const now = Date.now();
-    if (!rec || now < micNotBefore || now - lastMicStart < 600) return;
+    if (muted || !rec || now < micNotBefore || now - lastMicStart < 600) return;
     // Two recorders on the mic at once leave the recognizer deaf: the wake word engine must be off while the recognizer listens.
     if (WAKE_FIRST && wakeEver && !wakeErrShown && mode === 'passive' && now > manualMicUntil) return;
     // The wake engine releases the mic on its own thread, a moment after stop(): wait for its 'stopped' report, or the recognizer opens against a still-held mic and hears nothing.
@@ -530,6 +557,7 @@
   let wakeOn = false, wakeErrShown = false, wakeEver = false;
   let wakeHalting = false, wakeHaltTimer = 0;
   window.__wake = (type, data) => {
+    if (muted) { if (type === 'started') { try { window.AndroidWake.stop(); } catch {} } wakeOn = false; return; }
     if (type === 'started') {
       // Late start (models take a moment to load): if the recognizer is being used right now, the wake engine must not hold the mic.
       if (recOn || mode === 'active' || Date.now() < manualMicUntil) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; return; }
@@ -542,6 +570,7 @@
   function syncWake() {
     if (!window.AndroidWake || !booted) return;
     try {
+      if (muted) { if (wakeOn) window.AndroidWake.stop(); return; }
       const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil;
       if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
@@ -606,7 +635,7 @@
   }
   function pauseListening() { recWanted = false; try { rec?.abort(); } catch {} }
   function resumeListening() {
-    if (!rec || DISPLAY_ONLY) return;
+    if (!rec || DISPLAY_ONLY || muted) return;
     mode = 'passive'; recWanted = true;
     if (!recOn) startMic();
   }
@@ -639,6 +668,7 @@
   let wakeAnswering = false;
   function answerWake() {
     const url = !DISPLAY_ONLY && booted ? pickFiller('wake', 'generic') : null;
+    if (muted) return;
     if (!url || wakeAnswering) return goActive();
     wakeAnswering = true;
     try { pauseListening(); } catch {}
@@ -649,6 +679,7 @@
     a.play().catch(go);
   }
   function goActive(o = {}) {
+    if (muted) return;
     stopSpeaking(false);
     mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
     caption('', {});
@@ -742,6 +773,7 @@
   function submit(text) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
+    if (MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); muteMic(); return; }
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
     if (LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);
@@ -818,16 +850,18 @@
   });
   $('#micBtn').onclick = () => {
     if (!booted) return boot();
+    if (muted) return unmuteMic();
     // Only a mic that is really open counts as "on"; a stale listening state must not turn the tap into a stop.
     if (state === 'listening' && recOn) { mode = 'passive'; manualMicUntil = 0; clearTimeout(activeTimer); try { rec && rec.abort(); } catch {} setState('idle'); }
     else { micNotBefore = 0; recBackoff = 0; manualMicUntil = Date.now() + 15000; goActive(); }
   };
-  $('#reactor').onclick = () => { if (!booted) return boot(); if (speaking) stopSpeaking(); else goActive(); };
+  $('#reactor').onclick = () => { if (!booted) return boot(); if (muted) return unmuteMic(); if (speaking) stopSpeaking(); else goActive(); };
   $('#newSess').onclick = () => { send({ type: 'new_session' }); $('#log').innerHTML = ''; };
   document.addEventListener('keydown', e => {
     if (e.code !== 'Space' || document.activeElement === $('#cmdInput')) return;
     e.preventDefault();
     if (!booted) return boot();
+    if (muted) return unmuteMic();
     if (speaking) stopSpeaking(); else if (state !== 'listening') goActive();
   });
 
@@ -840,6 +874,7 @@
     // Never let the mic permission check hold up startup: if the phone is slow to hand over the mic (app just reopened, wake engine still releasing it), listening must still start.
     await Promise.race([startMicMeter(), new Promise(r => setTimeout(r, 2500))]);
     initRecognition();
+    if (muted) muteMic(false);
     loadFillers();
     chime(true);
     // "wake up" on start → greeting from the server-side briefing
@@ -854,7 +889,7 @@
   // Inside the Android app there is no tap-to-start: boot straight away, and let the side key jump to listening.
   if (/JarvisApp/.test(navigator.userAgent)) {
     setTimeout(boot, 500);
-    window.__jarvisWake = () => { if (!booted) boot(); else goActive(); };
+    window.__jarvisWake = () => { if (!booted) boot(); else goActive(); };   // side key: ignored while muted (goActive)
   }
 
   // ======================= reactor =======================

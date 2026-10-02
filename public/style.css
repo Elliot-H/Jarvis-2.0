@@ -174,3 +174,9 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
   .caption{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
   .grid{padding-bottom:220px}
 }
+
+/* hard mic mute */
+body[data-muted="1"]{--accent:var(--red)}
+body[data-muted="1"] #chipMic span{color:var(--red);font-weight:700}
+.mic.muted{border-color:var(--red)!important;color:var(--red)!important;opacity:.85;box-shadow:0 0 14px rgba(255,60,60,.5)}
+body[data-muted="1"] #coreState{color:var(--red)}

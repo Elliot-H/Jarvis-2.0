@@ -1876,6 +1876,7 @@ wss.on('connection', ws => {
       if (moved) state.weather = undefined; // new place: report its weather fresh
       saveState(); onMove();
     }
+    if (msg.type === 'mic_muted') { const r = `Microphone muted, ${process.env.USER_TITLE || 'sir'}. I am not listening. Tap the mic button when you want me back.`; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'wake') briefing('wake', msg.memo);
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
     if (msg.type === 'new_session') {
