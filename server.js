@@ -1344,7 +1344,7 @@ function sparkFor(sym) {
   const c = spark.get(sym);
   if (!c || (!c.busy && Date.now() - c.at > 15 * 60e3)) {
     spark.set(sym, { ...(c || {}), at: Date.now(), busy: true });
-    chart.bars(chart.ySymbol(sym) || sym, '15m').then(b => { const step = Math.max(1, Math.ceil(b.length / 60)); spark.set(sym, { at: Date.now(), pts: b.filter((_, i) => i % step === 0 || i === b.length - 1).map(x => Number(x.c.toPrecision(6))) }); broadcast(holdingsOut()); }).catch(() => spark.set(sym, { ...(spark.get(sym) || {}), at: Date.now(), busy: false }));
+    chart.bars(chart.ySymbol(sym) || sym, '15m').then(b => { const step = Math.max(1, Math.ceil(b.length / 60)); spark.set(sym, { at: Date.now(), pts: b.filter((_, i) => i % step === 0 || i === b.length - 1).map(x => Number(x.c.toPrecision(6))) }); broadcast(holdingsOut()); broadcast(watchlistMsg(true)); }).catch(() => spark.set(sym, { ...(spark.get(sym) || {}), at: Date.now(), busy: false }));
   }
   return spark.get(sym)?.pts || null;
 }
@@ -1360,7 +1360,9 @@ function holdingsOut() {
 function watchlistMsg(noRefresh) {
   if (!noRefresh) wlRefresh();
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
-  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null }; }) };
+  const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
+  const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
+  return { type: 'watchlist', at: Date.now(), list: [...state.sigWatch, ...wlAuto().filter(p => !state.sigWatch.some(w => w.symbol === p.symbol)).map(p => ({ ...p, auto: true }))].map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? null, entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price), spark: sparkFor(w.symbol) }; }) };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const sym = String(symbol || '').toUpperCase().replace(/[^A-Z.\-]/g, '');

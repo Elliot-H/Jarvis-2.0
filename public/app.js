@@ -256,7 +256,9 @@
     if (!list.length) { box.innerHTML = '<small>Nothing on the watch list yet.</small>'; return; }
     const px = n => '$' + (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
     const vc = { BUY: 'up', WATCH: '', AVOID: 'dn' };
-    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}${w.auto ? ' <small>auto</small>' : ''}</td><td>${w.price != null ? px(w.price) : ''}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.entry ? 'in ' + px(w.entry) : ''}${w.stop ? (w.trail ? ' · trail ' : ' · stop ') + px(w.stop) : ''}${w.scale && w.scale.next ? ' · next ' + px(w.scale.next) + ' (' + w.scale.nextLabel + ')' : w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
+    const spk = pts => { if (!pts || pts.length < 2) return ''; const lo = Math.min(...pts), hi = Math.max(...pts), r = hi - lo || 1; return `<svg class="spk" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline fill="none" stroke="${pts[pts.length - 1] >= pts[0] ? '#4dff9a' : '#ff6b6b'}" stroke-width="1.2" points="${pts.map((v, i) => (i * 60 / (pts.length - 1)).toFixed(1) + ',' + (15 - (v - lo) / r * 14).toFixed(1)).join(' ')}"/></svg>`; };
+    const dp = w => w.dayPct == null ? '' : `<br><small class="${w.dayPct >= 0 ? 'up' : 'dn'}">${w.dayPct >= 0 ? '+' : ''}${w.dayPct.toFixed(2)}% day</small>`;
+    box.innerHTML = `<table>${list.map(w => `<tr class="${vc[w.verdict] || ''}"><td>${chartA(w.symbol)}${w.auto ? ' <small>auto</small>' : ''}<br>${spk(w.spark)}</td><td>${w.price != null ? px(w.price) : ''}${dp(w)}</td><td>${w.verdict ? '<b>' + w.verdict + '</b>' : ''}<br><small>${w.entry ? 'in ' + px(w.entry) : ''}${w.stop ? (w.trail ? ' · trail ' : ' · stop ') + px(w.stop) : ''}${w.scale && w.scale.next ? ' · next ' + px(w.scale.next) + ' (' + w.scale.nextLabel + ')' : w.target ? ' · tgt ' + px(w.target) : ''}</small></td></tr>`).join('')}</table>`;
     fr.style.display = '';
   }
   function ageHoldings() { const e = $('#holdAge'); if (e && holdAt) { const s = Math.max(0, Math.round((Date.now() - holdAt) / 1000)); e.textContent = s < 5 ? 'live' : s + 's ago'; } }
