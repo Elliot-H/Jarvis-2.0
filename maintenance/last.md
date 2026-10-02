@@ -1,8 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T17:55:00Z
-REQUEST: Make watch list and holdings symbols tappable to open their chart; add WATCH marker on holdings.
+TIME: 2026-10-02T17:55:16Z
+REQUEST: Add a tappable watch-list box below Holdings from the signal_watch list
 RESULT:
-Owner, every ticker in the Holdings box is now a tappable link that opens its chart.
-Holdings you are watching for sell warnings also show a small WATCH tag.
-Tickers inside the watch, signal, crypto and alert panels are tappable too, using the same chart page.
-It goes live after Railway redeploys; no APK reinstall is needed. It was syntax-checked only, not tested on a live screen.
+Owner, there is now a Watch List box directly under Holdings on the main screen. It shows every symbol on the sell-warning watch, including QTEX, SDEV and SCKT, each as a tappable chart link. It updates live whenever you add or remove a symbol. It goes live when Railway finishes redeploying. No APK reinstall needed; just reopen the app.
