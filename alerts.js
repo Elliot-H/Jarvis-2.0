@@ -77,7 +77,7 @@ export function triggers(item, quote, hist, ctx, cfg) {
 export function format(a, quote) {
   const mv = a.move == null ? 'n/a' : `${a.move >= 0 ? '+' : ''}${a.move.toFixed(1)}%`;
   const age = quote ? `${quote.ageSec}s old (${quote.source})` : 'unknown';
-  return `${a.title.split(': ')[1]}: ${a.what}. Price ${fp(quote.price)}, move ${mv}${a.level ? `, level: ${a.level}` : ''}. Quote ${age}. ${a.act} Informational only: Jarvis does not trade or place stops for you.`;
+  return `${a.title.split(': ')[1]}: ${a.what}. Price ${fp(quote.price)}, move ${mv}${a.level ? `, level: ${a.level}` : ''}. Quote ${age}. ${a.act}`;
 }
 
 // ---- news catalyst (held symbols): high-impact headline in the last 3 hours

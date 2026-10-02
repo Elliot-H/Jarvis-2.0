@@ -1339,7 +1339,7 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
       if (trade.configured()) for (const s of (await trade.trending(10)).all || []) list.add(s);
       const r = await sig.scan([...list].slice(0, 20), 8);
       for (const x of r.top) if (x.score >= C.newSignalScore && x.stop) {
-        const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}. Informational only: Jarvis does not trade or place stops for you.`;
+        const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;
         await liveAlert(`${x.symbol}:newsig`, `BUY-WATCH: ${x.symbol}`, body, C.infoCooldownHours * 60);
       }
     } catch (e) { console.warn('new-signal alert', e.message); }
@@ -1350,7 +1350,7 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
       const q = lf.latest(it.sym);
       for (const h of alerts.catalysts((await md.news(it.sym)).headlines, newsSeen).slice(0, 1)) {
         newsSeen.add(h.headline); if (newsSeen.size > 300) newsSeen.delete(newsSeen.values().next().value);
-        await liveAlert(`${it.sym}:news:${h.headline.slice(0, 40)}`, `NEWS: ${it.sym}`, `${it.sym}: INFO, news catalyst on a position you hold: "${h.headline.slice(0, 140)}" (${h.source || 'news'}). ${q ? `Price ${fmtP(q.price)}, quote ${q.ageSec}s old.` : 'No live quote yet.'} I would check the story before acting. Informational only: Jarvis does not trade or place stops for you.`, 24 * 60);
+        await liveAlert(`${it.sym}:news:${h.headline.slice(0, 40)}`, `NEWS: ${it.sym}`, `${it.sym}: INFO, news catalyst on a position you hold: "${h.headline.slice(0, 140)}" (${h.source || 'news'}). ${q ? `Price ${fmtP(q.price)}, quote ${q.ageSec}s old.` : 'No live quote yet.'} I would check the story before acting.`, 24 * 60);
       }
     } catch (e) { console.warn('news alert', it.sym, e.message); }
   }

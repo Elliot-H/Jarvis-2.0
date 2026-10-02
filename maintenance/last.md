@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-02T16:21:34Z
-REQUEST: Silent / text-only mode toggled by voice, remembered
+TIME: 2026-10-02T16:25:49Z
+REQUEST: Remove the "Jarvis does not place stops for you" disclaimer from all outgoing alerts and messages.
 RESULT:
-Owner, silent mode is built and pushed; Railway redeploys on its own and no APK reinstall is needed. Say "go silent, text only" and I stop all voice, filler clips included, and reply in text on the HUD. Say "you can talk again" and the voice comes back. The setting is remembered across restarts and redeploys. Checked for syntax only, not tested on a live phone.
+Owner, I removed the "Informational only: Jarvis does not trade or place stops for you" sentence from all three alert templates, in server.js and alerts.js. Buy-watch alerts, news alerts and the standard alerts no longer carry it. It goes live when the server restarts on the new commit. No APK reinstall is needed.
