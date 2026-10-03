@@ -1127,6 +1127,71 @@ handlers.heading_to = async ({ place }) => {
   if (!p) return `No saved place called ${place}. Saved: ${state.places.map(x => x.name).join(', ') || 'none'}.`;
   return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name, Math.random, true)].join(' ');
 };
+// ---------- Google Maps navigation awareness (read-only) ----------
+// Tasker on the phone watches the Google Maps notification and POSTs its text to /api/nav?token=. We parse destination + ETA,
+// treat a new trip to a saved place like "heading to" it (bring list + heading items), and clear on "arrived" or when updates stop.
+const NAV_STALE_MS = Number(process.env.NAV_STALE_MIN || 10) * 60e3;
+const NAV_ARRIVED = /\b(you have arrived|you['’]?ve arrived|arrived at|arrived)\b/i;
+function parseNav(b) {
+  const f = k => String(b[k] ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const parts = [f('title'), f('text'), f('sub'), f('big')].filter(Boolean), all = parts.join(' | ');
+  const ev = f('event').toLowerCase();
+  const arrived = ev === 'arrived' || NAV_ARRIVED.test(all);
+  const end = ev === 'end' || ev === 'stop' || ev === 'ended';
+  let dest = f('dest');
+  if (!dest) for (const p of parts) { const m = p.match(/\b(?:to|toward|towards|destination:?)\s+(.{2,80}?)(?:\s*[|·•]\s*|$)/i); if (m && !/^(?:the )?(?:left|right|north|south|east|west)\b/i.test(m[1]) && !/\bturn\b/i.test(p.slice(0, m.index))) { dest = m[1].trim(); break; } }
+  let eta = f('eta');
+  if (!eta) { const m = all.match(/\b(?:ETA\s*:?\s*)?(\d{1,2}:\d{2}\s*(?:[AP]\.?M\.?)?)/i); if (m) eta = m[1].toUpperCase().replace(/\./g, ''); }
+  let minutes = null; const h = all.match(/(\d+)\s*(?:h|hr|hrs|hour|hours)\b/i), mi = all.match(/(\d+)\s*(?:min|mins|minutes)\b/i);
+  if (h || mi) minutes = (h ? +h[1] * 60 : 0) + (mi ? +mi[1] : 0);
+  return { arrived, end, dest: dest.slice(0, 80), eta, minutes, raw: all.slice(0, 200) };
+}
+function navLive() { const n = state.nav; return !!(n?.on && Date.now() - n.updatedAt < NAV_STALE_MS); }
+function navArrive(pl) { // same effects as a GPS arrival, so bring items clear and arrive triggers fire; GPS will find state.at already set
+  const key = placeKey(pl.name); if (state.at === key) return '';
+  const c = nowCtx(), parts = [], now = Date.now();
+  state.at = key; state.atSince = now; state.lastPlace = key; state.cand = null;
+  if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
+  const brought = bringFor(pl.name);
+  if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
+  const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
+  parts.push(...eventLines('arrive', pl.name, Math.random, true));
+  if (!parts.length) parts.push(pl.kind === 'home' ? 'Welcome home, sir.' : firstToday ? `Welcome to ${pl.name}, sir.` : `Arrived at ${pl.name}, sir.`);
+  return parts.join(' ');
+}
+function navUpdate(body) {
+  const p = parseNav(body || {}), now = Date.now(), prev = state.nav, wasOn = navLive();
+  if (p.arrived || p.end) {
+    const dest = p.dest || prev?.dest || '', pl = dest ? findPlace(dest) : null;
+    state.nav = { on: false, dest: '', place: '', eta: '', minutes: null, updatedAt: now, endedAt: now, lastDest: dest, arrived: !!p.arrived };
+    let line = '';
+    if (p.arrived && wasOn && pl) line = navArrive(pl);
+    saveState();
+    if (line) deliver(line, pl.name);
+    return { ok: true, navigating: false, arrived: !!p.arrived };
+  }
+  if (!p.dest && !p.eta && !p.minutes && !wasOn) return { ok: true, ignored: true }; // a Maps notification that is not turn-by-turn
+  const dest = p.dest || (wasOn ? prev.dest : ''), pl = dest ? findPlace(dest) : null;
+  const isNew = !wasOn || (dest && prev?.dest && placeKey(dest) !== placeKey(prev.dest));
+  state.nav = { on: true, dest, place: pl ? pl.name : '', eta: p.eta || (wasOn ? prev.eta : ''), minutes: p.minutes ?? (wasOn ? prev.minutes : null), startedAt: isNew ? now : prev.startedAt, updatedAt: now };
+  if (isNew && pl && !(state.navHeaded?.place === pl.name && now - state.navHeaded.at < 30 * 60e3)) {
+    state.navHeaded = { place: pl.name, at: now };
+    const here = currentPlace(), parts = [];
+    if (here && placeKey(here.name) !== placeKey(pl.name)) { parts.push(...eventLines('leave', here.name, Math.random, true)); state.departed = { place: here.name, at: now, answered: true }; }
+    parts.push(bringLine(pl.name) || '', ...eventLines('heading', pl.name, Math.random, true));
+    const text = parts.filter(Boolean).slice(0, 3).join(' ') || `Heading to ${pl.name}, sir.${state.nav.eta ? ' ETA ' + state.nav.eta + '.' : ''}`;
+    saveState(); deliver(text, `Heading to ${pl.name}`, true);
+  } else saveState();
+  return { ok: true, navigating: true, dest, place: state.nav.place || null, eta: state.nav.eta || null };
+}
+handlers.maps_nav_status = async () => {
+  const n = state.nav;
+  if (!n) return 'No Google Maps navigation has been reported. (Needs the Tasker watcher; set it up from /api/nav-setup.)';
+  const age = Math.round((Date.now() - n.updatedAt) / 60000);
+  if (!navLive()) return `Not navigating. ${n.arrived ? `Last trip ended with an arrival${n.lastDest ? ' at ' + n.lastDest : ''}` : n.lastDest ? `Last destination was ${n.lastDest}` : n.on ? `Last Maps update was ${age} min ago` : 'No active trip'} (updated ${age} min ago).`;
+  return `Navigating: yes. Destination: ${n.dest || 'unknown'}${n.place ? ` (saved place ${n.place})` : ''}. ETA: ${n.eta || 'unknown'}${n.minutes != null ? `, about ${n.minutes} min left` : ''}. Last updated ${age} min ago.`;
+};
+if (!process.env.JARVIS_SMOKE) setInterval(() => { if (state.nav?.on && !navLive()) { state.nav = { ...state.nav, on: false, lastDest: state.nav.dest, dest: '', place: '' }; saveState(); } }, 60_000);
 handlers.bring_add = async ({ place, item }) => {
   const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
@@ -1909,6 +1974,19 @@ app.get('/api/outbox', (req, res) => {
   const due = state.followups.filter(f => f.status === 'approved');
   due.forEach(f => { f.status = 'sending'; f.pickedAt = Date.now(); }); saveState();
   res.json({ count: due.length, messages: due.map(f => ({ id: f.id, name: f.customer, text: f.text })) });
+});
+// Tasker -> Jarvis: Google Maps navigation notification (token in the URL, same token as the outbox). Read-only.
+app.all('/api/nav', (req, res) => {
+  if (!outboxOk(req)) return res.status(401).json({ error: 'bad token' });
+  res.json(navUpdate({ ...req.query, ...(req.body && typeof req.body === 'object' ? req.body : {}) }));
+});
+app.get('/api/nav-setup', (req, res) => { // PIN-protected (after the auth middleware): shows the URL + Tasker steps
+  const url = `${req.protocol}://${req.get('host')}/api/nav?token=${state.outboxToken}`;
+  res.json({ url, status: state.nav || null, steps: [
+    'Tasker > Profiles > + > Event > UI > Notification. Owner Application: Maps. (Leave Title/Text blank.)',
+    'Task: HTTP Request, Method POST, URL = the url above, Headers: Content-Type: application/json, Body: {"title":"%antitle","text":"%antext","sub":"%ansubtext","big":"%anbigtext"}',
+    'Android: Settings > Apps > Tasker > Notifications access must be ON for Tasker to see other apps\' notifications.',
+    'Optional second profile: same event with Text matching *arrived*; the same task works, Jarvis detects "arrived" in the text.'] });
 });
 app.all('/api/outbox/:id/sent', (req, res) => {
   if (!outboxOk(req)) return res.status(401).json({ error: 'bad token' });
