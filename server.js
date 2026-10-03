@@ -1199,10 +1199,35 @@ if (!process.env.JARVIS_SMOKE) setInterval(() => { if (state.nav?.on && !navLive
 // a decline silences that meal for the day, never over a pending question or in quiet hours. Offer, not nag.
 const COPILOT_MAX_DAY = Number(process.env.COPILOT_MAX_DAY || 2), COPILOT_SETTLE_MS = Number(process.env.COPILOT_SETTLE_MIN || 6) * 60e3;
 const mealSlot = mins => mins >= 360 && mins < 660 ? 'breakfast' : mins >= 690 && mins < 870 ? 'lunch' : mins >= 1050 && mins < 1230 ? 'dinner' : '';
-function isDriving() {
-  if (navLive()) return true;
-  return (state.vehicles || []).some(v => v.lastRun && !v.sawOff && Date.now() - v.lastRun < 25 * 60e3);
+// ONE driving-context detector feeds the whole travel protocol (stage 2). Movement = phone GPS speed (Android sends m/s; else derived from
+// consecutive fixes) and/or OBD speed, >= MOVE_MPH. Engine running alone (rpm) is NOT movement: that is stage 1 (the "leaving?" question).
+// Stays "moving" for MOVE_HOLD_MIN after the last moving signal (red lights, stops), then the trip ends.
+const MOVE_MPH = Number(process.env.MOVE_MPH || 5), MOVE_HOLD = Number(process.env.MOVE_HOLD_MIN || 5) * 60e3;
+function driveSignal(src, mph) {
+  const now = Date.now(), dr = state.drive ||= { moving: false };
+  dr.mph = Math.round(mph); dr.src = src;
+  if (!(mph >= MOVE_MPH)) return;
+  dr.lastMoveAt = now;
+  if (!dr.moving) { dr.moving = true; dr.since = now; driveStart(src, mph); }
 }
+function driveFix(lat, lon, speedMs) { // every phone position (background /api/loc or app websocket)
+  const now = Date.now(), dr = state.drive ||= { moving: false }, pf = dr.fix;
+  dr.fix = { lat, lon, t: now };
+  let mph = Number.isFinite(speedMs) && speedMs >= 0 ? speedMs * 2.237 : null;
+  if (mph == null && pf && now - pf.t >= 15e3 && now - pf.t <= 10 * 60e3) mph = km(pf, { lat, lon }) * 0.621 / ((now - pf.t) / 3600e3);
+  if (mph != null) driveSignal('gps', mph);
+}
+function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
+  const now = Date.now(), d = state.departed;
+  const asked = (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
+  dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: !!state.pendingQ, nav: navLive() });
+  if (!asked && !state.pendingQ && !navLive()) { // engine-start question was missed (app asleep, dongle out of range): ask it now
+    state.departed = null; deliver(vehicleDeparture({ name: 'phone' }), 'Jarvis', true);
+  }
+  saveState();
+}
+if (!process.env.JARVIS_SMOKE) setInterval(() => { const dr = state.drive; if (dr?.moving && Date.now() - (dr.lastMoveAt || 0) > MOVE_HOLD) { dr.moving = false; dr.endedAt = Date.now(); dlog('drive-end', { minutes: Math.round((dr.endedAt - dr.since) / 60e3) }); saveState(); } }, 30_000);
+function isDriving() { return navLive() || !!state.drive?.moving; }
 function foodPref() { // newest memory fact naming something he likes to eat/get; chain = a capitalised "at/from X"
   for (const m of [...state.memory].reverse()) {
     const f = m.fact, food = f.match(/\b(?:likes?|loves?|enjoys?|favou?rites?(?: \w+)? (?:is|are)|usually (?:gets|orders|eats)|always (?:gets|orders|eats))\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:from|at|for|when|on|in)\b|[.,;]|$)/i);
@@ -1218,7 +1243,7 @@ async function nearbySpot(pref) { // optional: needs GOOGLE_PLACES_KEY; any fail
   try {
     const r = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', signal: AbortSignal.timeout(6000),
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.displayName,places.location,places.currentOpeningHours.openNow' },
-      body: JSON.stringify({ textQuery: pref.chain || pref.food, maxResultCount: 3, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius: 3000 } } }) });
+      body: JSON.stringify({ textQuery: pref.chain || pref.food || pref.query, maxResultCount: 3, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius: 3000 } } }) });
     if (!r.ok) return null;
     const p = ((await r.json()).places || []).find(x => x.currentOpeningHours?.openNow !== false && x.location);
     if (!p) return null;
@@ -1236,11 +1261,11 @@ async function copilotTick() {
   const slot = mealSlot(minsNow());
   if (!slot || cp.topics.includes('meal') || cp.declined.includes('meal:' + slot) || cp.ate.includes(slot)) return;
   if (slot === 'breakfast' && state.meal?.day === c.day && state.meal.kind === 'both') return;
-  const pref = foodPref(); if (!pref) return;
+  const pref = foodPref() || { food: '', chain: '', query: slot + ' food' };   // no stored preference: still offer, generic
   cp.topics.push('meal'); cp.lastAt = now; cp.sent++;   // claimed before the await so a slow lookup cannot double-fire
   const spot = await nearbySpot(pref);
   const when = `You haven't had ${slot} yet, sir.`;
-  const tail = spot ? ` There's a ${spot.name} about ${spot.miles < 1.5 ? 'a mile' : Math.round(spot.miles) + ' miles'} out. I know you like ${pref.food}; maybe stop by.` : ` I know you like ${pref.food}; maybe stop for some.`;
+  const tail = spot ? ` There's a ${spot.name} about ${spot.miles < 1.5 ? 'a mile' : Math.round(spot.miles) + ' miles'} out.${pref.food ? ` I know you like ${pref.food}; maybe stop by.` : ' Maybe stop by.'}` : (pref.food ? ` I know you like ${pref.food}; maybe stop for some.` : ' Say the word and I will find a spot.');
   state.pendingQ = { type: 'copilot', slot, at: now }; saveState();
   deliver(when + tail, 'Jarvis', true);
 }
@@ -2204,6 +2229,7 @@ app.post('/api/loc', (req, res) => {
   const moved = !state.location || Math.abs(state.location.lat - lat) > .5 || Math.abs(state.location.lon - lon) > .5;
   state.location = { lat: +lat.toFixed(4), lon: +lon.toFixed(4), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz, bg: true };
   if (moved) state.weather = undefined;
+  driveFix(lat, lon, Number(req.body?.speed));
   saveState(); onMove();
   res.json({ ok: true, at: state.at || null });
 });
@@ -2548,6 +2574,7 @@ wss.on('connection', ws => {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
       if (moved) state.weather = undefined; // new place: report its weather fresh
+      driveFix(msg.lat, msg.lon, NaN);
       saveState(); onMove();
     }
     if (msg.type === 'mic_muted') { const r = 'Microphone muted.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
@@ -2591,6 +2618,7 @@ async function obdScan(v, why = 'auto') {
   if (!d.ok) { if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
     if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
   v.lastOk = Date.now();
+  if (d.speedKph > 0) driveSignal('obd', d.speedKph * 0.621);
   const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
   const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
   const fresh = (d.dtcs || []).filter(c => !(prev.dtcs || []).includes(c));
@@ -2627,7 +2655,7 @@ if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) 
 async function obdTick() {
   if (!deviceClients.size || busy) return;
   for (const v of state.vehicles) {
-    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? (v.last && !v.last.rpm ? OBD_WATCH : OBD_EVERY) : OBD_RETRY;
+    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_WATCH : OBD_RETRY;
     if (!v.lastTry || Date.now() - v.lastTry > gap) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
   }
 }

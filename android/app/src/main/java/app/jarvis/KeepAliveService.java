@@ -57,7 +57,7 @@ public class KeepAliveService extends Service {
       lm = (LocationManager) getSystemService(LOCATION_SERVICE);
       String p = Build.VERSION.SDK_INT >= 31 && lm.hasProvider(LocationManager.FUSED_PROVIDER) ? LocationManager.FUSED_PROVIDER
           : lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ? LocationManager.NETWORK_PROVIDER : LocationManager.GPS_PROVIDER;
-      lm.requestLocationUpdates(p, 60_000L, 100f, listener, Looper.getMainLooper());
+      lm.requestLocationUpdates(p, 30_000L, 50f, listener, Looper.getMainLooper());
       Location last = lm.getLastKnownLocation(p);
       if (last != null) report(last);
     } catch (SecurityException | IllegalArgumentException e) { lm = null; }
@@ -65,9 +65,9 @@ public class KeepAliveService extends Service {
 
   private void report(Location l) {
     long now = System.currentTimeMillis();
-    if (now - lastSent < 45_000) return;
+    if (now - lastSent < 25_000) return;
     lastSent = now;
-    final String body = String.format(Locale.US, "{\"lat\":%.6f,\"lon\":%.6f,\"acc\":%.0f}", l.getLatitude(), l.getLongitude(), l.getAccuracy());
+    final String body = String.format(Locale.US, "{\"lat\":%.6f,\"lon\":%.6f,\"acc\":%.0f,\"speed\":%.1f}", l.getLatitude(), l.getLongitude(), l.getAccuracy(), l.hasSpeed() ? l.getSpeed() : -1f);
     new Thread(() -> {
       try {
         String base = BuildConfig.BASE_URL;
