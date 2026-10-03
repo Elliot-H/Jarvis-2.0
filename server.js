@@ -542,13 +542,18 @@ Object.assign(handlers, {
 state.coinIds ||= {}; for (const [k, v] of Object.entries(state.coinIds)) crypto_.learnCoin(k, v);
 // A ticker the stock feeds do not know: look it up as a coin on CoinGecko (exact symbol match), remember it, and return its quote.
 async function coinFallback(symbol) {
-  try {
-    const q = String(symbol || '').replace(/[^A-Za-z0-9]/g, ''); if (!q) return null;
-    const r = await crypto_.resolveId(q); if (!r || String(r.symbol || '').toUpperCase() !== q.toUpperCase()) return null;
-    crypto_.learnCoin(q, r.id); state.coinIds[q.toUpperCase()] = r.id; saveState();
-    const c = (await crypto_.byIds([r.id]))[0];
-    return c ? { ...c, id: r.id, kind: 'crypto', source: 'CoinGecko' } : null;
-  } catch { return null; }
+  const q = String(symbol || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); coinFallback.err = null; if (!q) return null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const known = crypto_.coinIdFor(q);   // already learned (or built in, e.g. NIGHT): use it; resolveId returns the id as its symbol for these
+      const r = known ? { id: known, name: q, symbol: q } : await crypto_.resolveId(q);
+      if (!r || String(r.symbol || '').toUpperCase() !== q) { coinFallback.err = 'notfound'; return null; }
+      crypto_.learnCoin(q, r.id); state.coinIds[q] = r.id; saveState();
+      let c = null; try { c = (await crypto_.byIds([r.id]))[0]; } catch {}   // price is optional: the watch list gets it from Kraken/CoinGecko later
+      return { symbol: q, name: r.name || q, ...(c || {}), id: r.id, kind: 'crypto', source: 'CoinGecko' };
+    } catch (e) { coinFallback.err = e.message; if (i) return null; await new Promise(res => setTimeout(res, 2000)); }
+  }
+  return null;
 }
 const mdFail = e => `Market data problem: ${e.message}. Tell the Owner plainly; if a key is missing say which one.`;
 Object.assign(handlers, {
@@ -1708,7 +1713,8 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   if (cm) {
     const c = await coinFallback(cm[1]);
     if (c) { state.watchlist = [...new Set([...state.watchlist, c.id])].slice(0, 25); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
-    if (cm[2]) return `Could not add ${cm[1]}: CoinGecko has no coin with that ticker.`;
+    // RAINUSD, RAIN/USD etc. can never be a stock (6+ letters), so never fall through to the stock chart feed and its 404.
+    if (cm[2] || sym.length > 5) return coinFallback.err && coinFallback.err !== 'notfound' ? `Could not add ${cm[1]} right now: ${coinFallback.err} Try the button again in a minute.` : `Could not add ${cm[1]}: CoinGecko has no coin with that ticker.`;
   }
   state.wlHide = state.wlHide.filter(x => x !== wlKey(sym));
   try {
