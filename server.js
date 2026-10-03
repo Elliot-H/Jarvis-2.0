@@ -79,7 +79,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -734,6 +734,7 @@ async function bucketAnswer(text) {
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
+  if (q.type === 'copilot') return copilotAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
@@ -1192,6 +1193,69 @@ handlers.maps_nav_status = async () => {
   return `Navigating: yes. Destination: ${n.dest || 'unknown'}${n.place ? ` (saved place ${n.place})` : ''}. ETA: ${n.eta || 'unknown'}${n.minutes != null ? `, about ${n.minutes} min left` : ''}. Last updated ${age} min ago.`;
 };
 if (!process.env.JARVIS_SMOKE) setInterval(() => { if (state.nav?.on && !navLive()) { state.nav = { ...state.nav, on: false, lastDest: state.nav.dest, dest: '', place: '' }; saveState(); } }, 60_000);
+// ---------- Co-pilot: unprompted, rare suggestions while the Owner is driving ----------
+// Driving = Google Maps trip live, or the truck engine seen running (OBD) recently. Today only a meal nudge: not eaten in this meal slot +
+// a food fact in long-term memory (+ a nearby spot if GOOGLE_PLACES_KEY is set). Max COPILOT_MAX_DAY per day, once per topic per trip,
+// a decline silences that meal for the day, never over a pending question or in quiet hours. Offer, not nag.
+const COPILOT_MAX_DAY = Number(process.env.COPILOT_MAX_DAY || 2), COPILOT_SETTLE_MS = Number(process.env.COPILOT_SETTLE_MIN || 6) * 60e3;
+const mealSlot = mins => mins >= 360 && mins < 660 ? 'breakfast' : mins >= 690 && mins < 870 ? 'lunch' : mins >= 1050 && mins < 1230 ? 'dinner' : '';
+function isDriving() {
+  if (navLive()) return true;
+  return (state.vehicles || []).some(v => v.lastRun && !v.sawOff && Date.now() - v.lastRun < 25 * 60e3);
+}
+function foodPref() { // newest memory fact naming something he likes to eat/get; chain = a capitalised "at/from X"
+  for (const m of [...state.memory].reverse()) {
+    const f = m.fact, food = f.match(/\b(?:likes?|loves?|enjoys?|favou?rites?(?: \w+)? (?:is|are)|usually (?:gets|orders|eats)|always (?:gets|orders|eats))\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:from|at|for|when|on|in)\b|[.,;]|$)/i);
+    if (!food || !/food|eat|meal|breakfast|lunch|dinner|burrito|sandwich|pizza|coffee|taco|burger|wawa/i.test((m.topic || '') + ' ' + f)) continue;
+    const chain = f.match(/\b(?:at|from)\s+([A-Z][\w'&-]+(?: [A-Z][\w'&-]+)?)/);
+    return { food: food[1].trim(), chain: chain ? chain[1] : '' };
+  }
+  return null;
+}
+async function nearbySpot(pref) { // optional: needs GOOGLE_PLACES_KEY; any failure just means no place is named
+  const key = process.env.GOOGLE_PLACES_KEY, L = state.location;
+  if (!key || !L || Date.now() - Date.parse(L.at) > 5 * 60e3) return null;
+  try {
+    const r = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', signal: AbortSignal.timeout(6000),
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.displayName,places.location,places.currentOpeningHours.openNow' },
+      body: JSON.stringify({ textQuery: pref.chain || pref.food, maxResultCount: 3, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius: 3000 } } }) });
+    if (!r.ok) return null;
+    const p = ((await r.json()).places || []).find(x => x.currentOpeningHours?.openNow !== false && x.location);
+    if (!p) return null;
+    return { name: p.displayName?.text || pref.chain, miles: km(L, { lat: p.location.latitude, lon: p.location.longitude }) * 0.621 };
+  } catch { return null; }
+}
+async function copilotTick() {
+  const now = Date.now(), c = nowCtx();
+  const cp = state.copilot = (state.copilot?.day === c.day ? state.copilot : { day: c.day, sent: 0, declined: [], ate: [], topics: [] });
+  if (!isDriving()) { if (cp.trip && !cp.tripEnd) cp.tripEnd = now; return; }
+  if (!cp.trip || (cp.tripEnd && now - cp.tripEnd > 20 * 60e3)) { cp.trip = now; cp.topics = []; }   // a new drive
+  cp.tripEnd = null;
+  if (cp.sent >= COPILOT_MAX_DAY || now - cp.trip < COPILOT_SETTLE_MS || now - (cp.lastAt || 0) < 40 * 60e3) return;
+  if (quietNow() || state.pendingQ || busy) return;
+  const slot = mealSlot(minsNow());
+  if (!slot || cp.topics.includes('meal') || cp.declined.includes('meal:' + slot) || cp.ate.includes(slot)) return;
+  if (slot === 'breakfast' && state.meal?.day === c.day && state.meal.kind === 'both') return;
+  const pref = foodPref(); if (!pref) return;
+  cp.topics.push('meal'); cp.lastAt = now; cp.sent++;   // claimed before the await so a slow lookup cannot double-fire
+  const spot = await nearbySpot(pref);
+  const when = `You haven't had ${slot} yet, sir.`;
+  const tail = spot ? ` There's a ${spot.name} about ${spot.miles < 1.5 ? 'a mile' : Math.round(spot.miles) + ' miles'} out. I know you like ${pref.food}; maybe stop by.` : ` I know you like ${pref.food}; maybe stop for some.`;
+  state.pendingQ = { type: 'copilot', slot, at: now }; saveState();
+  deliver(when + tail, 'Jarvis', true);
+}
+async function copilotAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  const say = r => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); return true; };
+  state.pendingQ = null; const cp = state.copilot;
+  if (!cp || t.split(' ').length > 8) { saveState(); return false; }
+  if (/\b(already|just) (ate|eaten|had)|\bi (ate|had|ve eaten|have eaten)\b/.test(t)) { (cp.ate ||= []).push(q.slot); saveState(); return say('Noted, sir.'); }
+  if (DEPART_NO.test(t) || SHOP_NO.test(t) || /^(not now|maybe later|i m good|im good|no thanks|no thank you|pass)\b/.test(t)) { (cp.declined ||= []).push('meal:' + q.slot); saveState(); return say('Very good, sir.'); }
+  if (SHOP_YES.test(t) || /^(good idea|sounds good|will do|let s do it|okay|ok|sure)\b/.test(t)) { saveState(); return say('Enjoy, sir.'); }
+  saveState(); return false;   // unrelated request: let it through
+}
+handlers.ate_now = async () => { const c = nowCtx(), s = mealSlot(minsNow()) || 'breakfast'; if (state.copilot?.day !== c.day) state.copilot = { day: c.day, sent: 0, declined: [], ate: [], topics: [] }; (state.copilot.ate ||= []).push(s); saveState(); return 'Recorded. Say "Noted, sir."'; };
+if (!process.env.JARVIS_SMOKE) setInterval(() => copilotTick().catch(e => console.warn('copilot', e.message)), 60_000);
 handlers.bring_add = async ({ place, item }) => {
   const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
