@@ -180,6 +180,8 @@ body[data-muted="1"]{--accent:var(--red)}
 body[data-muted="1"] #chipMic span{color:var(--red);font-weight:700}
 .mic.muted{border-color:var(--red)!important;color:var(--red)!important;opacity:.85;box-shadow:0 0 14px rgba(255,60,60,.5)}
 body[data-muted="1"] #coreState{color:var(--red)}
+body[data-muted="1"]::after{content:"MIC MUTED - DEAF MODE - TAP MIC TO RESUME";position:fixed;left:0;right:0;bottom:0;z-index:50;text-align:center;padding:7px 10px;background:rgba(255,60,60,.92);color:#fff;font:700 12px "JetBrains Mono",monospace;letter-spacing:.15em;pointer-events:none;animation:muteblink 1.6s ease-in-out infinite}
+@keyframes muteblink{50%{opacity:.6}}
 
 /* Comms log and activity start minimized so the reactor stays visible; tap the title to open. */
 .fold .frame-h{cursor:pointer}

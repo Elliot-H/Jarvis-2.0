@@ -581,7 +581,7 @@
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   // Hard mute: "stop listening" shuts the recognizer, the wake engine and the mic meter. Only a manual tap (mic button, core, SPACE) lifts it; kept across reloads.
-  const MUTE_RE = /\b(stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|mic(rophone)? off|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
+  const MUTE_RE = /\b(stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|deaf mode|(go|enter|turn on|activate) deaf( mode)?|mic(rophone)? (off|mute|muted)|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
   function paintMute() {
     document.body.dataset.muted = muted ? '1' : '';
     if (muted) { chip('#chipMic', 'bad', 'MIC MUTED'); $('#coreState').textContent = 'MUTED'; $('#coreHint').textContent = 'Mic is off. Tap the mic button to wake ' + cfg.userTitle; }
