@@ -2926,8 +2926,26 @@ handlers.led_setup = async ({ seen_red, seen_green, seen_blue, chip_order, light
 };
 // ---------- Awake: "I'm awake" dismisses every pending alarm on the phone ----------
 handlers.alarms_off = async () => {
+  deviceAction('siren_stop', {}, 4000).catch(() => {});
   const r = await deviceAction('alarms_off', { task: process.env.TASKER_ALARM_TASK || '' }, 10000).catch(e => ({ ok: false, detail: String((e && e.message) || e) }));
   return r.ok ? 'SUCCESS: the rest of the alarms are dismissed for today. Confirm briefly.' : `Could not clear the alarms: ${r.detail}. Say so plainly.`;
+};
+// ---------- Wake-up call: "Jarvis, where are you?" -> car-alarm siren on the phone at max volume -> "I'm over here." ----------
+let wakeCallBusy = false;
+handlers.wakeup_call = async ({ seconds }) => {
+  if (wakeCallBusy) return 'A wake-up call is already running. Say nothing.';
+  const secs = Math.max(5, Math.min(60, Number(seconds) || 20));
+  if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the siren cannot play. Say so plainly.';
+  wakeCallBusy = true;
+  try {
+    const line = text => { remember('jarvis', text); broadcast({ type: 'say', text, speak: true }); };
+    line('Jarvis, where are you?');
+    await new Promise(r => setTimeout(r, 4500));
+    const r = await deviceAction('siren', { seconds: secs }, (secs + 10) * 1000).catch(e => ({ ok: false, detail: String((e && e.message) || e) }));
+    if (!r.ok) return `The siren failed: ${r.detail}. Say so plainly (an app reinstall may be needed).`;
+    line("I'm over here.");
+    return 'DONE: wake-up call finished and already spoken. Say nothing more.';
+  } finally { wakeCallBusy = false; }
 };
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';

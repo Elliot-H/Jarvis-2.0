@@ -1,8 +1,7 @@
 STATUS: done
-TIME: 2026-10-03T17:23:58Z
-REQUEST: Fix the leaving-a-saved-place departure trigger that failed on Oct 2.
+TIME: 2026-10-03T18:05:00Z
+REQUEST: Add a wake-up call: "Jarvis, where are you?", max-volume car-alarm siren on the phone, then "I'm over here."
 RESULT:
-Owner, the engine-start question and the leave-the-perimeter trigger were already in place from last night. I closed two remaining gaps.
-Jarvis now treats a truck parked just outside the shop's edge as still at the shop, so the "leaving the shop, or headed somewhere" question names the shop.
-A quick key-off and restart between two engine checks is now caught from the engine run-time reading, then it asks and reads the bring list and leave reminders.
-The server part goes live on the Railway redeploy. The run-time reading needs an APK rebuild and reinstall, which I could not compile here; until then it behaves as before.
+Owner, I added a wake-up call. Say "wake-up call" and Jarvis asks "Jarvis, where are you?", then plays a sharp car-alarm siren on the phone's own speaker at maximum alarm volume for 20 seconds, then says "I'm over here."
+Saying "I'm awake" stops the siren early.
+The server part goes live on the Railway redeploy, but the siren itself needs an APK rebuild and reinstall, which I could not compile here. Until then Jarvis will say the siren failed.

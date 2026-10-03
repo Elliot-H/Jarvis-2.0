@@ -52,6 +52,8 @@ public class DeviceBridge {
       else if ("bt_disconnect".equals(action)) { SttBridge.noResumeUntil = Long.MAX_VALUE; btDisconnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBTOff"), o.optBoolean("off", true)); }
       else if ("bt_paired".equals(action)) btPaired(id);
       else if ("alarms_off".equals(action)) alarmsOff(id, o.optString("task", ""));
+      else if ("siren".equals(action)) siren(id, o.optInt("seconds", 20));
+      else if ("siren_stop".equals(action)) { sirenStop = true; reply(id, true, "siren stopped"); }
       else if ("spotify_resume".equals(action)) { SttBridge.noResumeUntil = 0; spotifyResume(id, o.optString("mode", "launch")); }
       else if ("media_status".equals(action)) mediaStatus(id);
       else if ("spotify_search".equals(action)) { SttBridge.noResumeUntil = 0; spotifySearch(id, o.optString("query"), o.optString("kind")); }
@@ -89,6 +91,68 @@ public class DeviceBridge {
       try { ctx.startActivity(back); } catch (Exception ignored) {}
     }, 1200);
     reply(id, ok, res);
+  }
+
+  // Wake-up call: car-alarm style siren (fast warble, rising sweeps, tight chirps) on the phone's own speaker, alarm stream at max. Replies when it ends.
+  private volatile boolean sirenStop = false, sirenOn = false;
+  private void siren(final String id, final int seconds) {
+    if (sirenOn) { reply(id, false, "siren already running"); return; }
+    sirenOn = true; sirenStop = false;
+    final int secs = Math.max(3, Math.min(60, seconds));
+    new Thread(() -> {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      int oldVol = am.getStreamVolume(AudioManager.STREAM_ALARM), oldMusic = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+      android.media.AudioTrack t = null;
+      String res = "siren played";
+      boolean ok = true;
+      try {
+        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+        final int sr = 22050;
+        short[] pat = sirenPattern(sr);
+        int min = android.media.AudioTrack.getMinBufferSize(sr, android.media.AudioFormat.CHANNEL_OUT_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT);
+        t = new android.media.AudioTrack.Builder()
+            .setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ALARM).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            .setAudioFormat(new android.media.AudioFormat.Builder().setSampleRate(sr).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).build())
+            .setBufferSizeInBytes(Math.max(min, 8192)).setTransferMode(android.media.AudioTrack.MODE_STREAM).build();
+        t.setVolume(1.0f);
+        if (Build.VERSION.SDK_INT >= 28) { // the phone's own speaker, even if a Bluetooth speaker is connected
+          for (android.media.AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) if (d.getType() == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { t.setPreferredDevice(d); break; }
+        }
+        t.play();
+        long end = System.currentTimeMillis() + secs * 1000L;
+        while (!sirenStop && System.currentTimeMillis() < end) t.write(pat, 0, pat.length);
+        if (sirenStop) res = "siren stopped early";
+      } catch (Exception e) { ok = false; res = "siren failed: " + e.getMessage(); }
+      finally {
+        try { if (t != null) { t.pause(); t.flush(); t.release(); } } catch (Exception ignored) {}
+        try { am.setStreamVolume(AudioManager.STREAM_ALARM, oldVol, 0); am.setStreamVolume(AudioManager.STREAM_MUSIC, oldMusic, 0); } catch (Exception ignored) {}
+        sirenOn = false;
+      }
+      final boolean fok = ok; final String fres = res;
+      ui.post(() -> reply(id, fok, fres));
+    }, "jarvis-siren").start();
+  }
+
+  /** ~4.4 s loop: warble 1400/1900 Hz, three rising sweeps, tight 3000 Hz chirps. Hard-clipped for a sharp edge. */
+  private static short[] sirenPattern(int sr) {
+    java.util.ArrayList<double[]> segs = new java.util.ArrayList<>(); // {startHz, endHz, seconds, gate(0 = continuous)}
+    for (int i = 0; i < 12; i++) segs.add(new double[]{i % 2 == 0 ? 1400 : 1900, i % 2 == 0 ? 1400 : 1900, 0.125, 0});
+    for (int i = 0; i < 3; i++) segs.add(new double[]{650, 1700, 0.4, 0});
+    for (int i = 0; i < 8; i++) { segs.add(new double[]{3000, 3000, 0.06, 0}); segs.add(new double[]{0, 0, 0.06, 0}); }
+    int n = 0; for (double[] g : segs) n += (int) (g[2] * sr);
+    short[] out = new short[n];
+    int k = 0; double ph = 0;
+    for (double[] g : segs) {
+      int m = (int) (g[2] * sr);
+      for (int i = 0; i < m; i++) {
+        double f = g[0] + (g[1] - g[0]) * i / m;
+        if (g[0] == 0) { out[k++] = 0; continue; }
+        ph += 2 * Math.PI * f / sr;
+        double v = Math.max(-1, Math.min(1, Math.sin(ph) * 2.2));
+        out[k++] = (short) (v * 32000);
+      }
+    }
+    return out;
   }
 
   private void reply(String id, boolean ok, String detail) {

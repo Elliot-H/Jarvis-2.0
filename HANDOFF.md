@@ -369,3 +369,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Departure trigger hardening (2026-10-03)
 - Engine-start "Are you leaving the shop, or headed somewhere?" now uses `hereNow()` (placeFor with hysteresis, so a rounded fix just outside the 250 m perimeter still counts as at the shop), and also fires when OBD run time since engine start (`runSec`, PID 011F, new in ObdBridge.java, needs APK reinstall) shows a key cycle between two 2-min scans. Without the APK it behaves as before. Check GET /api/depart-log for `vehicle-start` (`restarted`, `runSec`) and `leave` decisions.
+
+## Wake-up call (2026-10-03)
+- Tool `wakeup_call` (tools.js, server.js handler, persona "Wake-up call") -> say line, wait 4.5 s, device action `siren` -> DeviceBridge.siren (AudioTrack, USAGE_ALARM, STREAM_ALARM forced to max then restored, prefers the built-in speaker) -> say "I'm over here." `siren_stop` is called by alarms_off. Server part is live on redeploy; the siren needs an APK rebuild and reinstall. Not compiled here (no Android SDK).
