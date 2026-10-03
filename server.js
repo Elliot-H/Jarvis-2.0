@@ -1093,8 +1093,13 @@ async function destAnswer(q, text) {
 }
 // Vehicle start = he is about to leave (first departure trigger). Asked once per drive, answered here with no AI call.
 const DEPART_YES = /^(yes|yeah|yep|yup|leaving|i'?m leaving|heading out|headed out|taking off|on my way|going)\b/, DEPART_NO = /^(no|nope|nah|not yet|staying|just (?:warming|starting|checking)|not leaving)\b/;
+// Where is he parked? Same hysteresis as onMove (radius + LEAVE_MARGIN for the place he is known to be at), so a rounded fix just outside the perimeter still counts as "at the shop".
+function hereNow() {
+  const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 6 * 3600e3) return null;
+  const p = placeFor(L, state.at || ''); return p ? state.places.find(x => x.name === p.name) || p : null;
+}
 function vehicleDeparture(v) {
-  const here = currentPlace(), opts = [];
+  const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
   for (const p of [nextGuess, ...state.places.filter(x => !here || x.name !== here.name).sort((a, b) => bringFor(b.name).length - bringFor(a.name).length)])
     if (p && !opts.includes(p.name) && opts.length < 3) opts.push(p.name);
@@ -2642,8 +2647,10 @@ async function obdScan(v, why = 'auto') {
   // Battery trend: resting readings only (engine off and not run for 2 h, so no surface charge from driving)
   if (!off && why === 'auto') { // vehicle came alive: first departure trigger, once per drive
     // A new start = never seen running, OR seen off/unreachable since it last ran (key off, then restart even a minute later), OR a long gap.
-    const newStart = !v.lastRun || v.sawOff || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < 3 * 60e3; // 3 min: no double ask from one start
-    dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
+    // runSec (OBD run time since engine start) lower than the time since we last saw it running = key cycled between two scans.
+    const restarted = d.runSec != null && prev.runSec != null && prev.rpm && v.lastRun && d.runSec + 20 < (now - v.lastRun) / 1000 + prev.runSec;
+    const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < 3 * 60e3; // 3 min: no double ask from one start
+    dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, runSec: d.runSec ?? null, restarted: !!restarted, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
     if (newStart && !recent) { v.lastDepart = now; lines.unshift(vehicleDeparture(v)); }
   }
   if (off) { if (v.lastRun) v.sawOff = true; } else { v.lastRun = now; v.sawOff = false; }

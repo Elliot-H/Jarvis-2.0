@@ -91,6 +91,7 @@ public class ObdBridge {
           int[] f = bytes(cmd(in, out, "012F", 3000), "412F", 1); if (f != null) r.put("fuelPct", Math.round(f[0] * 100 / 255.0));
           int[] t = bytes(cmd(in, out, "0105", 3000), "4105", 1); if (t != null) r.put("coolantC", t[0] - 40);
           int[] rp = bytes(cmd(in, out, "010C", 3000), "410C", 2); if (rp != null) r.put("rpm", (rp[0] * 256 + rp[1]) / 4);
+          int[] rt = bytes(cmd(in, out, "011F", 3000), "411F", 2); if (rt != null) r.put("runSec", rt[0] * 256 + rt[1]);   // seconds since engine start: shows a key cycle between two scans
           int[] sp = bytes(cmd(in, out, "010D", 3000), "410D", 1); if (sp != null) r.put("speedKph", sp[0]);
           int[] d = bytes(cmd(in, out, "0131", 3000), "4131", 2); if (d != null) r.put("kmSinceClear", d[0] * 256 + d[1]);
         }
