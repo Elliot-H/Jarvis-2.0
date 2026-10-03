@@ -1,8 +1,7 @@
 STATUS: done
-TIME: 2026-10-03T15:02:07Z
-REQUEST: Build a proactive driving co-pilot that volunteers suggestions unprompted (e.g. breakfast burrito at a nearby Wawa)
+TIME: 2026-10-03T15:25:33Z
+REQUEST: Rework driving into one travel protocol: engine start asks leaving/heading, vehicle movement runs the full protocol; fix movement never firing.
 RESULT:
-Owner, the first co-pilot is built. While you are driving, meaning a Maps trip is live or the truck engine is running, Jarvis will offer one short meal suggestion if you have not eaten, using your food likes from memory.
-It is limited to two a day, once per trip, never in quiet hours, and a no silences it for that meal. To name a nearby Wawa I need a Google Places key on Railway; without it the line has no place.
-Tell Jarvis you like breakfast burritos from Wawa so it is in memory. You trailed off after because, so there may be another rule; I need to ask you.
-Goes live when Railway deploys. No APK reinstall. Only syntax checked, not tested on the road.
+Done, Owner. Engine start still asks where you are headed and gives the bring list. The full travel protocol, including the meal co-pilot, now runs only once the vehicle is really moving, using phone GPS speed or truck OBD speed.
+The bug was that the truck was only checked every 20 minutes while running, one failed dongle read counted as engine off, and the phone sent no speed. Now it checks every 2 minutes, and if movement starts without the engine question being asked, it asks then.
+The server side is live on deploy. Reinstall the APK to get faster location updates, phone speed and OBD speed. Without it, speed is worked out from location fixes. Not yet tested on a real drive.
