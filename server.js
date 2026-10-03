@@ -2727,7 +2727,7 @@ state.speakers ||= [];
 const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 65);
 for (const x of state.speakers) if (x.volume === 30 || x.volume === 45) delete x.volume;   // the old default was saved onto speakers; let them follow the new one
 const norm = x => String(x || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-function pickSpeaker(hint) {
+let pickSpeaker = function (hint) {
   const sp = state.speakers;
   if (!sp.length) return { name: process.env.BT_SPEAKER_NAME || 'Rockville', volume: DEFAULT_VOLUME };   // nothing taught yet: old default
   const h = norm(hint);
@@ -2736,6 +2736,17 @@ function pickSpeaker(hint) {
   if (here) { const m = sp.find(x => norm(x.area) && (norm(here.name).includes(norm(x.area)) || norm(x.area).includes(norm(here.name)))); if (m) return m; }
   if (sp.length === 1) return sp[0];
   return null;
+};
+// The shop speaker is the Rockville; a desk headset (Arctis Nova Pro Omni) must never be picked for the shop.
+const isHeadset = x => /arctis|nova pro|headset|omni/i.test(`${x?.name} ${x?.alias}`);
+{
+  const _pick = pickSpeaker;
+  pickSpeaker = hint => {
+    const m = _pick(hint);
+    const shop = /shop/i.test(`${hint || ''} ${currentPlace()?.name || ''} ${m?.area || ''}`);
+    if (shop && (!m || isHeadset(m))) { const r = state.speakers.find(x => /rockville/i.test(`${x.name} ${x.alias}`)); if (r) return r; }
+    return m;
+  };
 }
 async function connectSpeaker(hint) {
   const sp = pickSpeaker(hint);
@@ -2975,9 +2986,13 @@ async function musicViaPhone({ action, query, kind, volume, speaker }) {
   const say = r => (r.ok ? r.detail : 'Phone problem: ' + r.detail);
   const notes = [];
   if (action === 'start') { const c = await connectSpeaker(speaker); notes.push(c.text); if (!c.ok && !pickSpeaker(speaker)) return c.text; }
+  if (action === 'resume_last') {   // resume whatever media played last (YouTube etc.): the one place the generic media key is used on purpose
+    const r = await deviceAction('media_key', { key: 'play' }, 8000);
+    return r.ok ? 'Resuming whatever was playing last (not Spotify specifically).' : say(r);
+  }
   if (action === 'start' || (action === 'play' && !query) || action === 'resume') {
-    const r = await deviceAction('spotify_resume', {}, 15000);
-    return notes.concat(r.ok ? 'Spotify is opening and resuming your most recent listening.' : say(r)).join(' ');
+    const r = await deviceAction('spotify_resume', {}, 15000);   // opens the Spotify app and presses Play in Spotify only
+    return notes.concat(r.ok ? 'Spotify is opening and resuming your most recent Spotify listening.' : say(r)).join(' ');
   }
   if (action === 'play') { const r = await deviceAction('spotify_search', { query, kind: kind || 'track' }, 15000); return say(r); }
   if (['pause', 'next', 'previous'].includes(action)) { const r = await deviceAction('media_key', { key: action }, 8000); return r.ok ? { pause: 'Paused.', next: 'Skipped.', previous: 'Previous track.' }[action] : say(r); }
@@ -2987,6 +3002,7 @@ async function musicViaPhone({ action, query, kind, volume, speaker }) {
 }
 handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
   if (action === 'close' || action === 'stop') return handlers.bluetooth_disconnect({ device: speaker });   // stop, force-close Spotify, drop the speaker
+  if (action === 'resume_last') return musicViaPhone({ action, query, kind, volume, speaker });
   if (!spo.configured() || !spoRef()) return musicViaPhone({ action, query, kind, volume, speaker });
   const r = spoRef();
   try {
@@ -3019,7 +3035,7 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
   const _music = handlers.music_control;
   const WANTS_MUSIC = /\b(music|tunes?|songs?|spotify|playlist|play|put on|turn on|start|resume|speaker|bluetooth|god ?mode|take over|queue|album|artist|radio)\b/i;
   handlers.music_control = async a => {
-    const starts = ['start', 'play', 'resume'].includes(a?.action);
+    const starts = ['start', 'play', 'resume', 'resume_last'].includes(a?.action);
     if (starts) {
       const said = turn?.text || '';
       if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said)) {

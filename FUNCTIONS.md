@@ -31,7 +31,7 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A5 | Reminder / mention / question box | ✅ | Per place: while there, arrive, leave, headed there, not there; once-only; yes/no replies. |
 | A6 | Bring + grab lists | ✅ | "Bring the drill to the Camden house", "grab the film before I leave". |
 | A7 | Everyday check-ins | ✅ | Eaten yet, check with Princess, dogs' food. Editable. |
-| A8 | Music: Spotify + Rockville speaker | ✅ | Tasker for Bluetooth. Music off = close action: force-closes Spotify + disconnects speaker. |
+| A8 | Music: Spotify + Rockville speaker | ✅ | Tasker for Bluetooth. "Play music" = Spotify only; "resume last media" (resume_last) = YouTube etc. Music off = close action: force-closes Spotify + disconnects speaker. |
 | A9 | Phone alerts (Pushover, JARVIS sound) | ✅ | |
 | A10 | Crypto watch + briefs | ✅ | Analysis only, never trades. |
 | A11 | Self-repair | ✅ | Jarvis edits and redeploys himself after the Owner says yes. |

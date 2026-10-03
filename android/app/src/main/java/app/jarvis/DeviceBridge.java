@@ -224,6 +224,15 @@ public class DeviceBridge {
     am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
   }
 
+  /** Media key sent ONLY to the Spotify app, so Android cannot hand it to YouTube or whatever else played last. */
+  private void mediaKeyToSpotify(String key) {
+    int code = "pause".equals(key) ? KeyEvent.KEYCODE_MEDIA_PAUSE : KeyEvent.KEYCODE_MEDIA_PLAY;
+    for (int act : new int[]{KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP}) {
+      Intent b = new Intent(Intent.ACTION_MEDIA_BUTTON).setPackage("com.spotify.music").putExtra(Intent.EXTRA_KEY_EVENT, new KeyEvent(act, code));
+      try { ctx.sendBroadcast(b); } catch (Exception ignored) {}
+    }
+  }
+
   private void backToJarvis(long delay) {
     ui.postDelayed(() -> {
       Intent back = new Intent(ctx, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("silent", true);
@@ -237,10 +246,10 @@ public class DeviceBridge {
     if (i == null) { reply(id, false, "Spotify is not installed on the phone."); return; }
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     ctx.startActivity(i);
-    ui.postDelayed(() -> mediaKey("play"), 3500);
-    ui.postDelayed(() -> mediaKey("play"), 6000); // second press is ignored if it is already playing
+    ui.postDelayed(() -> mediaKeyToSpotify("play"), 3500);
+    ui.postDelayed(() -> mediaKeyToSpotify("play"), 6000); // second press is ignored if it is already playing
     backToJarvis(7500);
-    reply(id, true, "opened Spotify and pressed play; it resumes what played last");
+    reply(id, true, "opened Spotify and pressed play in Spotify only; it resumes what Spotify played last");
   }
 
   private void spotifySearch(String id, String query, String kind) {

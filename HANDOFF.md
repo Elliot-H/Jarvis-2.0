@@ -356,3 +356,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Watchlist additions: single acknowledgement (2026-10-03)
 - Standing rule in `config/persona.md` ("Watchlist additions") plus a note in the `crypto_watch` tool description: adding a ticker/coin to the watchlist gets one short acknowledgement, no re-confirmation, no "see it on screen?" offer; crypto adds never get a follow-up question.
+
+## Music vs resume-last-media (2026-10-03)
+- Bug: "get some tunes going" resumed YouTube. Cause: `spotify_resume` opened Spotify but pressed a GLOBAL media Play key, which Android gives to the most recent media session. Now `DeviceBridge.mediaKeyToSpotify` sends the key only to com.spotify.music (needs an APK reinstall; until then the old behaviour remains).
+- `music_control` start/play/resume = Spotify only. New action `resume_last` = global media Play key (YouTube etc.), persona: "resume YouTube / what I was watching / last media".
+- `pickSpeaker` now never returns a headset (Arctis/Nova/Omni) for the shop; it falls back to the taught Rockville. Default volume stays 65%. Live speaker data lives on the phone backup, so say "list my speakers" to confirm shop = Rockville.

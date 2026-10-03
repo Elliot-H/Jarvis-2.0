@@ -1,7 +1,8 @@
 STATUS: done
-TIME: 2026-10-03T16:52:10Z
-REQUEST: Stop re-confirming and the "see it on screen" offer after watchlist additions; crypto adds never ask a follow-up.
+TIME: 2026-10-03T17:30:00Z
+REQUEST: Music commands must always launch Spotify, with a separate command to resume YouTube/last media; shop speaker must be the Rockville at 65%.
 RESULT:
-Owner, I added a permanent rule to Jarvis's persona. Adding a ticker or coin to the watchlist now gets one short acknowledgement and nothing else.
-The on-screen question is switched off for watchlist additions, and crypto additions never get a follow-up question.
-It goes live when Railway redeploys. No APK reinstall needed.
+Owner, "play music", "get some tunes going" and "put some music on" now mean Spotify only, and the Android app sends the play key to Spotify itself, so it can no longer land on YouTube.
+There is a new separate command: say "resume YouTube" or "resume what I was watching" and Jarvis resumes the last media.
+The shop can never pick the Arctis headset now; it falls back to the Rockville, and the default volume stays 65 percent.
+The server side goes live on the Railway redeploy. The Spotify-only play key needs an APK reinstall. I could not read your live speaker list from here, so say "list my speakers" to confirm the shop is the Rockville.
