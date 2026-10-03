@@ -1,9 +1,8 @@
 STATUS: done
-TIME: 2026-10-03T18:00:00Z
-REQUEST: Fix shop music not actually playing; verify playback, report FAILED honestly, real status, low default volume.
+TIME: 2026-10-03T17:23:58Z
+REQUEST: Fix the leaving-a-saved-place departure trigger that failed on Oct 2.
 RESULT:
-Owner, music start now opens Spotify, presses play through Spotify's own session, then reads back what the phone is really playing, with up to three attempts.
-If it still is not playing, Jarvis now says FAILED with the actual reason instead of claiming success, and status returns the real track, artist and playing or paused.
-The server side goes live on the Railway redeploy. The phone side needs an APK rebuild and reinstall, and I could not compile the Android code here, so please check the build.
-After reinstalling, turn on Notification access for Jarvis in Android settings, otherwise Jarvis can only tell audio is playing, not the track.
-Default speaker volume is now 40 percent, and the shop still picks the Rockville.
+Owner, the engine-start question and the leave-the-perimeter trigger were already in place from last night. I closed two remaining gaps.
+Jarvis now treats a truck parked just outside the shop's edge as still at the shop, so the "leaving the shop, or headed somewhere" question names the shop.
+A quick key-off and restart between two engine checks is now caught from the engine run-time reading, then it asks and reads the bring list and leave reminders.
+The server part goes live on the Railway redeploy. The run-time reading needs an APK rebuild and reinstall, which I could not compile here; until then it behaves as before.
