@@ -1,8 +1,7 @@
-STATUS: needs-owner
-TIME: 2026-10-03T15:35:15Z
-REQUEST: Mic mute / Deaf Mode toggle by voice with a clear HUD indicator.
+STATUS: done
+TIME: 2026-10-03T15:48:27Z
+REQUEST: Add Chick-fil-A (lunch) alongside Wawa breakfast burritos in the driving co-pilot food protocol.
 RESULT:
-Owner, mic mute already existed. I added "deaf mode", "go into deaf mode" and "mic mute" to the phrases that trigger it, next to "mute the mic", "stop listening", "mic off" and "go deaf".
-When muted, the mic chip, core and mic button go red, and there is now a blinking red banner at the bottom: MIC MUTED, DEAF MODE, TAP MIC TO RESUME.
-I did not add voice unmute. A fully muted mic cannot hear "unmute" or "I'm back", so you tap the mic button, the core, or press space. Tell me if you want a softer deaf mode that still listens for the unmute phrase.
-Live on deploy for the web app; reinstall of the APK is not needed.
+Owner, the co-pilot now suggests Chick-fil-A at lunch and Wawa breakfast burritos at breakfast, with a nearby open spot if the Places key is set.
+A saved memory fact about a specific meal still overrides these defaults.
+It goes live when Railway redeploys. No APK reinstall needed.

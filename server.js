@@ -1228,14 +1228,21 @@ function driveStart(src, mph) { // movement just began: stage 2 of the travel pr
 }
 if (!process.env.JARVIS_SMOKE) setInterval(() => { const dr = state.drive; if (dr?.moving && Date.now() - (dr.lastMoveAt || 0) > MOVE_HOLD) { dr.moving = false; dr.endedAt = Date.now(); dlog('drive-end', { minutes: Math.round((dr.endedAt - dr.since) / 60e3) }); saveState(); } }, 30_000);
 function isDriving() { return navLive() || !!state.drive?.moving; }
-function foodPref() { // newest memory fact naming something he likes to eat/get; chain = a capitalised "at/from X"
-  for (const m of [...state.memory].reverse()) {
-    const f = m.fact, food = f.match(/\b(?:likes?|loves?|enjoys?|favou?rites?(?: \w+)? (?:is|are)|usually (?:gets|orders|eats)|always (?:gets|orders|eats))\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:from|at|for|when|on|in)\b|[.,;]|$)/i);
-    if (!food || !/food|eat|meal|breakfast|lunch|dinner|burrito|sandwich|pizza|coffee|taco|burger|wawa/i.test((m.topic || '') + ' ' + f)) continue;
-    const chain = f.match(/\b(?:at|from)\s+([A-Z][\w'&-]+(?: [A-Z][\w'&-]+)?)/);
-    return { food: food[1].trim(), chain: chain ? chain[1] : '' };
-  }
-  return null;
+const MEAL_DEFAULTS = { breakfast: { food: 'breakfast burritos', chain: 'Wawa' }, lunch: { food: 'chicken sandwiches', chain: 'Chick-fil-A' } };   // Owner's stated preferences; a memory fact naming that meal wins
+function foodPref(slot) { // slot-specific memory fact, else the built-in default for that slot, else any liked-food fact; chain = a capitalised "at/from X"
+  const SLOTS = ['breakfast', 'lunch', 'dinner'];
+  const find = ok => {
+    for (const m of [...state.memory].reverse()) {
+      const f = m.fact, food = f.match(/\b(?:likes?|loves?|enjoys?|favou?rites?(?: \w+)? (?:is|are)|usually (?:gets|orders|eats)|always (?:gets|orders|eats))\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:from|at|for|when|on|in)\b|[.,;]|$)/i);
+      if (!food || !/food|eat|meal|breakfast|lunch|dinner|burrito|sandwich|pizza|coffee|taco|burger|wawa|chick/i.test((m.topic || '') + ' ' + f)) continue;
+      const named = SLOTS.filter(x => new RegExp('\\b' + x + '\\b', 'i').test(f));
+      if (!ok(named)) continue;
+      const chain = f.match(/\b(?:at|from)\s+([A-Z][\w'&-]+(?: [A-Z][\w'&-]+)?)/);
+      return { food: food[1].trim(), chain: chain ? chain[1] : '' };
+    }
+    return null;
+  };
+  return find(n => slot && n.includes(slot)) || MEAL_DEFAULTS[slot] || find(n => !n.length || (slot && n.includes(slot))) || null;
 }
 async function nearbySpot(pref) { // optional: needs GOOGLE_PLACES_KEY; any failure just means no place is named
   const key = process.env.GOOGLE_PLACES_KEY, L = state.location;
@@ -1261,7 +1268,7 @@ async function copilotTick() {
   const slot = mealSlot(minsNow());
   if (!slot || cp.topics.includes('meal') || cp.declined.includes('meal:' + slot) || cp.ate.includes(slot)) return;
   if (slot === 'breakfast' && state.meal?.day === c.day && state.meal.kind === 'both') return;
-  const pref = foodPref() || { food: '', chain: '', query: slot + ' food' };   // no stored preference: still offer, generic
+  const pref = foodPref(slot) || { food: '', chain: '', query: slot + ' food' };   // no stored preference: still offer, generic
   cp.topics.push('meal'); cp.lastAt = now; cp.sent++;   // claimed before the await so a slow lookup cannot double-fire
   const spot = await nearbySpot(pref);
   const when = `You haven't had ${slot} yet, sir.`;
