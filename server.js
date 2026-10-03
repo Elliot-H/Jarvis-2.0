@@ -1091,6 +1091,20 @@ async function destAnswer(q, text) {
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
   return true;
 }
+// ===== TRAVEL PROTOCOL =====
+// One protocol for everything driving. Triggers (shared detection, travelContext): a live Google Maps trip, the OBD dongle showing the engine running,
+// or GPS leaving a saved place. Parts: (1) geolocation: places, Maps destination/ETA (navUpdate); (2) vehicle: engine start asks "leaving or headed
+// somewhere?" (vehicleDeparture/departAnswer), bring list + leave/heading reminders, cleared on arrival; (3) co-pilot meal nudges (copilotTick,
+// a sub-function of travelTick); (4) departure checklist (askChecklist) and arrival lines (onMove/navArrive). Every departure path goes through
+// travelDepartLines, so "Leaving X, sir." is always spoken: a Maps/engine departure used to mark the leave as handled while saying nothing.
+const placeSpoken = p => placeKey(p.name) === 'shop' ? 'the shop' : p.kind === 'home' ? 'home' : p.name;
+function travelDepartLines(from, destName) {
+  const lv = from ? eventLines('leave', from, Math.random, true) : [];
+  const out = [];
+  if (from) { const fp = findPlace(from); out.push(lv.length ? lv[0] : `Leaving ${fp ? placeSpoken(fp) : from}, sir.`, ...lv.slice(1)); }
+  if (destName) out.push(bringLine(destName), ...eventLines('heading', destName, Math.random, true));
+  return out.filter(Boolean);
+}
 // Vehicle start = he is about to leave (first departure trigger). Asked once per drive, answered here with no AI call.
 const DEPART_YES = /^(yes|yeah|yep|yup|leaving|i'?m leaving|heading out|headed out|taking off|on my way|going)\b/, DEPART_NO = /^(no|nope|nah|not yet|staying|just (?:warming|starting|checking)|not leaving)\b/;
 function vehicleDeparture(v) {
@@ -1101,7 +1115,7 @@ function vehicleDeparture(v) {
   state.pendingQ = { type: 'depart', from: here ? here.name : '', vehicle: v.name, at: Date.now() };
   state.departed = { place: here ? here.name : '', at: Date.now(), answered: false };
   saveState();
-  const lead = here ? `Are you leaving ${placeKey(here.name) === 'shop' ? 'the shop' : here.kind === 'home' ? 'home' : here.name}, or headed somewhere?` : 'Where are you headed, sir?';
+  const lead = here ? `Are you leaving ${placeSpoken(here)}, or headed somewhere?` : 'Where are you headed, sir?';
   return opts.length ? `${lead} ${listJoin(opts)}?` : lead;
 }
 async function departAnswer(q, text) {
@@ -1116,11 +1130,11 @@ async function departAnswer(q, text) {
   if (!dest) { // leaving, destination unknown: still give the leave reminders for here
     if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
     finish();
-    const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
+    const lv = q.from ? travelDepartLines(q.from) : [];
     return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' '));
   }
   finish();
-  const parts = [...(q.from ? eventLines('leave', q.from, Math.random, true) : []), bringLine(dest.name), ...eventLines('heading', dest.name, Math.random, true)].filter(Boolean);
+  const parts = travelDepartLines(q.from, dest.name);
   return say((parts.length ? parts.slice(0, 3) : ['Very good, sir.']).join(' '));
 }
 handlers.heading_to = async ({ place }) => {
@@ -1178,9 +1192,11 @@ function navUpdate(body) {
   if (isNew && pl && !(state.navHeaded?.place === pl.name && now - state.navHeaded.at < 30 * 60e3)) {
     state.navHeaded = { place: pl.name, at: now };
     const here = currentPlace(), parts = [];
-    if (here && placeKey(here.name) !== placeKey(pl.name)) { parts.push(...eventLines('leave', here.name, Math.random, true)); state.departed = { place: here.name, at: now, answered: true }; }
-    parts.push(bringLine(pl.name) || '', ...eventLines('heading', pl.name, Math.random, true));
+    const leavingHere = here && placeKey(here.name) !== placeKey(pl.name);
+    if (leavingHere) state.departed = { place: here.name, at: now, answered: true };
+    parts.push(...travelDepartLines(leavingHere ? here.name : '', pl.name));
     const text = parts.filter(Boolean).slice(0, 3).join(' ') || `Heading to ${pl.name}, sir.${state.nav.eta ? ' ETA ' + state.nav.eta + '.' : ''}`;
+    dlog('nav-depart', { from: here ? here.name : null, dest: pl.name, text: text.slice(0, 120) });
     saveState(); deliver(text, `Heading to ${pl.name}`, true);
   } else saveState();
   return { ok: true, navigating: true, dest, place: state.nav.place || null, eta: state.nav.eta || null };
@@ -1193,16 +1209,17 @@ handlers.maps_nav_status = async () => {
   return `Navigating: yes. Destination: ${n.dest || 'unknown'}${n.place ? ` (saved place ${n.place})` : ''}. ETA: ${n.eta || 'unknown'}${n.minutes != null ? `, about ${n.minutes} min left` : ''}. Last updated ${age} min ago.`;
 };
 if (!process.env.JARVIS_SMOKE) setInterval(() => { if (state.nav?.on && !navLive()) { state.nav = { ...state.nav, on: false, lastDest: state.nav.dest, dest: '', place: '' }; saveState(); } }, 60_000);
-// ---------- Co-pilot: unprompted, rare suggestions while the Owner is driving ----------
+// ---------- Co-pilot (sub-module of the travel protocol): unprompted, rare suggestions while the Owner is driving ----------
 // Driving = Google Maps trip live, or the truck engine seen running (OBD) recently. Today only a meal nudge: not eaten in this meal slot +
 // a food fact in long-term memory (+ a nearby spot if GOOGLE_PLACES_KEY is set). Max COPILOT_MAX_DAY per day, once per topic per trip,
 // a decline silences that meal for the day, never over a pending question or in quiet hours. Offer, not nag.
 const COPILOT_MAX_DAY = Number(process.env.COPILOT_MAX_DAY || 2), COPILOT_SETTLE_MS = Number(process.env.COPILOT_SETTLE_MIN || 6) * 60e3;
 const mealSlot = mins => mins >= 360 && mins < 660 ? 'breakfast' : mins >= 690 && mins < 870 ? 'lunch' : mins >= 1050 && mins < 1230 ? 'dinner' : '';
-function isDriving() {
-  if (navLive()) return true;
-  return (state.vehicles || []).some(v => v.lastRun && !v.sawOff && Date.now() - v.lastRun < 25 * 60e3);
+function travelContext() { // the one driving-context detector: Maps trip live and/or an OBD vehicle with the engine running
+  const nav = navLive(), veh = (state.vehicles || []).some(v => v.lastRun && !v.sawOff && Date.now() - v.lastRun < 25 * 60e3);
+  return { driving: nav || veh, nav, vehicle: veh, here: currentPlace(), dest: nav ? (state.nav.place || state.nav.dest || '') : '' };
 }
+const isDriving = () => travelContext().driving;
 function foodPref() { // newest memory fact naming something he likes to eat/get; chain = a capitalised "at/from X"
   for (const m of [...state.memory].reverse()) {
     const f = m.fact, food = f.match(/\b(?:likes?|loves?|enjoys?|favou?rites?(?: \w+)? (?:is|are)|usually (?:gets|orders|eats)|always (?:gets|orders|eats))\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z' -]{2,40}?)(?:\s+(?:from|at|for|when|on|in)\b|[.,;]|$)/i);
@@ -1225,12 +1242,16 @@ async function nearbySpot(pref) { // optional: needs GOOGLE_PLACES_KEY; any fail
     return { name: p.displayName?.text || pref.chain, miles: km(L, { lat: p.location.latitude, lon: p.location.longitude }) * 0.621 };
   } catch { return null; }
 }
-async function copilotTick() {
+async function travelTick() { // the protocol's clock: trip start/end from the shared context, then the co-pilot sub-module
   const now = Date.now(), c = nowCtx();
-  const cp = state.copilot = (state.copilot?.day === c.day ? state.copilot : { day: c.day, sent: 0, declined: [], ate: [], topics: [] });
-  if (!isDriving()) { if (cp.trip && !cp.tripEnd) cp.tripEnd = now; return; }
+  const cp = state.copilot = (state.copilot?.day === c.day ? state.copilot : { day: c.day, sent: 0, declined: [], ate: [], topics: [], trip: state.copilot?.trip, tripEnd: state.copilot?.tripEnd });
+  if (!travelContext().driving) { if (cp.trip && !cp.tripEnd) cp.tripEnd = now; return; }
   if (!cp.trip || (cp.tripEnd && now - cp.tripEnd > 20 * 60e3)) { cp.trip = now; cp.topics = []; }   // a new drive
   cp.tripEnd = null;
+  return copilotTick(cp, now);
+}
+async function copilotTick(cp, now) { // co-pilot sub-module: meal nudge (only called while driving)
+  const c = nowCtx();
   if (cp.sent >= COPILOT_MAX_DAY || now - cp.trip < COPILOT_SETTLE_MS || now - (cp.lastAt || 0) < 40 * 60e3) return;
   if (quietNow() || state.pendingQ || busy) return;
   const slot = mealSlot(minsNow());
@@ -1255,7 +1276,7 @@ async function copilotAnswer(q, text) {
   saveState(); return false;   // unrelated request: let it through
 }
 handlers.ate_now = async () => { const c = nowCtx(), s = mealSlot(minsNow()) || 'breakfast'; if (state.copilot?.day !== c.day) state.copilot = { day: c.day, sent: 0, declined: [], ate: [], topics: [] }; (state.copilot.ate ||= []).push(s); saveState(); return 'Recorded. Say "Noted, sir."'; };
-if (!process.env.JARVIS_SMOKE) setInterval(() => copilotTick().catch(e => console.warn('copilot', e.message)), 60_000);
+if (!process.env.JARVIS_SMOKE) setInterval(() => travelTick().catch(e => console.warn('travel', e.message)), 60_000);
 handlers.bring_add = async ({ place, item }) => {
   const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
