@@ -353,3 +353,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Alert "Add to watch list" for coins (2026-10-03, maintenance)
 - Bug: the button on a crypto alert (e.g. RAIN/USD) sent RAINUSD to `signal_watch add`, which treated it as a stock and failed ("Chart data source returned 404 for RAINUSD"). Now `signal_watch add` recognises RAIN/USD, RAIN-USD, RAINUSD(T): looks the coin up on CoinGecko by exact symbol (`coinFallback`), learns it (`state.coinIds`) and puts it on the crypto watch list (`state.watchlist`); live price from Kraken WS, candles/verdict from Kraken OHLC when Kraken lists it. Reply starts with "Watching" so `/watch-add` shows success.
+
+## Watchlist additions: single acknowledgement (2026-10-03)
+- Standing rule in `config/persona.md` ("Watchlist additions") plus a note in the `crypto_watch` tool description: adding a ticker/coin to the watchlist gets one short acknowledgement, no re-confirmation, no "see it on screen?" offer; crypto adds never get a follow-up question.

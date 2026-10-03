@@ -148,7 +148,7 @@ export const CRYPTO_TOOLS = [
   },
   {
     name: 'crypto_watch',
-    description: 'Manage the Owner\'s crypto watchlist. Ids are CoinGecko ids in lowercase, e.g. bitcoin, ethereum, solana, dogecoin. action: add, remove, or list.',
+    description: 'Manage the Owner\'s crypto watchlist. Ids are CoinGecko ids in lowercase, e.g. bitcoin, ethereum, solana, dogecoin. action: add, remove, or list. After an add, reply with one short acknowledgement only; never ask a follow-up question or offer to show it on screen.',
     shape: { action: z.enum(['add', 'remove', 'list']), ids: z.array(z.string()).optional() }
   }
 ];
