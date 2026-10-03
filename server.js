@@ -2714,6 +2714,14 @@ const spoRef = () => state.spotifyRefresh || process.env.SPOTIFY_REFRESH_TOKEN |
 const spoFail = e => String(e.message || e) === 'NO_DEVICE'
   ? 'Spotify has no player to use. Spotify must be open on the phone.'
   : 'Spotify problem: ' + String(e.message || e);
+async function spoVerify(r) {   // read back Spotify's own state, 4 tries
+  for (let i = 0; i < 4; i++) {
+    await new Promise(x => setTimeout(x, 1500));
+    const st = await spo.status(r).catch(() => null);
+    if (st && st.playing) return `Playing ${st.track} by ${st.artists} on ${st.device} (volume ${st.volume}%).`;
+  }
+  return '';
+}
 async function spotifyReady() {
   const r = spoRef(); const dev = await spo.pickDevice(r, 0);
   if (dev) return dev;
@@ -2724,7 +2732,7 @@ async function spotifyReady() {
 }
 // Bluetooth speakers he has taught Jarvis: { name (exact Bluetooth name), alias, area, volume }.
 state.speakers ||= [];
-const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 65);
+const DEFAULT_VOLUME = Number(process.env.DEFAULT_VOLUME || 40);   // low by default; a speaker's saved volume wins
 for (const x of state.speakers) if (x.volume === 30 || x.volume === 45) delete x.volume;   // the old default was saved onto speakers; let them follow the new one
 const norm = x => String(x || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 let pickSpeaker = function (hint) {
@@ -2756,7 +2764,7 @@ async function connectSpeaker(hint) {
   if (!c.ok) return { ok: false, text: `Could not confirm the ${sp.alias || sp.name}: ${c.detail}` };
   const vol = sp.volume ?? DEFAULT_VOLUME;
   await deviceAction('set_volume', { percent: vol }, 6000);
-  return { ok: true, text: `SUCCESS: the ${sp.alias || sp.name} speaker is connected (${c.detail}), volume ${vol}%. Tell the Owner it is connected.`, sp };
+  return { ok: true, text: `SUCCESS: the ${sp.alias || sp.name} speaker is connected (${c.detail}), volume ${vol}%. Connected only; this does NOT mean music is playing.`, sp };
 }
 handlers.bluetooth_paired = async () => { const r = await deviceAction('bt_paired', {}, 10000); return r.ok ? 'Paired devices on the phone: ' + r.detail : 'Phone problem: ' + r.detail; };
 handlers.speaker_save = async ({ name, alias, area, volume }) => {
@@ -2982,22 +2990,74 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
 handlers.bluetooth_connect = async ({ device }) => { const c = await connectSpeaker(device); return c.text; };
 
 // Without the Spotify Web API (Spotify limits who can create developer apps), the Android app drives the Spotify app directly.
+// Real playback read-back from the phone (media sessions + audio state). Never guesses.
+async function phoneMedia() {
+  const r = await deviceAction('media_status', {}, 6000).catch(e => ({ ok: false, detail: String(e) }));
+  if (!r.ok) return { ok: false, why: r.detail };
+  try { return { ok: true, ...JSON.parse(r.detail) }; } catch { return { ok: false, why: 'unreadable media status: ' + String(r.detail).slice(0, 120) }; }
+}
+const SPOTIFY_PKG = 'com.spotify.music';
+function describeMedia(m) {
+  if (!m.ok) return { playing: false, text: `I cannot read the phone's playback: ${m.why}` };
+  const sp = (m.sessions || []).find(x => x.pkg === SPOTIFY_PKG);
+  const other = (m.sessions || []).find(x => x.pkg !== SPOTIFY_PKG && x.state === 'playing');
+  if (m.listener) {
+    if (sp && sp.state === 'playing' && m.audio) return { playing: true, text: `Playing: ${sp.title || 'unknown track'} by ${sp.artist || 'unknown artist'} on Spotify${m.bt ? ' over Bluetooth' : ' on the PHONE speaker (not Bluetooth)'}, volume ${m.volume}%.`, bt: m.bt };
+    if (sp && sp.state === 'playing') return { playing: false, text: `Spotify says playing (${sp.title || '?'}) but the phone reports no audio output.` };
+    if (sp) return { playing: false, text: `Spotify is ${sp.state}${sp.title ? ` on "${sp.title}" by ${sp.artist}` : ''}.${other ? ` ${other.pkg} is playing instead.` : ''}` };
+    return { playing: false, text: other ? `Spotify has no active session; ${other.pkg} is playing instead.` : 'Spotify has no active session, so nothing is playing.' };
+  }
+  // No Notification access: only audio state is knowable.
+  return { playing: !!m.audio, text: m.audio ? `Audio is playing on the phone${m.bt ? ' over Bluetooth' : ' (phone speaker, not Bluetooth)'}, volume ${m.volume}%, but I cannot see the track or confirm it is Spotify (grant Jarvis Notification access to enable that).` : 'No audio is playing on the phone.', bt: m.bt, blind: true };
+}
+async function pollPlaying(ms) {
+  let last = { playing: false, text: 'no reading' };
+  const end = Date.now() + ms;
+  do { last = describeMedia(await phoneMedia()); if (last.playing) return last; await new Promise(r => setTimeout(r, 1500)); } while (Date.now() < end);
+  return last;
+}
+// Start Spotify and PROVE it is playing: up to 3 attempts, each with a different start method, each read back.
+async function startAndVerify() {
+  const attempts = [['launch', 'open Spotify and press Play'], ['search', 'send Spotify a play-music request'], ['launch', 'open Spotify and press Play again']];
+  const log = [];
+  for (let n = 0; n < attempts.length; n++) {
+    const [mode, label] = attempts[n];
+    const r = await deviceAction('spotify_resume', { mode }, 15000);
+    if (!r.ok) { log.push(`attempt ${n + 1} (${label}): ${r.detail}`); if (/not installed/i.test(r.detail)) break; continue; }
+    const v = await pollPlaying(n === 0 ? 14000 : 12000);
+    log.push(`attempt ${n + 1} (${label}): ${v.text}`);
+    if (v.playing) return { ok: true, text: v.text, log };
+  }
+  return { ok: false, text: log.join(' | '), log };
+}
+const failed = (why) => `FAILED: music is NOT confirmed playing. ${why} Tell the Owner it failed and give this reason; do NOT claim success.`;
 async function musicViaPhone({ action, query, kind, volume, speaker }) {
   const say = r => (r.ok ? r.detail : 'Phone problem: ' + r.detail);
   const notes = [];
-  if (action === 'start') { const c = await connectSpeaker(speaker); notes.push(c.text); if (!c.ok && !pickSpeaker(speaker)) return c.text; }
+  if (action === 'start') {
+    const c = await connectSpeaker(speaker); notes.push(c.text);
+    if (!c.ok) return failed(`Speaker step failed: ${c.text}`);
+  }
   if (action === 'resume_last') {   // resume whatever media played last (YouTube etc.): the one place the generic media key is used on purpose
     const r = await deviceAction('media_key', { key: 'play' }, 8000);
-    return r.ok ? 'Resuming whatever was playing last (not Spotify specifically).' : say(r);
+    if (!r.ok) return say(r);
+    const v = await pollPlaying(8000);
+    return v.playing ? 'SUCCESS: ' + v.text : failed('The play key was sent but nothing is playing. ' + v.text);
   }
   if (action === 'start' || (action === 'play' && !query) || action === 'resume') {
-    const r = await deviceAction('spotify_resume', {}, 15000);   // opens the Spotify app and presses Play in Spotify only
-    return notes.concat(r.ok ? 'Spotify is opening and resuming your most recent Spotify listening.' : say(r)).join(' ');
+    const r = await startAndVerify();
+    broadcast({ type: 'activity', text: `Spotify start ${r.ok ? 'CONFIRMED' : 'FAILED'}: ${r.text}`.slice(0, 600) });
+    return r.ok ? notes.concat('SUCCESS: ' + r.text).join(' ') : notes.concat(failed(r.text)).join(' ');
   }
-  if (action === 'play') { const r = await deviceAction('spotify_search', { query, kind: kind || 'track' }, 15000); return say(r); }
+  if (action === 'play') {
+    const r = await deviceAction('spotify_search', { query, kind: kind || 'track' }, 15000);
+    if (!r.ok) return failed(r.detail);
+    const v = await pollPlaying(14000);
+    return v.playing ? `SUCCESS: asked for "${query}". ${v.text}` : failed(`Spotify was asked for "${query}" but is not playing. ${v.text}`);
+  }
   if (['pause', 'next', 'previous'].includes(action)) { const r = await deviceAction('media_key', { key: action }, 8000); return r.ok ? { pause: 'Paused.', next: 'Skipped.', previous: 'Previous track.' }[action] : say(r); }
   if (action === 'volume') { const r = await deviceAction('set_volume', { percent: Number(volume) }, 8000); return say(r); }
-  if (action === 'status') return 'I cannot see what is playing without the Spotify connection; only controls work right now.';
+  if (action === 'status') { const v = describeMedia(await phoneMedia()); return v.text; }
   return 'Unknown music action.';
 }
 handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
@@ -3019,13 +3079,15 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
       const pl = await spo.latestPlaylist(r);
       if (!pl) return notes.concat('I could not find a recent playlist.').join(' ');
       await spo.play(r, { uri: pl.uri, context: true, deviceId: dev.id });
-      return notes.concat(`Playing your latest playlist, ${pl.name}, on ${dev.name}.`).join(' ');
+      const ok = await spoVerify(r);
+      return ok ? notes.concat(`SUCCESS: ${ok}`).join(' ') : notes.concat(failed(`Spotify accepted the play command for ${pl.name} on ${dev.name} but reports nothing playing.`)).join(' ');
     }
     if (action === 'play') {
       const hit = await spo.find(r, query, kind || 'track');
       if (!hit) return `Nothing on Spotify matched "${query}".`;
       await spo.play(r, { uri: hit.uri, context: hit.context, deviceId: dev.id });
-      return `Playing ${hit.name} on ${dev.name}.`;
+      const ok = await spoVerify(r);
+      return ok ? `SUCCESS: ${ok}` : failed(`Spotify accepted the command for ${hit.name} but reports nothing playing.`);
     }
     return 'Unknown music action.';
   } catch (e) { return spoFail(e); }

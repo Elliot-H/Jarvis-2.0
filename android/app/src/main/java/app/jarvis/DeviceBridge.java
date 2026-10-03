@@ -8,7 +8,12 @@ import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.app.SearchManager;
 import android.content.Intent;
+import android.content.ComponentName;
 import android.media.AudioManager;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
+import org.json.JSONArray;
 import android.provider.MediaStore;
 import android.view.KeyEvent;
 import android.os.Build;
@@ -47,7 +52,8 @@ public class DeviceBridge {
       else if ("bt_disconnect".equals(action)) { SttBridge.noResumeUntil = Long.MAX_VALUE; btDisconnect(id, o.optString("name", "Rockville"), o.optString("task", "JarvisBTOff"), o.optBoolean("off", true)); }
       else if ("bt_paired".equals(action)) btPaired(id);
       else if ("alarms_off".equals(action)) alarmsOff(id, o.optString("task", ""));
-      else if ("spotify_resume".equals(action)) { SttBridge.noResumeUntil = 0; spotifyResume(id); }
+      else if ("spotify_resume".equals(action)) { SttBridge.noResumeUntil = 0; spotifyResume(id, o.optString("mode", "launch")); }
+      else if ("media_status".equals(action)) mediaStatus(id);
       else if ("spotify_search".equals(action)) { SttBridge.noResumeUntil = 0; spotifySearch(id, o.optString("query"), o.optString("kind")); }
       else if ("music_active".equals(action)) { boolean a = PhoneAudio.otherMusicActive((AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE)); reply(id, true, a ? "playing" : "silent"); }
       else if ("close_app".equals(action)) { SttBridge.noResumeUntil = Long.MAX_VALUE; String pk = o.optString("pkg", "com.spotify.music"); try { ((android.app.ActivityManager) ctx.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pk); reply(id, true, "closed " + pk); } catch (Exception e) { reply(id, false, String.valueOf(e)); } }
@@ -240,16 +246,71 @@ public class DeviceBridge {
     }, delay);
   }
 
-  /** Open Spotify and press Play: Spotify carries on with whatever played last (your most recent playlist). */
-  private void spotifyResume(String id) {
+  /** Active media sessions (needs Notification access for Jarvis); null when that access has not been granted. */
+  private List<MediaController> sessions() {
+    try {
+      MediaSessionManager msm = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
+      return msm.getActiveSessions(new ComponentName(ctx, JarvisNotificationListener.class));
+    } catch (Exception e) { return null; }
+  }
+
+  /** What is really playing: audio state, Bluetooth route and each media session (package, state, track, artist) as JSON. */
+  private void mediaStatus(String id) {
+    try {
+      AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+      JSONObject r = new JSONObject();
+      r.put("audio", PhoneAudio.otherMusicActive(am));
+      boolean bt = false;
+      try { for (android.media.AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) if (d.getType() == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) bt = true; } catch (Exception ignored) {}
+      r.put("bt", bt);
+      r.put("volume", Math.round(100f * am.getStreamVolume(AudioManager.STREAM_MUSIC) / Math.max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC))));
+      List<MediaController> cs = sessions();
+      r.put("listener", cs != null);
+      JSONArray arr = new JSONArray();
+      if (cs != null) for (MediaController c : cs) {
+        JSONObject s = new JSONObject();
+        s.put("pkg", c.getPackageName());
+        PlaybackState ps = c.getPlaybackState();
+        s.put("state", ps == null ? "none" : ps.getState() == PlaybackState.STATE_PLAYING ? "playing" : ps.getState() == PlaybackState.STATE_PAUSED ? "paused" : ps.getState() == PlaybackState.STATE_BUFFERING ? "buffering" : "stopped");
+        android.media.MediaMetadata md = c.getMetadata();
+        s.put("title", md == null ? "" : String.valueOf(md.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)));
+        s.put("artist", md == null ? "" : String.valueOf(md.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)));
+        arr.put(s);
+      }
+      r.put("sessions", arr);
+      reply(id, true, r.toString());
+    } catch (Exception e) { reply(id, false, "media status failed: " + e); }
+  }
+
+  /**
+   * Open Spotify in the foreground and start it.
+   * mode "launch": launcher intent, then Play via Spotify's own media session (if Notification access is granted) and a Spotify-only Play key.
+   * mode "search": Android's "play music" request (empty search) sent straight to Spotify, which starts its last/suggested listening.
+   */
+  private void spotifyResume(String id, String mode) {
+    if ("search".equals(mode)) {
+      Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage("com.spotify.music");
+      i.putExtra(SearchManager.QUERY, "");
+      i.putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*");
+      i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+      try { ctx.startActivity(i); } catch (Exception e) { reply(id, false, "Spotify would not take the play request: " + e.getMessage()); return; }
+      backToJarvis(8000);
+      reply(id, true, "sent Spotify a play-music request");
+      return;
+    }
     Intent i = ctx.getPackageManager().getLaunchIntentForPackage("com.spotify.music");
     if (i == null) { reply(id, false, "Spotify is not installed on the phone."); return; }
     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     ctx.startActivity(i);
-    ui.postDelayed(() -> mediaKeyToSpotify("play"), 3500);
-    ui.postDelayed(() -> mediaKeyToSpotify("play"), 6000); // second press is ignored if it is already playing
-    backToJarvis(7500);
-    reply(id, true, "opened Spotify and pressed play in Spotify only; it resumes what Spotify played last");
+    Runnable press = () -> {
+      List<MediaController> cs = sessions();
+      if (cs != null) for (MediaController c : cs) if ("com.spotify.music".equals(c.getPackageName())) { try { c.getTransportControls().play(); } catch (Exception ignored) {} }
+      mediaKeyToSpotify("play");
+    };
+    ui.postDelayed(press, 3500);
+    ui.postDelayed(press, 6000); // second press is ignored if it is already playing
+    backToJarvis(8000);
+    reply(id, true, "opened Spotify and pressed play in Spotify only");
   }
 
   private void spotifySearch(String id, String query, String kind) {
