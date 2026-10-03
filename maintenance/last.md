@@ -1,7 +1,7 @@
-STATUS: needs-owner
-TIME: 2026-10-03T19:10:00Z
-REQUEST: Add if/no branching (dongle seen vs geolocation moved) to step four of the "Shut the shop down" protocol.
+STATUS: done
+TIME: 2026-10-03T19:05:27Z
+REQUEST: Build the "shut the shop down" protocol with a real 5-minute timer.
 RESULT:
-Owner, I changed nothing. The "Shut the shop down" protocol is not in the repo: no code, persona text, FUNCTIONS.md row or HANDOFF.md note defines it, so there is no step four to edit.
-The only related code is the engine-start departure question for the truck's OBD dongle, which has no 5-minute timer or music offer.
-Please resend the full protocol, steps one to five, and I will build it with both branches: no dongle after 5 minutes asks about leaving or music, and truck running with no movement asks "What's going on, sir? I thought you were leaving."
+Owner, the shut the shop down protocol is built as one routine. It closes Spotify, drops the speaker, then hunts the truck and any other saved vehicle every 30 seconds.
+If the engine starts, Jarvis asks where you are headed and reads the bring list. If five minutes pass with no engine start, Jarvis asks on his own whether you are leaving or staying, and offers the shop music if you stay.
+The timer is a real scheduled callback that survives a restart. It goes live on the Railway redeploy and needs no APK reinstall. It has not been tested on the real phone yet.

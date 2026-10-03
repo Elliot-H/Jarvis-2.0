@@ -733,6 +733,7 @@ async function bucketAnswer(text) {
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
+  if (q.type === 'stay' || q.type === 'stay_music') return stayAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
   if (q.type === 'copilot') return copilotAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
@@ -2644,6 +2645,7 @@ async function obdScan(v, why = 'auto') {
   if (fresh.length) lines.push(`Heads up, sir: the ${v.name} has ${fresh.length > 1 ? 'new trouble codes' : 'a new trouble code'}, ${listJoin(fresh)}${d.mil ? ', and the check engine light is on' : ''}. Ask me what ${fresh.length > 1 ? 'they mean' : 'it means'}.`);
   else if (d.mil && !prev.mil) lines.push(`The ${v.name}'s check engine light has come on, sir.`);
   const off = !d.rpm;
+  if (state.shutdown?.active) { state.shutdown.dongleSeen = true; if (!off) shutdownSeen(v); } // "shut the shop down": the dongle answered; a running engine ends the hunt (departure question follows below)
   // Battery trend: resting readings only (engine off and not run for 2 h, so no surface charge from driving)
   if (!off && why === 'auto') { // vehicle came alive: first departure trigger, once per drive
     // A new start = never seen running, OR seen off/unreachable since it last ran (key off, then restart even a minute later), OR a long gap.
@@ -2672,12 +2674,14 @@ async function obdScan(v, why = 'auto') {
 // Not connected yet (or last try failed) -> retry every OBD_RETRY_MIN so it connects as soon as it is in range; once connected, read
 // every OBD_EVERY_MIN. Alerts only for something new or concerning (see obdScan).
 const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 3) * 60e3;
+const HUNT_GAP = Number(process.env.HUNT_GAP_SEC || 30) * 1e3;
 if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) state.vehicles.push({ name: 'truck', dongle: 'OBDII' }); }
 async function obdTick() {
   if (!deviceClients.size || busy) return;
   for (const v of state.vehicles) {
-    const gap = v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_WATCH : OBD_RETRY;
-    if (!v.lastTry || Date.now() - v.lastTry > gap) { try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } }
+    const gap = state.shutdown?.active ? HUNT_GAP : v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_WATCH : OBD_RETRY; // "shut the shop down" hunt: look every 30 s
+    if (v.scanning) continue;
+    if (!v.lastTry || Date.now() - v.lastTry > gap) { v.scanning = true; try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } finally { v.scanning = false; } }
   }
 }
 if (!process.env.JARVIS_SMOKE) setInterval(obdTick, 60_000);
@@ -2947,6 +2951,87 @@ handlers.wakeup_call = async ({ seconds }) => {
     return 'DONE: wake-up call finished and already spoken. Say nothing more.';
   } finally { wakeCallBusy = false; }
 };
+// ---------- "Shut the shop down" protocol (A25): close Spotify -> drop the speaker -> hunt the vehicle dongle on a real 5-minute timer ----------
+// state.shutdown {active, startedAt, deadline, round, dongleSeen}. The timer is a real setTimeout, re-armed from state after a restart.
+// Engine start inside the window = normal departure question + bring list (obdScan does that). No start by the deadline = ask: still leaving, or staying?
+const SHUTDOWN_MIN = Number(process.env.SHUTDOWN_MIN || 5), SHUTDOWN_ROUNDS = 3;
+let shutdownTimer = null;
+function shutdownEnd() { clearTimeout(shutdownTimer); shutdownTimer = null; if (state.shutdown) { state.shutdown.active = false; saveState(); } }
+function shutdownSeen(v) {
+  if (!state.shutdown?.active) return;
+  dlog('shutdown-engine-start', { vehicle: v.name, round: state.shutdown.round }); shutdownEnd(); // the departure question itself is raised by obdScan
+}
+function shutdownArm() {
+  clearTimeout(shutdownTimer); const sd = state.shutdown; if (!sd?.active) return;
+  shutdownTimer = setTimeout(shutdownFire, Math.max(1000, sd.deadline - Date.now()));
+}
+function shutdownFire() {
+  const sd = state.shutdown; if (!sd?.active) return;
+  shutdownEnd();
+  dlog('shutdown-timeout', { round: sd.round, dongleSeen: !!sd.dongleSeen });
+  state.pendingQ = { type: 'stay', round: sd.round, at: Date.now() }; saveState();
+  deliver(sd.round > 1 ? 'Still no sign of the truck, sir. Are you still leaving, or staying at the shop? If you are staying, shall I put the shop music back on?' : 'Five minutes and no engine start, sir. Do you still plan on leaving, or are you staying at the shop? If you are staying, I can put the music back on.', 'Jarvis', true);
+}
+async function stayAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 12) { state.pendingQ = null; saveState(); return false; }
+  const NO = /^(no|nope|nah|not now|no thanks|leave it)\b/, YES = /^(yes|yeah|yep|yup|sure|please|do it|go ahead|ok|okay)\b/;
+  // The Owner just said yes to the music offer, so the "did he ask for music" guard is satisfied.
+  const startMusic = async () => { turn = { id: turn.id, text: 'turn the shop music back on', origin: 'user' }; const r = await handlers.music_control({ action: 'start' }); return /FAILED|Could not|Refused/i.test(String(r)) ? `I could not start the music, sir. ${String(r).slice(0, 160)}` : 'Music is back on, sir.'; };
+  if (q.type === 'stay_music') {
+    state.pendingQ = null; saveState();
+    if (NO.test(t)) return say('Very good, sir. Quiet shop.');
+    if (YES.test(t) || /\b(music|tunes)\b/.test(t)) return say(await startMusic());
+    return false;
+  }
+  if (/\b(staying|stay|not leaving|stay put|here)\b/.test(t) || NO.test(t)) {
+    if (/\b(music|tunes)\b/.test(t)) { state.pendingQ = null; saveState(); return say(await startMusic()); }
+    state.pendingQ = { type: 'stay_music', at: Date.now() }; saveState();
+    return say('Understood, sir. Shall I turn the shop music back on?');
+  }
+  if (DEPART_YES.test(t) || YES.test(t) || /\bleaving\b/.test(t)) { // still leaving: keep hunting for another window
+    const round = (q.round || 1) + 1; state.pendingQ = null;
+    if (round > SHUTDOWN_ROUNDS) { saveState(); return say('Very good, sir. I will stop watching for the truck. Say the word if you want me to start again.'); }
+    state.shutdown = { active: true, startedAt: Date.now(), deadline: Date.now() + SHUTDOWN_MIN * 60e3, round, dongleSeen: false }; saveState(); shutdownArm(); shutdownHunt();
+    return say(`Very good, sir. I will keep watching for the truck for another ${SHUTDOWN_MIN} minutes.`);
+  }
+  return false;
+}
+let huntLoop = null;
+function shutdownHunt() { // first look now, then every HUNT_GAP while the watch is active
+  setImmediate(() => obdTick().catch(() => {}));
+  clearInterval(huntLoop); huntLoop = setInterval(() => { if (!state.shutdown?.active) { clearInterval(huntLoop); huntLoop = null; return; } obdTick().catch(() => {}); }, HUNT_GAP);
+}
+let shutdownBusy = false;
+handlers.shut_shop_down = async ({ cancel } = {}) => {
+  if (cancel) { const was = !!state.shutdown?.active; shutdownEnd(); if (state.pendingQ && /^stay/.test(state.pendingQ.type)) state.pendingQ = null; saveState(); return was ? 'The shutdown watch is cancelled. Confirm briefly.' : 'No shutdown watch was running. Say so.'; }
+  if (shutdownBusy) return 'The shutdown protocol is already running. Say nothing more.';
+  shutdownBusy = true;
+  const notes = [];
+  try {
+    // STEP 1 + 2: close Spotify (force-stop), then make sure the speaker is unplugged from the phone
+    if (!deviceClients.size) notes.push('The Jarvis app is not open on the phone, so Spotify and the speaker could not be touched.');
+    else {
+      const r1 = String(await handlers.music_control({ action: 'close' }).catch(e => `Could not finish: ${e.message || e}`));
+      notes.push(`Step 1 (close Spotify): ${/SUCCESS/.test(r1) ? 'done' : 'FAILED: ' + r1.slice(0, 140)}.`);
+      if (/SUCCESS/.test(r1)) notes.push('Step 2 (speaker disconnect): done.');
+      else {
+        const r2 = String(await handlers.bluetooth_disconnect({}).catch(e => `Could not finish: ${e.message || e}`));
+        notes.push(`Step 2 (speaker disconnect): ${/SUCCESS/.test(r2) ? 'done' : 'FAILED: ' + r2.slice(0, 140)}.`);
+      }
+    }
+    // STEP 3 + 4: hunt every saved vehicle on a real timer
+    if (!state.vehicles.length) return `${notes.join(' ')} No vehicle is saved, so there is nothing to hunt. Tell the Owner plainly.`;
+    for (const v of state.vehicles) { v.sawOff = true; v.lastDepart = 0; v.lastTry = 0; } // the next running engine counts as a fresh start
+    state.shutdown = { active: true, startedAt: Date.now(), deadline: Date.now() + SHUTDOWN_MIN * 60e3, round: 1, dongleSeen: false }; saveState(); shutdownArm();
+    dlog('shutdown-start', { vehicles: state.vehicles.map(v => v.name), deadline: new Date(state.shutdown.deadline).toISOString() });
+    shutdownHunt();
+    notes.push(`Step 3: watching for ${listJoin(state.vehicles.map(v => v.name))}. Step 4: a ${SHUTDOWN_MIN}-minute timer is running; Jarvis will ask by himself if there is no engine start.`);
+    return `${notes.join(' ')} Tell the Owner in one or two short lines what was done, anything that FAILED, and that you are watching for the truck.`;
+  } finally { shutdownBusy = false; }
+};
+if (state.shutdown?.active) { if (Date.now() - state.shutdown.startedAt > 30 * 60e3) state.shutdown.active = false; else { shutdownArm(); shutdownHunt(); } } // survive a restart
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';

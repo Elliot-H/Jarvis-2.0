@@ -372,3 +372,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Wake-up call (2026-10-03)
 - Tool `wakeup_call` (tools.js, server.js handler, persona "Wake-up call") -> say line, wait 4.5 s, device action `siren` -> DeviceBridge.siren (AudioTrack, USAGE_ALARM, STREAM_ALARM forced to max then restored, prefers the built-in speaker) -> say "I'm over here." `siren_stop` is called by alarms_off. Server part is live on redeploy; the siren needs an APK rebuild and reinstall. Not compiled here (no Android SDK).
+
+## Shut the shop down (2026-10-03)
+- `handlers.shut_shop_down` in server.js (block before Maintenance mode). Steps: music_control close (Spotify force-stop + speaker disconnect; bluetooth_disconnect as retry), then `state.shutdown` {active, deadline, round, dongleSeen} + real `setTimeout` (`shutdownArm`, re-armed on boot) + `shutdownHunt` (obdTick every `HUNT_GAP_SEC`=30 s, all vehicles). Running engine seen in obdScan -> `shutdownSeen` ends the hunt, normal `vehicleDeparture` question follows. Deadline -> `shutdownFire` speaks + pushes the leaving/staying question (pendingQ type `stay`, then `stay_music`, answered in `stayAnswer` with no AI call). Untested on hardware; no node_modules in the maintenance sandbox so only `node --check` was run.
