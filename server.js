@@ -1697,6 +1697,13 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
     saveState(); broadcast(watchlistMsg());
     return `Removed ${sym} from the watch list${held ? ' (it is still in his positions; no more alerts on it)' : ''}.`;
   }
+  // Alert buttons for coins send RAIN/USD, RAIN-USD or RAINUSD: that is a coin, not a stock. Look it up and put it on the crypto watch list.
+  const cm = String(symbol || '').toUpperCase().replace(/\s/g, '').match(/^([A-Z0-9]{2,10})(?:([\/-])USD[T]?|USD[T]?)$/);
+  if (cm) {
+    const c = await coinFallback(cm[1]);
+    if (c) { state.watchlist = [...new Set([...state.watchlist, c.id])].slice(0, 25); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
+    if (cm[2]) return `Could not add ${cm[1]}: CoinGecko has no coin with that ticker.`;
+  }
   state.wlHide = state.wlHide.filter(x => x !== wlKey(sym));
   try {
     const ev = await sig.evaluate(sym);
