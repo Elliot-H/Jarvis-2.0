@@ -390,3 +390,9 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Arrival vs departure fix (2026-10-04)
 - While a departure question is open (`pendingQ` dest/checklist/depart), a statement like "no, I'm over at the Camden house now" is caught first by `arrivalStatement()` (server.js, before the answer handlers): it closes the question, runs `navArrive()` (bring items for that place cleared, arrive items, "Welcome to X"/"Hope you remembered ...") and never says "safe travels".
 - GPS arrival no longer asks the missed departure checklist. The vehicle-start question offers only the guessed next place, never every saved place.
+
+## Departure alerts late / via wrong app (2026-10-04)
+- Owner: left The Camden House ~12:18, nothing at engine start or leaving; only alert was a Pushover at 12:46 on arriving Home.
+- Log: 16:18Z drive-start (GPS, 16 mph) with `pendingQ: true` -> a stale question blocked the departure ask. No `vehicle-start`/OBD lines (dongle never read). 16:27Z leave confirmed, question routed by `alertOut` to Telegram (Owner watches Pushover). 16:46Z arrival re-ask (now removed by 34c6a9f).
+- Fixes: `driveStart` ignores/clears a `pendingQ` older than 3 min. `alertOut` always sends question alerts by Pushover; Telegram only gets an extra reply-able copy; logs `alert-out "title": sent|error`. Pushover link label "Open Jarvis" unless /chart. OBD logs (max every 30 min) when the phone app is not connected as a device or a scan fails.
+- Open: engine start needs the Jarvis Android app alive as a device client; if Android kills it, GPS movement is the trigger.
