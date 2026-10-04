@@ -79,7 +79,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -95,7 +95,7 @@ function pushBackup() {
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
 function broadcast(msg) {
-  if (state.silent && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
+  if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   const s = JSON.stringify(msg);
   if (msg.type === 'say' && msg.text && Date.now() < tgReplyUntil) tgSend(msg.text).catch(() => {}); // answering a Telegram reply: echo Jarvis's answer back there
   for (const c of clients) if (c.readyState === 1) c.send(s);
@@ -872,17 +872,24 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|silent mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
-const SILENT_OFF = /\b(you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
+const SILENT_ON = /\b(go silent|be silent|silent mode|death mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
+const SILENT_OFF = /\b(silent (mode )?(is )?off|death mode (is )?off|(turn|switch|take) (it |the |your )?(silent|death) mode off|(end|stop|cancel|disable|exit|leave) (the |your )?(silent|death) ?(mode)?|(turn|switch|take) off (the |your )?(silent|death) mode|you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
+// Silent mode ends by itself after SILENT_MAX_HOURS (default 8) so it can never get stuck on.
+function silentActive() {
+  if (!state.silent) return false;
+  const max = Number(process.env.SILENT_MAX_HOURS || 8) * 3600e3;
+  if (state.silentAt && Date.now() - state.silentAt > max) { state.silent = false; state.silentAt = 0; saveState(); setTimeout(() => broadcast({ type: 'silent', on: false }), 0); return false; }
+  return true;
+}
+function setSilent(on) { state.silent = !!on; state.silentAt = on ? Date.now() : 0; saveState(); broadcast({ type: 'silent', on: !!on }); }
 function silentAnswer(text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (t.split(' ').length > 10) return false;
   const off = SILENT_OFF.test(t), on = !off && SILENT_ON.test(t);
   if (!on && !off) return false;
-  state.silent = on; saveState();
-  broadcast({ type: 'silent', on });
+  setSilent(on);
   broadcast({ type: 'log', role: 'user', text }); remember('user', text);
-  const reply = on ? 'Silent mode on. Microphone muted, replies in text only, no wake-up calls. Type "silent mode off" or "you can talk again" to end it.' : 'Silent mode off. Microphone and voice are back on, sir.';
+  const reply = on ? 'Silent mode on. Replies in text only, no wake-up calls. Say "silent mode off" or tap the TEXT ONLY chip to end it. It also ends by itself after 8 hours.' : 'Silent mode off. Voice is back on, sir.';
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
@@ -2660,7 +2667,7 @@ app.get('/api/ack-clip/:id.mp3', (req, res) => { const b = ackClips.get(req.para
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
-  const text = state.silent ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
+  const text = silentActive() ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
   if (process.env.FISH_API_KEY && text) return fishTts(text, res, req.query?.prefetch === '1');
   if (!key || !text) return res.status(204).end();
   const voice = process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'; // "Daniel" – calm, polished British male
@@ -2701,7 +2708,7 @@ const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) =
 
 wss.on('connection', ws => {
   clients.add(ws);
-  ws.send(JSON.stringify({ type: 'silent', on: !!state.silent }));
+  ws.send(JSON.stringify({ type: 'silent', on: silentActive() }));
   if (freshBoot) setTimeout(() => { if (freshBoot) { freshBoot = false; lastBackup = ''; saveState(); } }, 8000);   // no restore came: phone has no backup, start fresh
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
@@ -2723,6 +2730,7 @@ wss.on('connection', ws => {
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
       state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
+    if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice is back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
     if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
@@ -3074,7 +3082,7 @@ handlers.alarms_off = async () => {
 // ---------- Wake-up call: "Jarvis, where are you?" -> car-alarm siren on the phone at max volume -> "I'm over here." ----------
 let wakeCallBusy = false;
 handlers.wakeup_call = async ({ seconds }) => {
-  if (state.silent) return 'Silent mode is on, so no wake-up call was made. Say so in one short line.';
+  if (silentActive()) return 'Silent mode is on, so no wake-up call was made. Say so in one short line.';
   if (wakeCallBusy) return 'A wake-up call is already running. Say nothing.';
   const secs = Math.max(5, Math.min(60, Number(seconds) || 20));
   if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the siren cannot play. Say so plainly.';

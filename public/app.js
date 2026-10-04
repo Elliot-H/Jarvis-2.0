@@ -113,9 +113,9 @@
         break;
       case 'backup': try { localStorage.setItem('jarvis.backup', JSON.stringify(m.data)); } catch {} break;
       case 'silent': silent = !!m.on; if (silent) { stopFillers(); stopSpeaking(true); }
-        // full silence: the mic is muted too (nothing picked up); ending silent mode gives the mic back
-        if (silent) { silentMuted = true; if (!muted) muteMic(false); }
-        else if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
+        // the mic stays on in silent mode so "silent mode off" works by voice; undo a mute left by the older full-silence build
+        if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
+        window.__silent = silent;
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
       case 'say':
         if (m.memo) saveMemo(m.memo);
@@ -1174,4 +1174,5 @@
     resize(); connect(); requestAnimationFrame(frame);
     if ('speechSynthesis' in window) speechSynthesis.getVoices();
   })();
+  try { document.querySelector('#chipVoice').addEventListener('click', () => { if (silent) send({ type: 'silent_off' }); }); } catch {}   // tap TEXT ONLY to end silent mode
 })();

@@ -409,3 +409,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Silent mode = full silence (2026-10-04)
 - `silentAnswer` (server.js): silent on mutes the mic client-side (`silentMuted` in app.js, reuses muteMic/unmuteMic), all speech stripped in `broadcast`, `wakeup_call` refused. Wake (opening the app) no longer clears silent. Off phrases unchanged; they must be typed (or Telegram) while the mic is muted.
+
+## Silent mode fix (2026-10-04)
+- Silent mode no longer mutes the mic (muted mic made "silent mode off" impossible by voice). It ends by voice (also "death mode off", "stop silent mode"...), by tapping the TEXT ONLY chip (`silent_off` ws message), and automatically after `SILENT_MAX_HOURS` (default 8; `silentActive()` / `setSilent()` in server.js; `state.silentAt` in BACKUP_KEYS).
