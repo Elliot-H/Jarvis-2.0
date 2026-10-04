@@ -2084,6 +2084,7 @@ app.get('/watch-add', async (req, res) => {
   if (!sym || k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return page('Bad or expired link.', false);
   try {
     const r = String(await handlers.signal_watch({ action: 'add', symbol: sym })), ok = r.startsWith('Watching');
+    console.log(`watch-add ${sym}: ${r.slice(0, 160)} | crypto list: ${(state.watchlist || []).join(',')}`);
     const nm = (r.match(/^Watching ([A-Z0-9.\-]+)(?: \(([^)]+)\))?/) || [])[1] || sym, full = (r.match(/^Watching [A-Z0-9.\-]+ \(([^)]+)\)/) || [])[1];
     return page(ok ? `${nm}${full ? ' (' + full.replace(/[<>&]/g, '') + ')' : ''} is on the watch list. Nothing was bought.` : r.replace(/[<>&]/g, ''), ok);
   } catch (e) { return page('Could not add it.', false); }
@@ -2594,7 +2595,11 @@ wss.on('connection', ws => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'restore' && msg.data && (freshBoot || Number(msg.data.stamp) > (state.backupStamp || 0))) {
       freshBoot = false;
+      const keep = { watchlist: state.watchlist || [], sigWatch: state.sigWatch || [], coinIds: state.coinIds || {} };   // adds made on the server since the phone last synced (alert taps while the app was closed)
       for (const k of BACKUP_KEYS) if (msg.data[k] !== undefined) state[k] = msg.data[k];
+      state.watchlist = [...new Set([...(state.watchlist || []), ...keep.watchlist])].slice(-25);
+      state.sigWatch = [...(state.sigWatch || []), ...keep.sigWatch.filter(w => !(state.sigWatch || []).some(x => x.symbol === w.symbol))].slice(-20);
+      state.coinIds = { ...keep.coinIds, ...(state.coinIds || {}) }; for (const [k2, v] of Object.entries(state.coinIds)) crypto_.learnCoin(k2, v);
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
       state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
