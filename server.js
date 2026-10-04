@@ -27,6 +27,7 @@ import * as alerts from './alerts.js';
 import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
+import * as ps5 from './ps5.js';
 import { analyzePhoto, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt } from './brain.js';
@@ -3199,9 +3200,30 @@ function gmPanel(room, game, rows, running) {
   state.panels.gaming = { id: 'gaming', title: running ? 'GAMING MODE · RUNNING' : 'GAMING MODE', body, updatedAt: new Date().toISOString() };
   saveState(); broadcast({ type: 'panels', panels: state.panels });
 }
+// No GAMING_BRIDGE_URL: the PHONE is the bridge (ps5.js). It wakes the PS5 over the home Wi-Fi; the TV and its game mode follow the
+// console over HDMI-CEC (One-Touch Play, already working at the Owner's house), so the TV steps are reported as "follows the PS5", not confirmed.
+const PS = ps5.make(deviceAction);
+const phoneMode = () => !process.env.GAMING_BRIDGE_URL;
+async function gmPhone(step, payload) {
+  const ps = state.gaming.ps || {};
+  if (['tv_on', 'soundbar_on', 'tv_input'].includes(step)) return { skipped: true, ok: false, detail: 'follows the PS5 over the HDMI link (One-Touch Play); the TV cannot report back' };
+  if (!ps.registKey) return { ok: false, detail: 'NOT DONE: the phone is not paired with the PS5 yet. Call gaming_pair (one time: PSN login + the Link Device code).' };
+  try {
+    if (step === 'ps_wake') { const r = await PS.wake(ps); if (r.st?.ip && r.st.ip !== ps.ip) { ps.ip = r.st.ip; saveState(); } gmLast = r.st; return r.ok ? { ok: true, detail: r.already ? 'was already on' : 'woke from rest mode' } : { ok: false, detail: 'FAILED: ' + r.detail }; }
+    const st = gmLast || await PS.discover(ps.ip);
+    if (step === 'ps_connect') return st?.code === 200 ? { ok: true, detail: `${st['host-name'] || 'PS5'} answering on ${st.ip}${st['running-app-name'] ? ', running ' + st['running-app-name'] : ', on the home screen'}` } : { ok: false, detail: 'FAILED: the PS5 is not answering as awake' };
+    if (step === 'ps_launch') {
+      const run = st?.['running-app-titleid'] || '';
+      if (payload.titleId && run && run.startsWith(payload.titleId.split('_')[0])) return { ok: true, detail: `${st['running-app-name'] || payload.game} is running` };
+      return { ok: false, detail: `NOT DONE: a PS5 cannot be told to start a game over the network. It is on the home screen${run ? ' (running ' + (st['running-app-name'] || run) + ')' : ''}; the last game played is highlighted, press X.` };
+    }
+  } catch (e) { return { ok: false, detail: 'FAILED: ' + e.message }; }
+  return { ok: false, detail: 'unknown step' };
+}
+let gmLast = null;
 async function gmBridge(step, payload) {
   const base = process.env.GAMING_BRIDGE_URL;
-  if (!base) return { ok: false, detail: `NOT DONE: no gaming bridge is connected (GAMING_BRIDGE_URL is not set). Needs ${GM_NEEDS[step]}.` };
+  if (!base) return gmPhone(step, payload);
   try {
     const r = await fetch(base.replace(/\/$/, '') + '/step', { method: 'POST', signal: AbortSignal.timeout(45000), headers: { 'Content-Type': 'application/json', ...(process.env.GAMING_BRIDGE_TOKEN ? { Authorization: 'Bearer ' + process.env.GAMING_BRIDGE_TOKEN } : {}) }, body: JSON.stringify({ step, ...payload }) });
     const j = await r.json().catch(() => ({}));
@@ -3224,6 +3246,36 @@ handlers.gaming_config = async ({ room, screen, input, soundbar, default_room, g
   if (!out.length && !show) return 'Nothing to change. Ask what to set: room screen/input, default room, game with title id, default game.';
   return `${out.length ? 'Saved: ' + out.join('; ') + '. ' : ''}Settings now: default room ${g.defaultRoom}; default game ${g.defaultGame || 'none'}; rooms ${JSON.stringify(g.rooms)}; games ${Object.values(g.games).map(x => x.name + (x.titleId ? '' : ' (no title id)')).join(', ') || 'none'}. Bridge ${process.env.GAMING_BRIDGE_URL ? 'connected' : 'NOT connected'}.`;
 };
+// One-time pairing (phone <-> PS5): PSN account id from the Sony login (opened inside the Jarvis app), then the 8-digit Link Device code.
+handlers.gaming_pair = async ({ pin, account_id, status } = {}) => {
+  const g = state.gaming; g.ps ||= {};
+  if (account_id) { g.ps.accountId = String(account_id).trim(); saveState(); }
+  if (status) { try { const st = await PS.discover(g.ps.ip); return st ? `PS5 ${st['host-name'] || ''} on ${st.ip}: ${st.code === 200 ? 'ON' : 'REST MODE'}${st['running-app-name'] ? ', running ' + st['running-app-name'] : ''}. Paired: ${g.ps.registKey ? 'yes' : 'no'}.` : 'No PS5 answered on the phone\'s Wi-Fi.'; } catch (e) { return 'FAILED: ' + e.message; } }
+  if (!g.ps.accountId) {
+    broadcast({ type: 'open_url', url: '/api/ps/login' });
+    return 'STEP 1 of 2: the PlayStation login page is opening in the Jarvis app. Tell him to sign in with his PSN account (only he can type that password). When it is done, Jarvis comes back by itself; then ask for step 2: open the PS5 Link Device code (Settings, System, Remote Play, Link Device) and read the 8 digits.';
+  }
+  if (!pin) return `PSN is linked${g.ps.onlineId ? ' as ' + g.ps.onlineId : ''}. STEP 2: ask him to open Settings, System, Remote Play, Link Device on the PS5 and read the 8-digit code (it expires in about 5 minutes).`;
+  const code = String(pin).replace(/\D/g, '');
+  if (code.length !== 8) return 'That code is not 8 digits. Ask him to read it again.';
+  try {
+    const r = await PS.register(g.ps.accountId, code);
+    if (!r.ok) return 'PAIRING FAILED: ' + r.detail;
+    Object.assign(g.ps, { registKey: r.registKey, rpKey: r.rpKey, mac: r.mac, ip: r.ip, hostId: r.hostId, name: r.name, pairedAt: new Date().toISOString() }); saveState();
+    dlog('ps5-paired', { name: r.name, ip: r.ip });
+    return `PAIRED with ${r.name || 'the PS5'} (${r.ip}). From now on "gaming mode" wakes it from rest mode. Tell him to leave the console in rest mode (not fully off) with "Stay connected to the internet" and "Enable turning on PS5 from network" on.`;
+  } catch (e) { return 'PAIRING FAILED: ' + e.message; }
+};
+app.get('/api/ps/login', (_req, res) => res.redirect(302, ps5.PSN_LOGIN));
+app.get('/api/ps/oauth', async (req, res) => {
+  const page = (msg) => res.send(`<!doctype html><meta name=viewport content="width=device-width"><body style="background:#000;color:#7df;font:18px system-ui;padding:24px">${msg}<p><a style="color:#7df" href="/?app=1">Back to Jarvis</a></p><script>setTimeout(()=>location.href='/?app=1',2500)</script>`);
+  try {
+    const a = await ps5.psnAccount(String(req.query.code || ''));
+    state.gaming.ps = { ...(state.gaming.ps || {}), ...a }; saveState();
+    dlog('psn-linked', { onlineId: a.onlineId });
+    page(`PSN linked${a.onlineId ? ' as ' + a.onlineId : ''}. Next: on the PS5 open Settings &gt; System &gt; Remote Play &gt; Link Device and read the code to Jarvis.`);
+  } catch (e) { page('PSN login failed: ' + String(e.message).replace(/</g, '')); }
+});
 let gamingBusy = false;
 handlers.gaming_mode = async ({ game, room } = {}) => {
   if (gamingBusy) return 'Gaming mode is already running. Say nothing more.';
@@ -3233,14 +3285,15 @@ handlers.gaming_mode = async ({ game, room } = {}) => {
     const gm = g.games[gk] || (game ? { name: game } : null);
     const rows = [], say = t => broadcast({ type: 'activity', text: 'Gaming mode: ' + t });
     gmPanel(rm, gm?.name, [], true);
-    let blocked = '';
-    for (const [step, label] of GM_STEPS) {
+    let blocked = ''; gmLast = null;
+    const order = phoneMode() ? ['ps_wake', 'ps_connect', 'tv_on', 'soundbar_on', 'tv_input', 'ps_launch'].map(k => GM_STEPS.find(x => x[0] === k)) : GM_STEPS;
+    for (const [step, label] of order) {
       let r;
       if (step === 'soundbar_on' && rm.soundbar === false) r = { skipped: true, detail: 'not used in this room' };
       else if (blocked) r = { skipped: true, detail: `skipped, ${blocked} did not confirm` };
-      else if (step === 'tv_input' && !rm.input) r = { ok: false, detail: 'NOT DONE: no HDMI input is saved for this room. Say which input the PlayStation is on.' };
-      else if (step === 'ps_launch' && !gm) r = { ok: false, detail: 'NOT DONE: no game chosen and no default game saved.' };
-      else if (step === 'ps_launch' && !gm.titleId) r = { ok: false, detail: `NOT DONE: no PlayStation title id saved for ${gm.name}. Needs gaming_config game and title_id.` };
+      else if (step === 'tv_input' && !rm.input && !phoneMode()) r = { ok: false, detail: 'NOT DONE: no HDMI input is saved for this room. Say which input the PlayStation is on.' };
+      else if (step === 'ps_launch' && !gm) r = phoneMode() ? await gmBridge(step, {}) : { ok: false, detail: 'NOT DONE: no game chosen and no default game saved.' };
+      else if (step === 'ps_launch' && !gm.titleId && !phoneMode()) r = { ok: false, detail: `NOT DONE: no PlayStation title id saved for ${gm.name}. Needs gaming_config game and title_id.` };
       else { say(label); r = await gmBridge(step, { room: rm.key, screen: rm.screen, input: rm.input, game: gm?.name, titleId: gm?.titleId }); }
       rows.push({ label, ...r });
       if (!r.ok && !r.skipped && ['tv_on', 'ps_wake', 'ps_connect'].includes(step)) blocked = label;   // soundbar, input and launch failures do not stop the rest

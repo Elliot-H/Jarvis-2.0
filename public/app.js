@@ -97,6 +97,9 @@
 
   function handle(m) {
     switch (m.type) {
+      case 'open_url': // one-time logins (PSN for the PS5 pairing) open inside the Jarvis app; only same-origin paths
+        if (window.AndroidDevice && typeof m.url === 'string' && m.url.startsWith('/api/')) setTimeout(() => { location.href = m.url; }, 1500);
+        break;
       case 'state':
         if (m.state === 'thinking') { setState('thinking', { echo: false }); ticker('Processing…'); }
         else if (DISPLAY_ONLY) setState(m.state, { echo: false });

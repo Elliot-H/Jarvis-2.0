@@ -101,6 +101,14 @@ public class MainActivity extends Activity {
       @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
         Uri u = req.getUrl();
         if (u.toString().startsWith(origin)) return false;
+        // PS5 pairing: the PSN login runs inside the app; Sony's Remote Play redirect carries the code back to Jarvis.
+        if (u.toString().startsWith("https://remoteplay.dl.playstation.net/remoteplay/redirect")) {
+          String code = u.getQueryParameter("code");
+          v.loadUrl(origin + "/api/ps/oauth?code=" + Uri.encode(code == null ? "" : code));
+          return true;
+        }
+        String h = u.getHost() == null ? "" : u.getHost();
+        if (h.endsWith("sonyentertainmentnetwork.com") || h.endsWith("account.sony.com") || h.endsWith("playstation.com") || h.endsWith("playstation.net")) return false;
         try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
         return true;
       }

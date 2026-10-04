@@ -63,6 +63,8 @@ public class DeviceBridge {
       else if ("bt_scan".equals(action)) btScan(id, o.optInt("seconds", 9));
       else if ("bt_pair".equals(action)) btPair(id, o.optString("mac"), o.optInt("seconds", 30));
       else if ("led".equals(action)) ledWrite(id, o.optString("mac", ""), o.optJSONArray("packets"), o.optBoolean("verify", true));
+      else if ("udp".equals(action)) lanUdp(id, o);
+      else if ("tcp".equals(action)) lanTcp(id, o);
       else if ("set_volume".equals(action)) setVolume(id, o.optInt("percent", 50));
       else reply(id, false, "Unknown phone action " + action);
     } catch (Exception e) { reply(id, false, String.valueOf(e.getMessage())); }
@@ -155,9 +157,72 @@ public class DeviceBridge {
     return out;
   }
 
+  // ---------- raw LAN I/O for the PS5 (protocol lives on the server, ps5.js) ----------
+  // udp: send b64 to host:port ("broadcast" = this Wi-Fi's broadcast address), collect up to `max` replies for waitMs -> [{from, b64}]
+  private void lanUdp(final String id, final JSONObject o) {
+    new Thread(() -> {
+      java.net.DatagramSocket sock = null;
+      try {
+        byte[] data = android.util.Base64.decode(o.optString("b64"), android.util.Base64.DEFAULT);
+        String host = o.optString("host");
+        int port = o.optInt("port"), waitMs = Math.max(100, Math.min(10000, o.optInt("waitMs", 2500))), max = o.optInt("max", 4);
+        sock = new java.net.DatagramSocket();
+        sock.setBroadcast(true);
+        java.net.InetAddress to = "broadcast".equals(host) ? wifiBroadcast() : java.net.InetAddress.getByName(host);
+        sock.send(new java.net.DatagramPacket(data, data.length, to, port));
+        JSONArray out = new JSONArray();
+        long end = System.currentTimeMillis() + waitMs;
+        byte[] buf = new byte[2048];
+        while (out.length() < max) {
+          long left = end - System.currentTimeMillis();
+          if (left <= 0) break;
+          sock.setSoTimeout((int) left);
+          java.net.DatagramPacket p = new java.net.DatagramPacket(buf, buf.length);
+          try { sock.receive(p); } catch (java.net.SocketTimeoutException te) { break; }
+          JSONObject r = new JSONObject();
+          r.put("from", p.getAddress().getHostAddress());
+          r.put("b64", android.util.Base64.encodeToString(java.util.Arrays.copyOf(p.getData(), p.getLength()), android.util.Base64.NO_WRAP));
+          out.put(r);
+        }
+        reply(id, true, out.toString());
+      } catch (Exception e) { reply(id, false, "udp: " + e); }
+      finally { if (sock != null) sock.close(); }
+    }).start();
+  }
+
+  // tcp: connect, send b64, read until the other side closes or waitMs passes -> {b64}
+  private void lanTcp(final String id, final JSONObject o) {
+    new Thread(() -> {
+      try (java.net.Socket s = new java.net.Socket()) {
+        int waitMs = Math.max(500, Math.min(15000, o.optInt("waitMs", 5000)));
+        s.connect(new java.net.InetSocketAddress(o.optString("host"), o.optInt("port")), 4000);
+        s.setTcpNoDelay(true);
+        s.setSoTimeout(waitMs);
+        s.getOutputStream().write(android.util.Base64.decode(o.optString("b64"), android.util.Base64.DEFAULT));
+        s.getOutputStream().flush();
+        java.io.ByteArrayOutputStream got = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        try { int n; while ((n = s.getInputStream().read(buf)) > 0) got.write(buf, 0, n); } catch (java.net.SocketTimeoutException ignored) {}
+        JSONObject r = new JSONObject();
+        r.put("b64", android.util.Base64.encodeToString(got.toByteArray(), android.util.Base64.NO_WRAP));
+        reply(id, got.size() > 0, got.size() > 0 ? r.toString() : "tcp: no answer from " + o.optString("host"));
+      } catch (Exception e) { reply(id, false, "tcp: " + e); }
+    }).start();
+  }
+
+  private java.net.InetAddress wifiBroadcast() throws Exception {
+    android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+    android.net.DhcpInfo d = wm == null ? null : wm.getDhcpInfo();
+    if (d == null || d.ipAddress == 0) throw new Exception("the phone is not on Wi-Fi");
+    int b = (d.ipAddress & d.netmask) | ~d.netmask;
+    byte[] q = new byte[4];
+    for (int k = 0; k < 4; k++) q[k] = (byte) (b >> (k * 8));
+    return java.net.InetAddress.getByAddress(q);
+  }
+
   private void reply(String id, boolean ok, String detail) {
     String js = "window.__deviceResult&&window.__deviceResult(" + JSONObject.quote(id) + "," + ok + "," + JSONObject.quote(detail) + ")";
-    web.evaluateJavascript(js, null);
+    ui.post(() -> web.evaluateJavascript(js, null));   // replies come from worker threads too (udp/tcp, siren)
   }
 
   private void openApp(String id, String pkg) {
