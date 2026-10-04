@@ -84,3 +84,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A35 | Wake-up call: forceful car-alarm siren on the phone | 🔧 | `wakeup_call` tool: says "Jarvis, where are you?", plays a car-alarm style siren (warble, sweeps, tight chirps) on the phone's own speaker at max alarm volume (default 20 s), then says "I'm over here." "I'm awake" stops it. Needs APK rebuild + reinstall (new `siren` device action). |
 
 - Watch list default entry: adding a stock or coin with no entry price uses today's live price as entry and computes the trailing stop, so HUD rows are never blank (built 2026-10-04).
+
+- Departure prompt 3: vehicle check offer (2026-10-04). On OBD engine start Jarvis chains a one-line offer (fuel, battery volts, fault codes, emissions) after the "where to / bring list" answer. Yes = reads the full scan aloud; no = dropped for the trip. Spoken live in the app.

@@ -755,6 +755,7 @@ async function bucketAnswer(text) {
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
+  if (q.type === 'vscan') return vscanAnswer(q, text);
   if (q.type === 'stay' || q.type === 'stay_music') return stayAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
   if (q.type === 'copilot') return copilotAnswer(q, text);
@@ -1095,7 +1096,7 @@ async function checklistAnswer(q, text) {
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 3 * 60e3 || (CHECK_CMD.test(t) && !CHECK_NO.test(t))) return false; // stale or an unrelated request: let it through, keep nothing
   const done = () => { state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
-  if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.'); }
+  if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + vscanTail()); }
   if (/^(yes|yeah|yep|yup|i do|i did)$/.test(t)) { q.at = Date.now(); saveState(); return say('What is it, sir?'); }
   // Destination: the one guessed at departure, else a saved place named in the answer ("...for the camden house").
   let dest = q.dest ? findPlace(q.dest) : null, body = t;
@@ -1113,7 +1114,7 @@ async function checklistAnswer(q, text) {
   const all = [...(q.items || []), ...items];
   for (const it of all) await handlers.bring_add({ place: dest.name, item: it });
   state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState();
-  return say(`Noted, sir. ${listJoin(all)} for ${dest.name}.`);
+  return say(`Noted, sir. ${listJoin(all)} for ${dest.name}.` + vscanTail());
 }
 // Yes / no to "Headed home, sir?"
 async function destAnswer(q, text) {
@@ -1147,6 +1148,48 @@ function vehicleDeparture(v) {
   const lead = here ? `Are you leaving ${placeKey(here.name) === 'shop' ? 'the shop' : here.kind === 'home' ? 'home' : here.name}, or headed somewhere?` : 'Where are you headed, sir?';
   return opts.length ? `${lead} ${listJoin(opts)}?` : lead;
 }
+// Third departure prompt: a one-line OFFER of the full vehicle check, chained after the "where to / bring list" answer. Yes = read vehicle_scan aloud; no = dropped for the trip.
+const fuelWords = p => p == null ? '' : p >= 90 ? 'full' : p >= 68 ? 'about three quarters' : p >= 40 ? 'about half' : p >= 20 ? 'about a quarter' : `down to ${Math.round(p)} percent`;
+function vscanOfferText(v) {
+  const d = v.last; if (!d) return '';
+  const bits = [];
+  if (d.fuelPct != null) bits.push(`fuel ${d.fuelPct >= 90 ? 'is full' : 'at ' + fuelWords(d.fuelPct)}`);
+  if (d.volts) bits.push(`battery at ${d.volts.toFixed(1)} volts`);
+  const n = (d.dtcs || []).length; bits.push(n ? `${n} fault code${n > 1 ? 's' : ''}${d.mil ? ' and the check engine light on' : ''}` : d.mil ? 'check engine light on' : 'no fault codes');
+  if (d.readiness?.ready) bits.push((d.readiness.notReady || []).length ? 'emissions not ready' : 'emissions ready');
+  const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
+  return `${nm}'s on, ${listJoin(bits)}. Would you like the full check before you pull off?`;
+}
+function vscanTail() { // returns the offer to append to a departure reply (and arms the yes/no), or ''
+  const o = state.vscan; if (!o || o.offered || Date.now() - o.at > 20 * 60e3) return '';
+  const v = vFind(o.vehicle), t = v && vscanOfferText(v); if (!t) return '';
+  o.offered = true; state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; saveState();
+  return ' ' + t;
+}
+const VSCAN_YES = /^(yes|yeah|yep|yup|sure|please|go ahead|do it|read it|full check|full report|okay|ok|why not|let'?s hear it)\b/, VSCAN_NO = /^(no|nope|nah|skip|skip it|not now|no thanks|no thank you|i'?m good|im good|that'?s ok|thats ok|never mind|nevermind|don'?t)\b/;
+function vSpoken(v) {
+  const d = v.last, bits = [`Battery ${d.volts ?? 'unknown'} volts`, `check engine light ${d.mil ? 'on' : 'off'}`];
+  bits.push((d.dtcs || []).length ? `trouble codes ${d.dtcs.join(', ')}` : 'no trouble codes');
+  bits.push((d.pending || []).length ? `pending codes ${d.pending.join(', ')}` : 'no pending codes');
+  if (d.readiness?.ready) bits.push((d.readiness.notReady || []).length ? `emissions monitors not ready: ${d.readiness.notReady.join(', ')}` : 'emissions monitors all ready');
+  if (d.trims) bits.push(`fuel trims ${Object.entries(d.trims).map(([k, x]) => `${k} ${x} percent`).join(', ')}`);
+  if (d.freezeFrame) bits.push(`freeze frame for ${d.freezeFrame.code}: ${Object.entries(d.freezeFrame).filter(([k]) => k !== 'code').map(([k, x]) => `${k} ${x}`).join(', ')}`);
+  if (d.coolantC != null) bits.push(`coolant ${Math.round(d.coolantC * 1.8 + 32)} degrees Fahrenheit`);
+  if (d.fuelPct != null) bits.push(`fuel ${Math.round(d.fuelPct)} percent`);
+  return bits.join('. ') + '.';
+}
+async function vscanAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  if (Date.now() - q.at > 5 * 60e3 || t.split(' ').length > 8) { state.pendingQ = null; saveState(); return false; }
+  if (VSCAN_NO.test(t)) { state.pendingQ = null; saveState(); return say('Very good, sir.'); }
+  if (VSCAN_YES.test(t)) {
+    state.pendingQ = null; saveState();
+    const v = vFind(q.vehicle); if (!v?.last) return say('The readings are gone, sir. Ask me to scan the truck.');
+    return say(vSpoken(v));
+  }
+  state.pendingQ = null; saveState(); return false; // unrelated request: let it through, no repeat
+}
 async function departAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
@@ -1160,11 +1203,11 @@ async function departAnswer(q, text) {
     if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
     finish();
     const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
-    return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' '));
+    return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' ') + vscanTail());
   }
   finish();
   const parts = [...(q.from ? eventLines('leave', q.from, Math.random, true) : []), bringLine(dest.name), ...eventLines('heading', dest.name, Math.random, true)].filter(Boolean);
-  return say((parts.length ? parts.slice(0, 3) : ['Very good, sir.']).join(' '));
+  return say((parts.length ? parts.slice(0, 3) : ['Very good, sir.']).join(' ') + vscanTail());
 }
 handlers.heading_to = async ({ place }) => {
   const p = findPlace(place);
@@ -2746,7 +2789,7 @@ async function obdScan(v, why = 'auto') {
     const restarted = d.runSec != null && prev.runSec != null && prev.rpm && v.lastRun && d.runSec + 20 < (now - v.lastRun) / 1000 + prev.runSec;
     const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < 3 * 60e3; // 3 min: no double ask from one start
     dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, runSec: d.runSec ?? null, restarted: !!restarted, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
-    if (newStart && !recent) { v.lastDepart = now; lines.unshift(vehicleDeparture(v)); }
+    if (newStart && !recent) { v.lastDepart = now; state.vscan = { vehicle: v.name, at: now, offered: false }; lines.unshift(vehicleDeparture(v)); }
   }
   if (off) { if (v.lastRun) v.sawOff = true; } else { v.lastRun = now; v.sawOff = false; }
   if (off && d.volts && (!v.lastRun || now - v.lastRun > 2 * 3600e3)) {
