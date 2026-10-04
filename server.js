@@ -1010,10 +1010,12 @@ function deliver(text, title = 'Jarvis', alsoPush = false) {
 async function alertOut(title, text) {
   const q = state.pendingQ;
   if (q && Date.now() - q.at < 15000) {
-    if (process.env.TELEGRAM_BOT_TOKEN) { const err = await pushTelegram(title, text); if (!err) return null; console.warn('two-way alert failed:', err); }
-    return push(title, text, publicBase() || undefined);
+    // Pushover is the Owner's alert app (custom Jarvis sound): question alerts always go there. Telegram, when set, only adds a copy he can reply to.
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.PUSHOVER_APP_TOKEN) pushTelegram(title, text).then(e => e && console.warn('telegram copy failed:', e)).catch(() => {});
+    const err = await push(title, text, publicBase() || undefined);
+    console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
   }
-  return push(title, text);
+  const err = await push(title, text); console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
 }
 const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
 let moveTimer = null;
@@ -1065,6 +1067,7 @@ function onMove() {
   const leaving = !!prev && !pl, speak = !!text && (leaving || !quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t))); // a departure is always announced, even in quiet hours
   if (prev) dlog('leave-announce', { place: prev.name, spoken: speak, text: text.slice(0, 120) });
   if (speak) deliver(text, leaving ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis', leaving);
+  if (speak && leaving && state.lastCheck && !state.lastCheck.answered) { state.lastCheck.pushed = true; saveState(); }   // it reached his phone: no repeat on arrival
 }
 // Departure checklist: asked aloud the moment he leaves a saved place; his answer becomes bring items for the destination.
 const CHECK_ITEMS = 'Tools, food, gas, anything for the dogs, anything for Princess?';
@@ -1254,8 +1257,10 @@ function driveFix(lat, lon, speedMs) { // every phone position (background /api/
 function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
   const now = Date.now(), d = state.departed;
   const asked = (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
-  dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: !!state.pendingQ, nav: navLive() });
-  if (!asked && !state.pendingQ && !navLive()) { // engine-start question was missed (app asleep, dongle out of range): ask it now
+  const qFresh = !!state.pendingQ && now - (state.pendingQ.at || 0) < 3 * 60e3;   // answers are only accepted for 3 min; an older question must not block this one (Oct 4: a stale one silenced the 12:18 departure)
+  if (state.pendingQ && !qFresh) state.pendingQ = null;
+  dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: qFresh, nav: navLive(), at: state.at || null });
+  if (!asked && !qFresh && !navLive()) { // engine-start question was missed (app asleep, dongle out of range): ask it now
     state.departed = null; deliver(vehicleDeparture({ name: 'phone' }), 'Jarvis', true);
   }
   saveState();
@@ -1513,7 +1518,7 @@ async function pushPushover(title, body, link, watch, buy) {
         title: String(title).slice(0, 250), message: watch ? String(body).slice(0, 800).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + `\n<a href="${buy}">Buy</a> | <a href="${watch}">Add to watch list</a>` : String(body).slice(0, 1000) || ' ',
         ...(watch ? { html: '1' } : {}),
         sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0',
-        ...(link ? { url: link, url_title: 'Open chart' } : {})
+        ...(link ? { url: link, url_title: /\/chart\?/.test(link) ? 'Open chart' : 'Open Jarvis' } : {})
       }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Pushover answered ${r.status}: ${(await r.text()).slice(0, 160)}`;
@@ -2710,7 +2715,7 @@ async function obdScan(v, why = 'auto') {
   const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
   if (!d.ok) { if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
-    if (why !== 'auto') console.log(`obd ${v.name}: ${d.detail || d.code}`); return { ok: false, why: d.detail || d.code || 'no answer' }; }
+    if (why !== 'auto' || Date.now() - (v.failNote || 0) > 30 * 60e3) { v.failNote = Date.now(); console.log(`obd ${v.name}: ${d.detail || d.code || 'no answer'}`); } return { ok: false, why: d.detail || d.code || 'no answer' }; }
   v.lastOk = Date.now();
   if (d.speedKph > 0) driveSignal('obd', d.speedKph * 0.621);
   const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
@@ -2750,8 +2755,9 @@ async function obdScan(v, why = 'auto') {
 const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 3) * 60e3;
 const HUNT_GAP = Number(process.env.HUNT_GAP_SEC || 30) * 1e3;
 if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) state.vehicles.push({ name: 'truck', dongle: 'OBDII' }); }
+let obdNote = 0;
 async function obdTick() {
-  if (!deviceClients.size || busy) return;
+  if (!deviceClients.size || busy) { if (!deviceClients.size && state.vehicles.length && Date.now() - obdNote > 30 * 60e3) { obdNote = Date.now(); console.log('obd: skipped, the Jarvis phone app is not connected as a device (engine start cannot be seen until it reconnects)'); } return; }
   for (const v of state.vehicles) {
     const gap = state.shutdown?.active ? HUNT_GAP : v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_WATCH : OBD_RETRY; // "shut the shop down" hunt: look every 30 s
     if (v.scanning) continue;
