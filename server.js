@@ -997,15 +997,19 @@ function dlog(event, detail) {
 }
 let pendingSay = null;
 // Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
-function deliver(text, title = 'Jarvis', alsoPush = false) {
+function deliver(text, title = 'Jarvis', question = false) {
   text = text.replace(/\s+/g, ' ').trim(); if (!text) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
   if (clients.size) {
     pendingSay = { text, at: Date.now() };
-    setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, busy ? 6000 : 2500);
-    if (alsoPush) alertOut(title, text).catch(e => console.warn('depart push', e.message)); // a connected but backgrounded app cannot speak: also notify the phone
-  } else alertOut(title, text).catch(() => {});
+    // A question (leaving / departure prompts) is spoken live and answered by voice: no notification while the app is connected.
+    setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, question ? 300 : busy ? 6000 : 2500);
+  } else {
+    // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
+    if (question) pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 };
+    alertOut(title, text).catch(() => {});
+  }
 }
 // A question alert (departure checklist, "leaving?") must be answerable: send it through Telegram, where the Owner can reply
 // straight from the notification (see tgPoll), falling back to the normal push with a link that opens Jarvis.
@@ -1019,7 +1023,7 @@ async function alertOut(title, text) {
   }
   const err = await push(title, text); console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
 }
-const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
+const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < (p.ttl || 10000) ? ' ' + p.text : ''; };
 let moveTimer = null;
 function onMove() {
   const L = state.location; if (!L) return;

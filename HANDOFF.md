@@ -399,3 +399,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Watch list default entry (2026-10-04)
 - Adding to the watch list without an entry now always uses today's live price as the entry and computes the trailing stop from it. Stocks: signal_watch already did. Crypto: `cryptoDefaults()` in server.js stores `state.cEntry[coinId]` (in BACKUP_KEYS) when crypto_watch / a coin fallback adds it, and lazily for old rows with no entry; crypto rows now show entry + trailing stop. Remove clears it.
+
+## Leaving prompts are live voice, not notifications (2026-10-04)
+- `deliver(text, title, question)` in server.js: for the departure questions ("Where are you headed?", "Before you go, anything to bring?", truck-start prompts) the third arg now means question. App connected -> spoken at once (0.3 s) through the app/HUD and NO push; his spoken answer goes through the existing `pendingQ` handlers (`departAnswer`, `checklistAnswer` -> heading_to / bring_add). App not connected -> notification as a last resort, and the question is held 10 min and spoken when he opens the app (`takePendingSay` ttl). Trigger timing unchanged. Server only, no APK reinstall. Syntax-checked only.
+
