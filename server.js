@@ -882,7 +882,7 @@ function silentAnswer(text) {
   state.silent = on; saveState();
   broadcast({ type: 'silent', on });
   broadcast({ type: 'log', role: 'user', text }); remember('user', text);
-  const reply = on ? 'Silent mode on. I will reply in text only until you say I can talk again.' : 'Voice is back on, sir.';
+  const reply = on ? 'Silent mode on. Microphone muted, replies in text only, no wake-up calls. Type "silent mode off" or "you can talk again" to end it.' : 'Silent mode off. Microphone and voice are back on, sir.';
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
@@ -1475,7 +1475,7 @@ async function localGreeting(memo) {
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
-  if (reason === 'wake') { if (state.silent) { state.silent = false; saveState(); broadcast({ type: 'silent', on: false }); }   // opening the app always brings the voice back
+  if (reason === 'wake') {   // silent mode stays on (text only) until the Owner ends it explicitly
   const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
@@ -3074,6 +3074,7 @@ handlers.alarms_off = async () => {
 // ---------- Wake-up call: "Jarvis, where are you?" -> car-alarm siren on the phone at max volume -> "I'm over here." ----------
 let wakeCallBusy = false;
 handlers.wakeup_call = async ({ seconds }) => {
+  if (state.silent) return 'Silent mode is on, so no wake-up call was made. Say so in one short line.';
   if (wakeCallBusy) return 'A wake-up call is already running. Say nothing.';
   const secs = Math.max(5, Math.min(60, Number(seconds) || 20));
   if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the siren cannot play. Say so plainly.';

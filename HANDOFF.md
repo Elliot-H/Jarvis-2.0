@@ -406,3 +406,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Departure prompt 3: vehicle check offer (2026-10-04)
 - `obdScan` engine-start arms `state.vscan {vehicle, at, offered}`. After the departure/bring-list answer succeeds, `vscanTail()` (server.js, above `departAnswer`) appends `vscanOfferText()` to the spoken reply and sets `pendingQ` type `vscan`; `vscanAnswer` handles yes (reads `vSpoken`: volts, MIL, codes, pending, readiness, trims, freeze frame, coolant, fuel) / no (dropped, never repeated that trip) with no AI call. Offered once per engine start (20 min window). Spoken live via the same answer path as the other prompts. Only chained when he actually answers a leaving question; syntax-checked and offer text tested, not driven live. No APK change.
+
+## Silent mode = full silence (2026-10-04)
+- `silentAnswer` (server.js): silent on mutes the mic client-side (`silentMuted` in app.js, reuses muteMic/unmuteMic), all speech stripped in `broadcast`, `wakeup_call` refused. Wake (opening the app) no longer clears silent. Off phrases unchanged; they must be typed (or Telegram) while the mic is muted.
