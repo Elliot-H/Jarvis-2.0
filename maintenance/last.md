@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-04T20:03:37Z
-REQUEST: Deliver the leaving/departure questions as live spoken Jarvis prompts instead of notifications
+TIME: 2026-10-04T20:14:16Z
+REQUEST: Add a third departure prompt offering the full vehicle check on engine start
 RESULT:
-Owner, the two leaving questions are now spoken live through the app when it is connected, with no notification pushed. You can answer out loud and Jarvis acts on it as before. If the app is not connected, a notification still goes out as a last resort and the question is spoken when you open the app. Trigger timing is unchanged. It goes live when Railway redeploys; no app reinstall needed.
+Owner, Jarvis now chains a short offer after your leaving and bring-list answer, like "Truck's on, fuel at about three quarters, battery at 13.8 volts, no fault codes and emissions ready. Would you like the full check before you pull off?" Say yes and he reads the full scan aloud. Say no and he drops it with no repeat that trip. It is spoken live in the app, with the notification only as a last resort when the app is not connected. It goes live when Railway redeploys; no app reinstall needed. I only syntax-checked it and tested the offer wording, so it has not been driven live.
