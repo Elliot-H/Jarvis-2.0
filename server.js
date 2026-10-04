@@ -79,7 +79,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1437,7 +1437,7 @@ async function tgChatId() {
   try { fs.writeFileSync(TG_FILE, id); } catch {}
   return id;
 }
-async function pushTelegram(title, body, link, watch) {
+async function pushTelegram(title, body, link, watch, buy) {
   try {
     const chat = await tgChatId();
     if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
@@ -1500,8 +1500,19 @@ function cryptoLinks(text) {
   }
   return out.filter(Boolean);
 }
+// Keep the alert's full analysis so the watch list row shows exactly what the recommendation said (entry, stop, next level, bias, confidence, key levels, invalidation).
+function rememberRec(link, title, body) {
+  try {
+    const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym) return;
+    const lv = {}; for (const v of u.searchParams.getAll('lv')) { const [k, n] = v.split(':'); if (k && Number.isFinite(Number(n))) lv[k] = Number(n); }
+    state.recs ||= {}; state.recs[wlKey(sym)] = { title: String(title).slice(0, 120), body: String(body).slice(0, 1500), lv, at: Date.now() };
+    const keys = Object.keys(state.recs); if (keys.length > 40) for (const k of keys.sort((a, b) => state.recs[a].at - state.recs[b].at).slice(0, keys.length - 40)) delete state.recs[k];
+    saveState();
+  } catch {}
+}
 async function push(title, body, link) {
   const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first), buy = buyLink(first);
+  if (watch) rememberRec(first, title, body);
   const extra = links.slice(1).join('\n'); if (extra) body = `${body}\n${extra}`;
   if (process.env.PUSHOVER_APP_TOKEN && process.env.PUSHOVER_USER_KEY) {
     const err = await pushPushover(title, body, first, watch, buy);
@@ -1689,9 +1700,9 @@ function watchlistMsg(noRefresh) {
   const px = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.price]));
   const pc = new Map((watch.items || []).map(i => [i.sym.replace('/USD', '').replace('/', ''), i.prevClose]));
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
-  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, call: e.call || null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol) }; }); 
+  const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, call: e.call || null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol), rec: state.recs?.[wlKey(w.symbol)] || null }; }); 
   const have = new Set(stocks.map(w => wlKey(w.symbol)));
-  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: wlEval.get(c?.symbol)?.stop ?? null, target: wlEval.get(c?.symbol)?.target ?? null, verdict: wlEval.get(c?.symbol)?.verdict ?? null, call: wlEval.get(c?.symbol)?.call || null, spark: c?.symbol ? sparkFor(c.symbol) : null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: wlEval.get(c?.symbol)?.stop ?? null, target: wlEval.get(c?.symbol)?.target ?? null, verdict: wlEval.get(c?.symbol)?.verdict ?? null, call: wlEval.get(c?.symbol)?.call || null, spark: c?.symbol ? sparkFor(c.symbol) : null, rec: c?.symbol ? state.recs?.[wlKey(c.symbol)] || null : null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
   return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
@@ -2079,7 +2090,7 @@ app.get('/watch-add', async (req, res) => {
   const sym = String(req.query.s || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12), k = String(req.query.k || '');
   // A one-tap confirmation, not a page to read: success closes the tab on its own (back to the alert app); a "Back to Jarvis" button opens the app if Chrome keeps the tab.
   const app_ = 'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=app.jarvis.hud;end';
-  const page = (t, ok) => res.status(ok ? 200 : 400).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${ok ? 'Added' : 'Not added'}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px"><div><h2 style="color:#3fe0ff">${ok ? '&#10003; Added to watch list' : 'Not added'}</h2><p>${t}</p><p><a style="display:inline-block;padding:12px 22px;border:1px solid #3fe0ff;border-radius:10px;color:#3fe0ff;text-decoration:none" href="${app_}">Back to Jarvis</a></p></div>${ok ? '<script>setTimeout(()=>{try{window.close()}catch(e){}},1200);setTimeout(()=>{if(history.length>1)history.back()},1600)</script>' : ''}`);
+  const page = (t, ok) => res.status(ok ? 200 : 400).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${ok ? 'Added' : 'Not added'}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px"><div><h2 style="color:#3fe0ff">${ok ? '&#10003; Added to watch list' : 'Not added'}</h2><p>${t}</p><p><a style="display:inline-block;padding:12px 22px;border:1px solid #3fe0ff;border-radius:10px;color:#3fe0ff;text-decoration:none" href="${app_}">Back to Jarvis</a></p></div>${ok ? `<script>setTimeout(()=>{location.replace("${app_}")},500)</script>` : ''}`);
   const want = watchSig(sym);
   if (!sym || k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return page('Bad or expired link.', false);
   try {

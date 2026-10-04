@@ -378,3 +378,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Shut the shop down (2026-10-03)
 - `handlers.shut_shop_down` in server.js (block before Maintenance mode). Steps: music_control close (Spotify force-stop + speaker disconnect; bluetooth_disconnect as retry), then `state.shutdown` {active, deadline, round, dongleSeen} + real `setTimeout` (`shutdownArm`, re-armed on boot) + `shutdownHunt` (obdTick every `HUNT_GAP_SEC`=30 s, all vehicles). Running engine seen in obdScan -> `shutdownSeen` ends the hunt, normal `vehicleDeparture` question follows. Deadline -> `shutdownFire` speaks + pushes the leaving/staying question (pendingQ type `stay`, then `stay_music`, answered in `stayAnswer` with no AI call). Untested on hardware; no node_modules in the maintenance sandbox so only `node --check` was run.
+
+## Alert "Add to watch list" fix (2026-10-04)
+- `/watch-add` success page used `window.close()`/`history.back()`, which dropped the Owner into whatever app opened the link (social media). It now redirects to the Jarvis app intent (`app.jarvis.hud`); the Back to Jarvis button stays as fallback.
+- `push()` stores the full alert (title, body, entry/stop/target levels) in `state.recs[symbol]` (in BACKUP_KEYS) via `rememberRec`; `watchlistMsg` rows carry `rec`; `renderWatchlist` shows a "JARVIS RECOMMENDATION" row (entry, trailing stop, next level, full analysis text). Also fixed `pushTelegram` missing `buy` param.
