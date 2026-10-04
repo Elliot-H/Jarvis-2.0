@@ -412,3 +412,9 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Silent mode fix (2026-10-04)
 - Silent mode no longer mutes the mic (muted mic made "silent mode off" impossible by voice). It ends by voice (also "death mode off", "stop silent mode"...), by tapping the TEXT ONLY chip (`silent_off` ws message), and automatically after `SILENT_MAX_HOURS` (default 8; `silentActive()` / `setSilent()` in server.js; `state.silentAt` in BACKUP_KEYS).
+
+## Gaming mode (2026-10-04)
+- `handlers.gaming_mode` / `gaming_config` in server.js (block before Maintenance mode), tools in tools.js, persona section "Gaming mode". State `state.gaming` {rooms{house|home:{screen,input,soundbar}}, defaultRoom, defaultGame, games{name:{titleId}}} (in BACKUP_KEYS). HUD panel id `gaming`.
+- Reality: Railway cannot reach the TV or PlayStation (home LAN), and the phone app has no PlayStation control. So each step (tv_on, soundbar_on, tv_input, ps_wake, ps_connect, ps_launch) is sent to a LAN bridge at `GAMING_BRIDGE_URL` (+ optional `GAMING_BRIDGE_TOKEN`): POST /step, answer {ok, confirmed, detail}. Only confirmed:true counts. No bridge = every step NOT DONE with what it needs. The bridge itself is NOT built yet.
+- Likely bridge: Pi/PC on each LAN (house, home) with HDMI-CEC (cec-client: TV on, active source, console wake via One Touch Play) and playactor or ps5-mqtt (wake, connect, launch by title id; needs the PSN login and PS5 "turn on from network" enabled). Remote Play from the cloud is not workable (needs the console on a reachable network and a PSN session). IR blaster is the fallback for TV/soundbar.
+- Needs from the Owner: bridge hardware, PlayStation title id for the default game, which HDMI input the PS is on in each room.

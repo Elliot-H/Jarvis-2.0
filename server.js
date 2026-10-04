@@ -79,7 +79,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -3178,6 +3178,80 @@ handlers.shut_shop_down = async ({ cancel } = {}) => {
   } finally { shutdownBusy = false; }
 };
 if (state.shutdown?.active) { if (Date.now() - state.shutdown.startedAt > 30 * 60e3) state.shutdown.active = false; else { shutdownArm(); shutdownHunt(); } } // survive a restart
+// ---------- Gaming Mode (A32): TV (+soundbar) on -> HDMI to the PlayStation -> console awake -> game launched, every step proven ----------
+// Nothing here can reach a TV or PlayStation by itself: Railway is in the cloud, they are on the home/house LAN. A step only counts as done when a LAN
+// bridge (GAMING_BRIDGE_URL + GAMING_BRIDGE_TOKEN) answers {ok:true, confirmed:true}. No bridge = each step is reported as NOT DONE with what is missing.
+// Bridge contract: POST <GAMING_BRIDGE_URL>/step  {step:'tv_on'|'soundbar_on'|'tv_input'|'ps_wake'|'ps_connect'|'ps_launch', room, screen, input, game, titleId}
+//   -> {ok, confirmed, detail}. Typical bridge: a Pi/PC or Home Assistant on the LAN (HDMI-CEC + TV API, playactor/ps5-mqtt for wake and launch).
+state.gaming ||= { rooms: {}, defaultRoom: 'house', defaultGame: '', games: {} };
+const GM_STEPS = [['tv_on', 'TV on'], ['soundbar_on', 'Soundbar on'], ['tv_input', 'HDMI input to the PlayStation'], ['ps_wake', 'PlayStation awake'], ['ps_connect', 'PlayStation connection'], ['ps_launch', 'Game launch']];
+const GM_NEEDS = {
+  tv_on: 'a TV control path on the LAN (HDMI-CEC from the bridge, or the TV\'s network API / IR blaster)',
+  soundbar_on: 'a soundbar control path (HDMI-ARC/CEC from the bridge, or its IR code)',
+  tv_input: 'a TV input switch (HDMI-CEC "active source" or the TV\'s network API) plus the input name set with gaming_config',
+  ps_wake: 'a PlayStation wake path on the LAN (HDMI-CEC One Touch Play, or a PS5 library such as playactor/ps5-mqtt with the console\'s PSN login, with Remote Play and "Enable turning on PS5 from network" switched on in the console)',
+  ps_connect: 'the same PS5 link (playactor or Remote Play) to confirm the console answers',
+  ps_launch: 'the PS5 link with a PlayStation title id for the game (gaming_config game=... title_id=...)'
+};
+const gmRoom = room => { const k = norm(room || state.gaming.defaultRoom || 'house'); return { key: k, ...(state.gaming.rooms[k] || {}) }; };
+function gmPanel(room, game, rows, running) {
+  const body = [`Room: ${room.key}${room.screen ? ' · ' + room.screen : ''}${room.input ? ' · ' + room.input : ''}`, `Game: ${game || 'none set'}`, '', ...rows.map(r => `${r.ok ? '✔' : r.skipped ? '–' : '✘'} ${r.label}: ${r.detail}`)].join('\n');
+  state.panels.gaming = { id: 'gaming', title: running ? 'GAMING MODE · RUNNING' : 'GAMING MODE', body, updatedAt: new Date().toISOString() };
+  saveState(); broadcast({ type: 'panels', panels: state.panels });
+}
+async function gmBridge(step, payload) {
+  const base = process.env.GAMING_BRIDGE_URL;
+  if (!base) return { ok: false, detail: `NOT DONE: no gaming bridge is connected (GAMING_BRIDGE_URL is not set). Needs ${GM_NEEDS[step]}.` };
+  try {
+    const r = await fetch(base.replace(/\/$/, '') + '/step', { method: 'POST', signal: AbortSignal.timeout(45000), headers: { 'Content-Type': 'application/json', ...(process.env.GAMING_BRIDGE_TOKEN ? { Authorization: 'Bearer ' + process.env.GAMING_BRIDGE_TOKEN } : {}) }, body: JSON.stringify({ step, ...payload }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, detail: `FAILED: bridge answered HTTP ${r.status}${j.detail ? ': ' + String(j.detail).slice(0, 120) : ''}` };
+    if (j.ok && j.confirmed) return { ok: true, detail: String(j.detail || 'confirmed').slice(0, 140) };
+    return { ok: false, detail: `FAILED: ${j.ok ? 'sent but not confirmed' : 'refused'}${j.detail ? ': ' + String(j.detail).slice(0, 120) : ''}` };
+  } catch (e) { return { ok: false, detail: `FAILED: could not reach the bridge (${e.message})` }; }
+}
+handlers.gaming_config = async ({ room, screen, input, soundbar, default_room, game, title_id, default_game, show } = {}) => {
+  const g = state.gaming, out = [];
+  if (room && (screen || input || soundbar !== undefined)) {
+    const k = norm(room), cur = g.rooms[k] || {};
+    g.rooms[k] = { ...cur, ...(screen ? { screen } : {}), ...(input ? { input } : {}), ...(soundbar !== undefined ? { soundbar: !!soundbar } : {}) };
+    out.push(`${k}: ${JSON.stringify(g.rooms[k])}`);
+  }
+  if (default_room) { g.defaultRoom = norm(default_room); out.push(`default room ${g.defaultRoom}`); }
+  if (game) { const n = norm(game); g.games[n] = { name: game, ...(title_id ? { titleId: title_id } : g.games[n]?.titleId ? { titleId: g.games[n].titleId } : {}) }; if (default_game) g.defaultGame = n; out.push(`game ${game}${g.games[n].titleId ? ' (' + g.games[n].titleId + ')' : ' (no title id yet)'}`); }
+  else if (typeof default_game === 'string' && default_game) { g.defaultGame = norm(default_game); out.push(`default game ${default_game}`); }
+  if (out.length) saveState();
+  if (!out.length && !show) return 'Nothing to change. Ask what to set: room screen/input, default room, game with title id, default game.';
+  return `${out.length ? 'Saved: ' + out.join('; ') + '. ' : ''}Settings now: default room ${g.defaultRoom}; default game ${g.defaultGame || 'none'}; rooms ${JSON.stringify(g.rooms)}; games ${Object.values(g.games).map(x => x.name + (x.titleId ? '' : ' (no title id)')).join(', ') || 'none'}. Bridge ${process.env.GAMING_BRIDGE_URL ? 'connected' : 'NOT connected'}.`;
+};
+let gamingBusy = false;
+handlers.gaming_mode = async ({ game, room } = {}) => {
+  if (gamingBusy) return 'Gaming mode is already running. Say nothing more.';
+  gamingBusy = true;
+  try {
+    const g = state.gaming, rm = gmRoom(room), gk = norm(game) || g.defaultGame;
+    const gm = g.games[gk] || (game ? { name: game } : null);
+    const rows = [], say = t => broadcast({ type: 'activity', text: 'Gaming mode: ' + t });
+    gmPanel(rm, gm?.name, [], true);
+    let blocked = '';
+    for (const [step, label] of GM_STEPS) {
+      let r;
+      if (step === 'soundbar_on' && rm.soundbar === false) r = { skipped: true, detail: 'not used in this room' };
+      else if (blocked) r = { skipped: true, detail: `skipped, ${blocked} did not confirm` };
+      else if (step === 'tv_input' && !rm.input) r = { ok: false, detail: 'NOT DONE: no HDMI input is saved for this room. Say which input the PlayStation is on.' };
+      else if (step === 'ps_launch' && !gm) r = { ok: false, detail: 'NOT DONE: no game chosen and no default game saved.' };
+      else if (step === 'ps_launch' && !gm.titleId) r = { ok: false, detail: `NOT DONE: no PlayStation title id saved for ${gm.name}. Needs gaming_config game and title_id.` };
+      else { say(label); r = await gmBridge(step, { room: rm.key, screen: rm.screen, input: rm.input, game: gm?.name, titleId: gm?.titleId }); }
+      rows.push({ label, ...r });
+      if (!r.ok && !r.skipped && ['tv_on', 'ps_wake', 'ps_connect'].includes(step)) blocked = label;   // soundbar, input and launch failures do not stop the rest
+      gmPanel(rm, gm?.name, rows, true);
+    }
+    gmPanel(rm, gm?.name, rows, false);
+    const done = rows.filter(r => r.ok).map(r => r.label), bad = rows.filter(r => !r.ok && !r.skipped);
+    dlog('gaming-mode', { room: rm.key, game: gm?.name, rows: rows.map(r => [r.label, !!r.ok]) });
+    return `${rows.map(r => `${r.label}: ${r.ok ? 'CONFIRMED, ' : ''}${r.detail}`).join(' | ')}. ${bad.length ? `Not everything worked: ${bad.length} step(s) not done.` : 'All steps confirmed.'} Read it out step by step in a few short lines: what actually turned on (${done.join(', ') || 'nothing'}), and plainly what is missing and what hardware or connection is still needed. Never claim a step worked unless it says CONFIRMED.`;
+  } finally { gamingBusy = false; }
+};
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';
