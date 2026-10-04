@@ -97,6 +97,7 @@ const clients = new Set();
 function broadcast(msg) {
   if (state.silent && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   const s = JSON.stringify(msg);
+  if (msg.type === 'say' && msg.text && Date.now() < tgReplyUntil) tgSend(msg.text).catch(() => {}); // answering a Telegram reply: echo Jarvis's answer back there
   for (const c of clients) if (c.readyState === 1) c.send(s);
 }
 
@@ -987,8 +988,18 @@ function deliver(text, title = 'Jarvis', alsoPush = false) {
   if (clients.size) {
     pendingSay = { text, at: Date.now() };
     setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, busy ? 6000 : 2500);
-    if (alsoPush) push(title, text).catch(e => console.warn('depart push', e.message)); // a connected but backgrounded app cannot speak: also notify the phone
-  } else push(title, text).catch(() => {});
+    if (alsoPush) alertOut(title, text).catch(e => console.warn('depart push', e.message)); // a connected but backgrounded app cannot speak: also notify the phone
+  } else alertOut(title, text).catch(() => {});
+}
+// A question alert (departure checklist, "leaving?") must be answerable: send it through Telegram, where the Owner can reply
+// straight from the notification (see tgPoll), falling back to the normal push with a link that opens Jarvis.
+async function alertOut(title, text) {
+  const q = state.pendingQ;
+  if (q && Date.now() - q.at < 15000) {
+    if (process.env.TELEGRAM_BOT_TOKEN) { const err = await pushTelegram(title, text); if (!err) return null; console.warn('two-way alert failed:', err); }
+    return push(title, text, publicBase() || undefined);
+  }
+  return push(title, text);
 }
 const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < 10000 ? ' ' + p.text : ''; };
 let moveTimer = null;
@@ -1448,6 +1459,29 @@ async function pushTelegram(title, body, link, watch, buy) {
     return r.ok ? null : `Telegram answered ${r.status}: ${(await r.text()).slice(0, 120)}`;
   } catch (e) { return String(e.message || e).slice(0, 120); }
 }
+let tgReplyUntil = 0;
+async function tgSend(text) {
+  const chat = await tgChatId(); if (!chat) return;
+  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat, text: String(text).slice(0, 3500) }), signal: AbortSignal.timeout(10000) });
+}
+// Replies typed in the Jarvis Telegram chat go through the same path as a typed question; his answer is echoed back to Telegram.
+let tgOffset = 0;
+async function tgPoll() {
+  if (!process.env.TELEGRAM_BOT_TOKEN) return;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?timeout=25&offset=${tgOffset}`, { signal: AbortSignal.timeout(35000) });
+    const j = await r.json(); const chat = await tgChatId();
+    for (const u of j.result || []) {
+      tgOffset = u.update_id + 1;
+      const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the Owner's own chat
+      const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
+      tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
+      if (!silentAnswer(t) && !(await panelAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+    }
+  } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
+  setImmediate(tgPoll);
+}
+if (!process.env.JARVIS_SMOKE) setTimeout(tgPoll, 5000);
 async function pushNtfy(title, body, link, watch, buy) {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return 'NTFY_TOPIC is not set in Railway yet.';

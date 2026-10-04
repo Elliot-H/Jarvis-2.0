@@ -382,3 +382,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Alert "Add to watch list" fix (2026-10-04)
 - `/watch-add` success page used `window.close()`/`history.back()`, which dropped the Owner into whatever app opened the link (social media). It now redirects to the Jarvis app intent (`app.jarvis.hud`); the Back to Jarvis button stays as fallback.
 - `push()` stores the full alert (title, body, entry/stop/target levels) in `state.recs[symbol]` (in BACKUP_KEYS) via `rememberRec`; `watchlistMsg` rows carry `rec`; `renderWatchlist` shows a "JARVIS RECOMMENDATION" row (entry, trailing stop, next level, full analysis text). Also fixed `pushTelegram` missing `buy` param.
+
+## Two-way departure alerts (2026-10-04)
+- Problem: departure/"before you go, anything to bring?"/vehicle-start alerts went out by Pushover (one-way). `deliver()` now routes question alerts (`state.pendingQ` set within 15 s) through `alertOut()`: Telegram when `TELEGRAM_BOT_TOKEN` is set (reply right from the notification), else the normal push with a link that opens Jarvis.
+- `tgPoll()` long-polls Telegram getUpdates; text from the Owner's chat (must equal `tgChatId()`) goes through silentAnswer/panelAnswer/shopAnswer/bucketAnswer (so checklist/depart answers work with no AI call) else `ask(text,{spoken:false})`. For 90 s after a reply, every `say` broadcast is echoed back to Telegram. Needs the Telegram bot already set up (token in Railway, Owner messaged the bot once). Mock-untested against real Telegram; syntax checked only. Server only, no APK reinstall.
