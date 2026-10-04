@@ -386,3 +386,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Two-way departure alerts (2026-10-04)
 - Problem: departure/"before you go, anything to bring?"/vehicle-start alerts went out by Pushover (one-way). `deliver()` now routes question alerts (`state.pendingQ` set within 15 s) through `alertOut()`: Telegram when `TELEGRAM_BOT_TOKEN` is set (reply right from the notification), else the normal push with a link that opens Jarvis.
 - `tgPoll()` long-polls Telegram getUpdates; text from the Owner's chat (must equal `tgChatId()`) goes through silentAnswer/panelAnswer/shopAnswer/bucketAnswer (so checklist/depart answers work with no AI call) else `ask(text,{spoken:false})`. For 90 s after a reply, every `say` broadcast is echoed back to Telegram. Needs the Telegram bot already set up (token in Railway, Owner messaged the bot once). Mock-untested against real Telegram; syntax checked only. Server only, no APK reinstall.
+
+## Arrival vs departure fix (2026-10-04)
+- While a departure question is open (`pendingQ` dest/checklist/depart), a statement like "no, I'm over at the Camden house now" is caught first by `arrivalStatement()` (server.js, before the answer handlers): it closes the question, runs `navArrive()` (bring items for that place cleared, arrive items, "Welcome to X"/"Hope you remembered ...") and never says "safe travels".
+- GPS arrival no longer asks the missed departure checklist. The vehicle-start question offers only the guessed next place, never every saved place.

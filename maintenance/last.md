@@ -1,8 +1,5 @@
 STATUS: done
-TIME: 2026-10-04T15:22:12Z
-REQUEST: Make departure and vehicle-start alerts two-way so the Owner can reply to them.
+TIME: 2026-10-04T16:58:55Z
+REQUEST: Fix arrival vs departure logic (no "safe travels" on arrival, no departure checklist on arrival, no all-places "where headed")
 RESULT:
-Owner, the leaving and "anything to bring" alerts now go out through Telegram, where you can reply right from the notification.
-Your reply is handled the same as if you had said it in the app, and Jarvis answers back in the same Telegram chat.
-If Telegram is not set up, the alert falls back to the normal push with a link that opens Jarvis.
-It goes live on the Railway redeploy and needs no APK reinstall. It needs the Telegram bot token in Railway and you to have messaged the bot once. I could only syntax check it, not test it against real Telegram.
+Owner, an arrival like "I am at the Camden house now" is now recognised as an arrival. Jarvis welcomes you, mentions or clears the bring items for that place, and never says safe travels. The leftover departure question is closed, and Jarvis no longer asks the checklist again when you arrive. The vehicle-start question now offers only the one guessed place instead of listing all three. It is live after Railway redeploys; no APK reinstall is needed.

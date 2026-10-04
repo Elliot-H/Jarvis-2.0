@@ -733,9 +733,23 @@ async function panelAnswer(text) {
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
   return true;
 }
+// "I'm at / just got to / arrived at <saved place>": an arrival. Clears the open departure question, applies the same effects as a GPS
+// arrival (bring items cleared, arrive items) and never says safe travels. Statements of heading/leaving are not matched.
+const ARRIVE_RE = /\b(?:i'?m|im|i am|we'?re|we are|i have|i'?ve|ive|just|now)?\s*(?:now |just |finally )?(?:arrived(?: at| in)?|got to|made it to|pulled (?:in|into|up (?:at|to))|here at|over at|back at|(?:am |are )?(?:at|in))\s+(?:the\s+)?(.+?)(?:\s+now|\s+again)?$/;
+async function arrivalStatement(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '').replace(/^(?:no|nope|nah|yeah|yes|well|actually|um|uh|okay|ok)\s+/, '');
+  if (t.split(' ').length > 12 || /\b(?:leaving|headed|heading|going|on my way|about to)\b/.test(t) || /\?$/.test(String(text).trim())) return false;
+  const m = t.match(ARRIVE_RE); if (!m) return false;
+  const pl = findPlace(m[1].replace(/^(?:the )?/, '')); if (!pl) return false;
+  state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
+  const line = navArrive(pl) || `Noted, sir. You are at ${pl.name}.`; saveState();
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
+  return true;
+}
 // A bucket question with its own yes/no replies is answered here (short answers only, within 10 minutes).
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
+  if (['dest', 'checklist', 'depart'].includes(q.type) && await arrivalStatement(q, text)) return true; // "no, I'm at the Camden house now" is an ARRIVAL, never a departure answer
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
@@ -1042,7 +1056,6 @@ function onMove() {
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
     const lc = state.lastCheck;
-    if (lc && !lc.answered && placeKey(lc.from) !== key && now - lc.at < 12 * 3600e3) parts.push(askChecklist(lc.from, null, true)); // departure prompt missed or cut off: ask on arrival
     const firstToday = (state.arrived ||= {})[key] !== c.day; state.arrived[key] = c.day;
     parts.push(...eventLines('arrive', pl.name, Math.random, true));
     if (!parts.length) parts.push(pl.kind === 'home' ? 'Welcome home, sir.' : firstToday ? `Welcome to ${pl.name}, sir.` : `Arrived at ${pl.name}, sir.`); // always one short line on an arrival
@@ -1118,8 +1131,7 @@ function hereNow() {
 function vehicleDeparture(v) {
   const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
-  for (const p of [nextGuess, ...state.places.filter(x => !here || x.name !== here.name).sort((a, b) => bringFor(b.name).length - bringFor(a.name).length)])
-    if (p && !opts.includes(p.name) && opts.length < 3) opts.push(p.name);
+  if (nextGuess) opts.push(nextGuess.name); // only a real guess is offered; never list every saved place
   state.pendingQ = { type: 'depart', from: here ? here.name : '', vehicle: v.name, at: Date.now() };
   state.departed = { place: here ? here.name : '', at: Date.now(), answered: false };
   saveState();
