@@ -76,10 +76,11 @@ function loadState() {
 }
 const state = loadState();
 let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's backup before stamping anything newer
+state.silent = false;   // silent mode never survives a restart
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -872,8 +873,8 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|silent mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
-const SILENT_OFF = /\b(you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
+const SILENT_ON = /\b(go silent|death mode|be silent|silent mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
+const SILENT_OFF = /\b(you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again|death mode off|exit silent mode|leave silent mode)\b/;
 function silentAnswer(text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (t.split(' ').length > 10) return false;
@@ -882,7 +883,7 @@ function silentAnswer(text) {
   state.silent = on; saveState();
   broadcast({ type: 'silent', on });
   broadcast({ type: 'log', role: 'user', text }); remember('user', text);
-  const reply = on ? 'Silent mode on. Microphone muted, replies in text only, no wake-up calls. Type "silent mode off" or "you can talk again" to end it.' : 'Silent mode off. Microphone and voice are back on, sir.';
+  const reply = on ? 'Silent mode on. Replies in text only, no wake-up calls. Say \"you can talk again\" or reopen the app to end it.' : 'Silent mode off. Voice is back on, sir.';
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
@@ -1475,7 +1476,8 @@ async function localGreeting(memo) {
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
-  if (reason === 'wake') {   // silent mode stays on (text only) until the Owner ends it explicitly
+  if (reason === 'wake') {   // opening the app always ends silent mode, so voice can never stay locked off
+    if (state.silent) { state.silent = false; saveState(); broadcast({ type: 'silent', on: false }); }
   const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;

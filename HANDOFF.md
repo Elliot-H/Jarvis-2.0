@@ -409,3 +409,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Silent mode = full silence (2026-10-04)
 - `silentAnswer` (server.js): silent on mutes the mic client-side (`silentMuted` in app.js, reuses muteMic/unmuteMic), all speech stripped in `broadcast`, `wakeup_call` refused. Wake (opening the app) no longer clears silent. Off phrases unchanged; they must be typed (or Telegram) while the mic is muted.
+
+## Silent mode fix (2026-10-04)
+- Reverted the full-mute version: silent no longer mutes the mic, is not in BACKUP_KEYS (phone restore re-armed it), is cleared at boot and by app wake. Client clears a stale `jarvis.muted` once (`jarvis.silentFix`). Aliases: death mode / death mode off. Mic beeping cause not confirmed from logs (none in repo); the stuck mute/restore loop was removed, and chimes are already off unless ?chime=1. Needs a web redeploy only.

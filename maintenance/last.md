@@ -1,5 +1,5 @@
-STATUS: done
-TIME: 2026-10-04T20:20:00Z
-REQUEST: Make "go silent" a full-silence mode (mic muted, no speech, no wake-up calls) until the Owner ends it
+STATUS: needs-owner
+TIME: 2026-10-04T20:40:00Z
+REQUEST: Fix silent/Death Mode lock (no voice, re-enters silent, mic beeping)
 RESULT:
-Owner, silent mode was text-only before: it stopped speech but left the mic listening, and the wake-up call siren still played. Now "go silent" or "silent mode" also mutes the mic on the app, replies stay text, and the wake-up call is refused. Opening the app no longer cancels it. It stays on until you say or type "silent mode off" or "you can talk again", which restores the mic and voice. Because the mic is off, type that phrase in the command box or Telegram. It goes live on the Railway redeploy; no APK reinstall needed. Syntax-checked only, not tested on the phone.
+Owner, silent mode was saved in the phone backup and the full-mute version also muted the mic, so voice stayed off and came back on every restore. Now silent mode is never restored or kept across restarts, opening the app ends it, and it no longer mutes the mic. "Death mode" and "death mode off" work by voice. I could not see behaviour logs, so I could not confirm the beeping source, but the mute loop is gone and app chimes are off by default. The fix is on branch claude/laughing-allen-vvkah8, not main, so it needs merging to main to go live. No APK reinstall needed. Syntax-checked only.

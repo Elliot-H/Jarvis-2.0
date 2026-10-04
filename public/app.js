@@ -47,6 +47,7 @@
   let ws, state = 'idle', level = 0, targetLevel = 0;
   let audioCtx, ttsAnalyser, micAnalyser, freq = new Uint8Array(128);
   let speaking = false, currentAudio = null;
+  try { if (!localStorage.getItem('jarvis.silentFix')) { localStorage.setItem('jarvis.silentFix', '1'); localStorage.removeItem('jarvis.muted'); } } catch {}   // old silent mode left the mic muted across reloads
   let silentMuted = false;   // the mic is muted because of silent mode (restored when it ends)
   let silent = false;   // silent / text-only mode (server-owned): no speech, no filler clips
   let muted = false; try { muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}
@@ -113,9 +114,8 @@
         break;
       case 'backup': try { localStorage.setItem('jarvis.backup', JSON.stringify(m.data)); } catch {} break;
       case 'silent': silent = !!m.on; if (silent) { stopFillers(); stopSpeaking(true); }
-        // full silence: the mic is muted too (nothing picked up); ending silent mode gives the mic back
-        if (silent) { silentMuted = true; if (!muted) muteMic(false); }
-        else if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
+        // silent mode only stops speech; the mic stays live so "you can talk again" works by voice
+        if (!silent && silentMuted) { silentMuted = false; if (muted) { if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } } }
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
       case 'say':
         if (m.memo) saveMemo(m.memo);
