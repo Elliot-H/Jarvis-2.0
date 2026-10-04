@@ -2077,10 +2077,16 @@ app.get('/health', (_req, res) => res.send('ok'));
 // Alert button target: signed, watch-only (never places a buy).
 app.get('/watch-add', async (req, res) => {
   const sym = String(req.query.s || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12), k = String(req.query.k || '');
-  const page = (t, ok) => res.status(ok ? 200 : 400).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;background:#02060c;color:#cfefff;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px"><div><h2 style="color:#3fe0ff">${ok ? 'Added to watch list' : 'Not added'}</h2><p>${t}</p><p><a style="color:#3fe0ff" href="/">Open Jarvis</a></p></div>`);
+  // A one-tap confirmation, not a page to read: success closes the tab on its own (back to the alert app); a "Back to Jarvis" button opens the app if Chrome keeps the tab.
+  const app_ = 'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=app.jarvis.hud;end';
+  const page = (t, ok) => res.status(ok ? 200 : 400).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${ok ? 'Added' : 'Not added'}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:16px"><div><h2 style="color:#3fe0ff">${ok ? '&#10003; Added to watch list' : 'Not added'}</h2><p>${t}</p><p><a style="display:inline-block;padding:12px 22px;border:1px solid #3fe0ff;border-radius:10px;color:#3fe0ff;text-decoration:none" href="${app_}">Back to Jarvis</a></p></div>${ok ? '<script>setTimeout(()=>{try{window.close()}catch(e){}},1200);setTimeout(()=>{if(history.length>1)history.back()},1600)</script>' : ''}`);
   const want = watchSig(sym);
   if (!sym || k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return page('Bad or expired link.', false);
-  try { const r = await handlers.signal_watch({ action: 'add', symbol: sym }); return page(String(r).startsWith('Watching') ? `${sym} is on the watch list. Nothing was bought.` : String(r).replace(/[<>&]/g, ''), String(r).startsWith('Watching')); } catch (e) { return page('Could not add it.', false); }
+  try {
+    const r = String(await handlers.signal_watch({ action: 'add', symbol: sym })), ok = r.startsWith('Watching');
+    const nm = (r.match(/^Watching ([A-Z0-9.\-]+)(?: \(([^)]+)\))?/) || [])[1] || sym, full = (r.match(/^Watching [A-Z0-9.\-]+ \(([^)]+)\)/) || [])[1];
+    return page(ok ? `${nm}${full ? ' (' + full.replace(/[<>&]/g, '') + ')' : ''} is on the watch list. Nothing was bought.` : r.replace(/[<>&]/g, ''), ok);
+  } catch (e) { return page('Could not add it.', false); }
 });
 // The shop iPhone's Shortcut: token in the URL instead of the PIN cookie.
 const outboxOk = req => String(req.query.token || '') === state.outboxToken;
