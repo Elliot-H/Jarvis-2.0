@@ -396,3 +396,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - Log: 16:18Z drive-start (GPS, 16 mph) with `pendingQ: true` -> a stale question blocked the departure ask. No `vehicle-start`/OBD lines (dongle never read). 16:27Z leave confirmed, question routed by `alertOut` to Telegram (Owner watches Pushover). 16:46Z arrival re-ask (now removed by 34c6a9f).
 - Fixes: `driveStart` ignores/clears a `pendingQ` older than 3 min. `alertOut` always sends question alerts by Pushover; Telegram only gets an extra reply-able copy; logs `alert-out "title": sent|error`. Pushover link label "Open Jarvis" unless /chart. OBD logs (max every 30 min) when the phone app is not connected as a device or a scan fails.
 - Open: engine start needs the Jarvis Android app alive as a device client; if Android kills it, GPS movement is the trigger.
+
+## Watch list default entry (2026-10-04)
+- Adding to the watch list without an entry now always uses today's live price as the entry and computes the trailing stop from it. Stocks: signal_watch already did. Crypto: `cryptoDefaults()` in server.js stores `state.cEntry[coinId]` (in BACKUP_KEYS) when crypto_watch / a coin fallback adds it, and lazily for old rows with no entry; crypto rows now show entry + trailing stop. Remove clears it.

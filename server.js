@@ -79,7 +79,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -458,6 +458,8 @@ Object.assign(handlers, {
     }
     if (action === 'add') state.watchlist = [...state.watchlist.filter(x => !clean.includes(x)), ...clean].slice(-25);   // newest adds always kept (slice(0,25) silently dropped them on a full list)
     if (action === 'remove') state.watchlist = state.watchlist.filter(i => !clean.includes(i));
+    if (action === 'remove') for (const i of clean) delete state.cEntry[i];
+    if (action === 'add') { try { for (const c of await crypto_.byIds(clean)) cryptoDefaults(c.id, c.symbol, c.price); } catch (e) { console.warn('crypto entry', e.message); } }   // entry defaults to today's price, stop computed from it
     saveState(); cgPx.at = 0; broadcast(watchlistMsg(true));
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
   }
@@ -1655,6 +1657,14 @@ async function realisedRefresh(pos) {
   } catch (e) { console.warn('realised', e.message); }
 }
 const trailStopOf = sym => state.trail[wlKey(sym)]?.stop ?? null;
+// Default entry: a coin added to the watch list without an entry takes today's price at the time of adding (or first sight) as its entry, and the trailing stop is computed from it.
+state.cEntry ||= {};
+function cryptoDefaults(id, symbol, price) {
+  const p = Number(price) || 0; if (!id || !(p > 0)) return state.cEntry[id] ?? null;
+  if (!(state.cEntry[id] > 0)) { state.cEntry[id] = p; saveState(); }
+  if (symbol) trailUpdate(symbol, p, state.cEntry[id], null);
+  return state.cEntry[id];
+}
 // Auto rows: Alpaca positions worth at least the dust threshold (dust stays off the list) that he has not removed.
 // The HUD watch list holds only what he added with signal_watch; holdings are never auto-added, and a held symbol is not shown in it.
 const wlAuto = () => [];
@@ -1753,7 +1763,7 @@ function watchlistMsg(noRefresh) {
   const dayOf = (sym, price) => { const prev = pc.get(sym) || lf.latest(sym)?.prevClose; return price > 0 && prev > 0 ? +((price - prev) / prev * 100).toFixed(2) : null; };
   const stocks = wlRows().map(w => { const e = wlEval.get(w.symbol) || {}; return { symbol: w.symbol, auto: !!w.auto, price: px.get(w.symbol) ?? kr.latest(wlKey(w.symbol))?.price ?? cgPx.bySym.get(wlKey(w.symbol))?.price ?? null, feed: px.get(w.symbol) == null && (kr.latest(wlKey(w.symbol))?.price != null || cgPx.bySym.get(wlKey(w.symbol))?.price != null) ? 'crypto' : 'stock', entry: w.entry ?? null, stop: trailStopOf(w.symbol) ?? e.stop ?? null, trail: trailStopOf(w.symbol) != null, scale: scaleInfo(w.symbol), target: e.target ?? null, verdict: e.verdict ?? null, call: e.call || null, dayPct: dayOf(w.symbol, px.get(w.symbol) ?? lf.latest(w.symbol)?.price) ?? (px.get(w.symbol) == null ? kr.latest(wlKey(w.symbol))?.pct ?? cgPx.bySym.get(wlKey(w.symbol))?.change24h ?? null : null), spark: sparkFor(w.symbol), rec: state.recs?.[wlKey(w.symbol)] || null }; }); 
   const have = new Set(stocks.map(w => wlKey(w.symbol)));
-  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: null, stop: wlEval.get(c?.symbol)?.stop ?? null, target: wlEval.get(c?.symbol)?.target ?? null, verdict: wlEval.get(c?.symbol)?.verdict ?? null, call: wlEval.get(c?.symbol)?.call || null, spark: c?.symbol ? sparkFor(c.symbol) : null, rec: c?.symbol ? state.recs?.[wlKey(c.symbol)] || null : null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
+  const crypto = (state.watchlist || []).map(id => { const c = cgPx.byId.get(id) || (state.cgLast[id] ? { ...state.cgLast[id], stale: true } : null); return { id, c }; }).filter(x => !(x.c && have.has(x.c.symbol))).map(({ id, c }) => ({ symbol: c?.symbol || id.toUpperCase(), kind: 'crypto', name: c?.name || id, price: kr.latest(c?.symbol)?.price ?? c?.price ?? null, dayPct: kr.latest(c?.symbol)?.pct ?? c?.change24h ?? null, entry: cryptoDefaults(id, c?.symbol, kr.latest(c?.symbol)?.price ?? c?.price), stop: (c?.symbol && trailStopOf(c.symbol)) ?? wlEval.get(c?.symbol)?.stop ?? null, trail: !!(c?.symbol && trailStopOf(c.symbol) != null), target: wlEval.get(c?.symbol)?.target ?? null, verdict: wlEval.get(c?.symbol)?.verdict ?? null, call: wlEval.get(c?.symbol)?.call || null, spark: c?.symbol ? sparkFor(c.symbol) : null, rec: c?.symbol ? state.recs?.[wlKey(c.symbol)] || null : null, note: kr.latest(c?.symbol) ? 'live' : c?.stale ? 'last price' + (cgPx.err ? ' (CoinGecko: ' + cgPx.err + ')' : '') : (!c && cgPx.err ? 'CoinGecko: ' + cgPx.err : undefined) }));
   return { type: 'watchlist', at: Date.now(), list: [...stocks, ...crypto] };
 }
 handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
@@ -1774,7 +1784,7 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const cm = String(symbol || '').toUpperCase().replace(/\s/g, '').match(/^([A-Z0-9]{2,10})(?:([\/-])USD[T]?|USD[T]?)$/);
   if (cm) {
     const c = await coinFallback(cm[1]);
-    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
+    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); cryptoDefaults(c.id, c.symbol, c.price); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
     // RAINUSD, RAIN/USD etc. can never be a stock (6+ letters), so never fall through to the stock chart feed and its 404.
     if (cm[2] || sym.length > 5) return coinFallback.err && coinFallback.err !== 'notfound' ? `Could not add ${cm[1]} right now: ${coinFallback.err} Try the button again in a minute.` : `Could not add ${cm[1]}: CoinGecko has no coin with that ticker.`;
   }
@@ -1787,7 +1797,7 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
     return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().atrMult}x this ticker's ATR under the highest price since entry, or its swing low; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) {
     const c = await coinFallback(sym);   // not a stock: it may be a coin; any coin works, no per-ticker setup
-    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `${sym} is a crypto coin (${c.name}). Added to the HUD watch list; price and 24h move come from CoinGecko.`; }
+    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); cryptoDefaults(c.id, c.symbol, c.price); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `${sym} is a crypto coin (${c.name}). Added to the HUD watch list; price and 24h move come from CoinGecko.`; }
     return `Could not add ${sym}: ${e.message}`;
   }
 };
