@@ -455,7 +455,7 @@ Object.assign(handlers, {
       for (const q of clean) { try { const r = await crypto_.resolveId(q); if (r) found.push(r.id); else missed.push(q); } catch (e) { missed.push(q); if (/rate limiting/i.test(e.message)) return e.message; } }
       clean = found; if (missed.length && !found.length) return `CoinGecko has no coin matching ${missed.join(', ')}.`;
     }
-    if (action === 'add') state.watchlist = [...new Set([...state.watchlist, ...clean])].slice(0, 25);
+    if (action === 'add') state.watchlist = [...state.watchlist.filter(x => !clean.includes(x)), ...clean].slice(-25);   // newest adds always kept (slice(0,25) silently dropped them on a full list)
     if (action === 'remove') state.watchlist = state.watchlist.filter(i => !clean.includes(i));
     saveState(); cgPx.at = 0; broadcast(watchlistMsg(true));
     return `Watchlist: ${state.watchlist.join(', ') || 'empty'}.`;
@@ -1712,7 +1712,7 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
   const cm = String(symbol || '').toUpperCase().replace(/\s/g, '').match(/^([A-Z0-9]{2,10})(?:([\/-])USD[T]?|USD[T]?)$/);
   if (cm) {
     const c = await coinFallback(cm[1]);
-    if (c) { state.watchlist = [...new Set([...state.watchlist, c.id])].slice(0, 25); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
+    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); state.wlHide = state.wlHide.filter(x => x !== wlKey(cm[1])); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `Watching ${c.symbol} (${c.name}): it is a crypto coin, on the crypto watch list with live price and 24h move where available. Nothing was bought.`; }
     // RAINUSD, RAIN/USD etc. can never be a stock (6+ letters), so never fall through to the stock chart feed and its 404.
     if (cm[2] || sym.length > 5) return coinFallback.err && coinFallback.err !== 'notfound' ? `Could not add ${cm[1]} right now: ${coinFallback.err} Try the button again in a minute.` : `Could not add ${cm[1]}: CoinGecko has no coin with that ticker.`;
   }
@@ -1725,7 +1725,7 @@ handlers.signal_watch = async ({ action, symbol, entry, stop }) => {
     return `Watching ${sym}: entry ${w.entry}, trailing stop ${w.stop} (${acfg().atrMult}x this ticker's ATR under the highest price since entry, or its swing low; it only moves up). I will send a phone alert if the rules say the uptrend is breaking or the stop is hit. ${SIG_NOTE}`;
   } catch (e) {
     const c = await coinFallback(sym);   // not a stock: it may be a coin; any coin works, no per-ticker setup
-    if (c) { state.watchlist = [...new Set([...state.watchlist, c.id])].slice(0, 25); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `${sym} is a crypto coin (${c.name}). Added to the HUD watch list; price and 24h move come from CoinGecko.`; }
+    if (c) { state.watchlist = [...state.watchlist.filter(x => x !== c.id), c.id].slice(-25); saveState(); cgPx.at = 0; broadcast(watchlistMsg(true)); return `${sym} is a crypto coin (${c.name}). Added to the HUD watch list; price and 24h move come from CoinGecko.`; }
     return `Could not add ${sym}: ${e.message}`;
   }
 };
