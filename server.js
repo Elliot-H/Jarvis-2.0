@@ -80,7 +80,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -910,7 +910,7 @@ if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
 }
 // While the app is open, now and then, a reminder can come up on its own (only when Jarvis is idle).
 if (!process.env.JARVIS_SMOKE) setInterval(() => {
-  if (busy || !clients.size || Math.random() > .35) return;
+  if (busy || !clients.size || quietBlocks() || Math.random() > .35) return;
   const text = shopQuestion() || pickReminder()?.text; if (text) { remember('jarvis', text); broadcast({ type: 'say', text, speak: true }); }
 }, 25 * 60_000);
 
@@ -984,6 +984,50 @@ function silentAnswer(text) {
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
+// Quiet ("not now") mode: no unprompted output (phone pushes, spoken remarks, nudges, co-pilot, briefs) while on. Direct replies to the Owner still work.
+// Critical alerts (stop hit, kill switch) still go through unless he asked for absolute silence. Optional duration; auto-resumes; capped at QUIET_MAX_HOURS (24) so it can never stick.
+const QUIET_ON = /^(?:(?:ok|okay|please|jarvis|hey) )*(not (?:right )?now|quiet|quiet mode|go quiet|be quiet|hold off|hold off for now|do not disturb|dont disturb|don t disturb|don t disturb me|dnd|mute|mute (?:yourself|alerts|notifications|the alerts)|silence|not now please)(?: (.+))?$/;
+const QUIET_OFF = /\b(carry on|resume|you can (?:talk|speak) to me again|you can talk again|(?:not now|quiet|quiet mode|dnd|do not disturb|don t disturb) (?:is |mode )?off|end quiet|stop being quiet|back to normal|notify me again|alerts? back on)\b/;
+const NUMW = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, sixty: 60 };
+function quietMinutes(tail) {
+  const t = String(tail || '').replace(/^(for|the next|about|another)\s+/, '');
+  if (/^half an hour|^half hour/.test(t)) return 30;
+  const m = t.match(/^(\d+(?:\.\d+)?|forty five|[a-z]+)(?: and a half)? (hours?|hrs?|minutes?|mins?)\b/); if (!m) return 0;
+  const n = /^[\d.]/.test(m[1]) ? Number(m[1]) : m[1] === 'forty five' ? 45 : NUMW[m[1]]; if (!n) return 0;
+  return Math.round(n * (/^h/.test(m[2]) ? 60 : 1) * (/and a half/.test(t) ? 1.5 : 1));
+}
+const quietCap = () => Number(process.env.QUIET_MAX_HOURS || 24) * 3600e3;
+function quietActive() {
+  const q = state.quiet; if (!q?.on) return false;
+  const end = Math.min(q.until || Infinity, q.at + quietCap());
+  if (Date.now() >= end) { state.quiet = { on: false }; saveState(); broadcast({ type: 'quiet', on: false }); const r = 'Quiet mode over. Back to normal, sir.'; remember('jarvis', r); if (clients.size) broadcast({ type: 'say', text: r, speak: true }); return false; }
+  return true;
+}
+// Critical = the Owner's money or safety: always passes quiet mode unless absolute.
+const CRITICAL_ALERT = /^(BROKER STOP TRIGGERED|ALERT LEVEL TOUCHED)|kill.?switch|Investment Watch is blind/i;
+const quietBlocks = (critical = false) => quietActive() && (!critical || !!state.quiet.absolute);
+function quietAnswer(text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (t.split(' ').length > 10) return false;
+  const act = quietActive();
+  let reply;
+  if (QUIET_OFF.test(t)) {
+    if (!act) return false;
+    state.quiet = { on: false }; saveState(); broadcast({ type: 'quiet', on: false });
+    reply = 'Quiet mode off. Back to normal, sir.';
+  } else {
+    const m = t.match(QUIET_ON); if (!m || /^mute (your )?(voice|mic|microphone)\b/.test(t) || /^silence (your )?voice/.test(t)) return false;
+    const tail = m[2] || '', mins = quietMinutes(tail);
+    if (tail && !mins && !/^(for )?(absolute|total|complete|full|please|everything|even|no exceptions|now|a while|the moment)/.test(tail)) return false;
+    const absolute = /\b(absolute|total|complete|full) (silence|quiet)|\beverything\b|\beven (critical|urgent|emergenc)|no exceptions|\babsolute\b/.test(t);
+    state.quiet = { on: true, at: Date.now(), until: mins ? Date.now() + mins * 60e3 : 0, absolute }; saveState(); broadcast({ type: 'quiet', on: true });
+    reply = `Quiet mode on${mins ? ` for ${mins >= 60 && mins % 60 === 0 ? mins / 60 + (mins === 60 ? ' hour' : ' hours') : mins + ' minutes'}` : ''}${absolute ? ', absolute silence' : ', critical alerts only'}. Say "carry on" to end it.`;
+  }
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
+if (!process.env.JARVIS_SMOKE) setInterval(quietActive, 30_000);
 async function shopAnswer(text) {
   const a = state.shopAsk;
   if (!a?.pending || Date.now() - a.at > 10 * 60e3) return false;
@@ -1097,7 +1141,7 @@ function dlog(event, detail) {
 let pendingSay = null;
 // Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
 function deliver(text, title = 'Jarvis', question = false) {
-  text = text.replace(/\s+/g, ' ').trim(); if (!text) return;
+  text = text.replace(/\s+/g, ' ').trim(); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
   if (clients.size) {
@@ -1640,7 +1684,7 @@ async function tgPoll() {
       const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the Owner's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
-      if (!silentAnswer(t) && !(await panelAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+      if (!silentAnswer(t) && !(await panelAnswer(t)) && !quietAnswer(t) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
     }
   } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
   setImmediate(tgPoll);
@@ -1708,7 +1752,8 @@ function rememberRec(link, title, body) {
     saveState();
   } catch {}
 }
-async function push(title, body, link) {
+async function push(title, body, link, force = false) {
+  if (!force && quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(body))) { console.log(`quiet mode: held back "${title}"`); return null; }
   const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first), buy = buyLink(first);
   if (watch) rememberRec(first, title, body);
   const extra = links.slice(1).join('\n'); if (extra) body = `${body}\n${extra}`;
@@ -1729,7 +1774,7 @@ async function push(title, body, link) {
   return pushNtfy(title, body, first, watch, buy);
 }
 handlers.phone_alert = async ({ title, message }) => {
-  const err = await push(title || 'Jarvis', message || '');
+  const err = await push(title || 'Jarvis', message || '', undefined, true);
   return err ? `Could not send: ${err} Tell the Owner plainly.` : 'Sent. Tell the Owner to check his phone.';
 };
 // ---------- Signals (A24): rule-based scan of trending tickers, stop-loss levels, sell-warning alerts ----------
@@ -2828,7 +2873,7 @@ wss.on('connection', ws => {
     if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice is back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };

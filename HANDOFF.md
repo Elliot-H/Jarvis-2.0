@@ -431,3 +431,5 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - watchTick now carries `brokerStop` (the resting order) per item. Alerts: `ALERT LEVEL TOUCHED` (+ "you need to act" when no broker stop) vs `BROKER STOP TRIGGERED` (order resting at the broker); same in alerts.js. watch_status lists restingBrokerStops, heldWithoutBrokerStop and alertLevels. `GET /api/stop-orders` is read-only.
 - Not done: the trailing alert level (trailUpdate) is independent of broker stops; an amended broker stop does not move it. Untested against live Alpaca (mock fetch only). No APK reinstall.
 
+## Quiet ("not now") mode (2026-10-05)
+- server.js `quietAnswer` / `quietActive` / `quietBlocks`. Gates: `push()` (4th arg `force` skips it; `phone_alert` uses force), `deliver()` (all unprompted remarks), the 25-min idle loop. Critical regex `CRITICAL_ALERT` passes unless `state.quiet.absolute`. Chain order: silentAnswer, panelAnswer (pending questions win over a bare "not now"), quietAnswer, shopAnswer, bucketAnswer. Held-back alerts are dropped, not queued. Clients get `{type:'quiet'}` (no HUD chip yet).
