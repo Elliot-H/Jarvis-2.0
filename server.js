@@ -498,6 +498,7 @@ function armBuy(symbol, title, price) {
   armedBuys = armedBuys.filter(a => a.symbol !== sym && Date.now() - a.at < ARM_MS);
   armedBuys.push({ symbol: sym, title, price, dollars: ARM_DOLLARS, at: Date.now() }); armedBuys = armedBuys.slice(-5);
 }
+const isCrypto_ = s => /\/USD$/.test(s);
 const tradeFail = e => `Trading problem: ${e.message} Tell the Owner plainly.`;
 const spentToday = () => { const d = new Date().toDateString(); return state.tradeLog.filter(t => new Date(t.at).toDateString() === d && t.side === 'buy').reduce((a, t) => a + t.dollars, 0); };
 Object.assign(handlers, {
@@ -506,18 +507,34 @@ Object.assign(handlers, {
     catch (e) { return tradeFail(e); }
   },
   trade_quote: async ({ symbol }) => { try { return JSON.stringify(await trade.quote(symbol)); } catch (e) { return tradeFail(e); } },
-  trade_propose: async ({ symbol, side, dollars }) => {
+  trade_propose: async ({ symbol, side, dollars, shares, wholeShares }) => {
     if (!turn || turn.origin !== 'user') return 'Refused: trades can only be proposed when the Owner asks, never from a scheduled or system task.';
     const s = trade.normSymbol(symbol); if (!s) return 'Unrecognised symbol.';
-    dollars = Math.round(dollars * 100) / 100;
-    if (dollars > trade.MAX_ORDER) return `Refused: over the $${trade.MAX_ORDER} per-order limit. Tell the Owner; the limit is TRADE_MAX_ORDER.`;
-    if (side === 'buy' && spentToday() + dollars > trade.MAX_DAY) return `Refused: would pass the $${trade.MAX_DAY} daily buy limit ($${spentToday()} used).`;
+    const byShares = shares != null || wholeShares;
+    if (!byShares && dollars == null) return 'Give either dollars, a share count (shares), or wholeShares=true.';
     try {
       const q = await trade.quote(s);
       const nm = await trade.assetName(s);
-      pendingTrade = { symbol: s, side, dollars, price: q.price, turnId: turn.id, at: Date.now() };
       const spelled = s.replace('/USD', '').split('').join('-');
-      return `PENDING (not placed): ${side} $${dollars} of ${s}${nm ? ' (' + nm + ')' : ''} at about $${q.price}. Read it back with the company name and the ticker spelled out letter by letter (${spelled}) so he can catch a misheard ticker, then ask him to say confirm.`;
+      const left = Math.max(0, trade.MAX_DAY - spentToday());
+      let qty = null;
+      if (byShares) {
+        if (!(q.price > 0)) return 'Could not get a price for that symbol, so I cannot size a share order.';
+        const cap = side === 'buy' ? Math.min(trade.MAX_ORDER, left) : trade.MAX_ORDER;
+        if (shares != null) {
+          qty = isCrypto_(s) ? Math.round(shares * 1e6) / 1e6 : Math.floor(shares + 1e-9);
+          if (!(qty > 0)) return 'Share orders must be at least one whole share.';
+        } else {
+          qty = Math.floor(cap / q.price + 1e-9);
+          if (qty < 1) return `Refused: one share of ${s} is about $${q.price}, over the $${cap} I can use on this order, so not even one whole share fits. Tell the Owner.`;
+        }
+        dollars = Math.round(qty * q.price * 100) / 100;
+      } else dollars = Math.round(dollars * 100) / 100;
+      if (dollars > trade.MAX_ORDER) return `Refused: about $${dollars} is over the $${trade.MAX_ORDER} per-order limit. Tell the Owner; the limit is TRADE_MAX_ORDER.`;
+      if (side === 'buy' && spentToday() + dollars > trade.MAX_DAY) return `Refused: would pass the $${trade.MAX_DAY} daily buy limit ($${spentToday()} used).`;
+      pendingTrade = { symbol: s, side, dollars, qty, price: q.price, turnId: turn.id, at: Date.now() };
+      const what = qty ? `${side} ${qty} whole share${qty === 1 ? '' : 's'} of ${s}` : `${side} $${dollars} of ${s}`;
+      return `PENDING (not placed): ${what}${nm ? ' (' + nm + ')' : ''} at about $${q.price}${qty ? ', roughly $' + dollars + ' in total' : ''}. Read it back with the company name and the ticker spelled out letter by letter (${spelled}) so he can catch a misheard ticker, then ask him to say confirm.`;
     } catch (e) { return tradeFail(e); }
   },
   trade_confirm: async () => {
@@ -528,7 +545,7 @@ Object.assign(handlers, {
     try {
       const o = await trade.place(t);
       state.tradeLog.push({ ...t, orderId: o.id, status: o.status, mode: trade.mode(), at: new Date().toISOString() }); state.tradeLog = state.tradeLog.slice(-200); saveState();
-      return `Placed: ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
+      return t.qty ? `Placed: ${t.side} ${t.qty} share${t.qty === 1 ? '' : 's'} of ${t.symbol}, status ${o.status}.` : `Placed: ${t.side} $${t.dollars} ${t.symbol}, status ${o.status}.`;
     } catch (e) { return tradeFail(e); }
   },
   armed_buys: async () => {

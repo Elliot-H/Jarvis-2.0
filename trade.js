@@ -117,11 +117,13 @@ export async function sellFills(limit = 200) {
 }
 export async function cancelAll() { await api(BASE, '/v2/orders', { method: 'DELETE' }); return 'All open orders cancelled.'; }
 
-export async function place({ symbol, side, dollars }) {
+// Dollar order (notional) or whole-share order (qty). Alpaca rejects notional orders on non-fractionable symbols, so qty is the whole-share route.
+export async function place({ symbol, side, dollars, qty }) {
   const s = normSymbol(symbol);
-  const body = { symbol: s, side, type: 'market', notional: String(dollars), time_in_force: isCrypto(s) ? 'gtc' : 'day' };
+  const body = { symbol: s, side, type: 'market', time_in_force: isCrypto(s) ? 'gtc' : 'day' };
+  if (qty) body.qty = String(qty); else body.notional = String(dollars);
   const o = await api(BASE, '/v2/orders', { method: 'POST', body: JSON.stringify(body) });
-  return { id: o.id, status: o.status, symbol: o.symbol, side: o.side, notional: o.notional };
+  return { id: o.id, status: o.status, symbol: o.symbol, side: o.side, notional: o.notional, qty: o.qty };
 }
 
 // Read-only latest prices for a mixed list of stocks and crypto (used by the Investment Watch).
