@@ -49,7 +49,7 @@
   let speaking = false, currentAudio = null;
   let silentMuted = false;   // the mic is muted because of silent mode (restored when it ends)
   let silent = false;   // silent / text-only mode (server-owned): no speech, no filler clips
-  let muted = false; try { muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}
+  let muted = false; try { if (!localStorage.getItem('jarvis.muteFix1')) { localStorage.setItem('jarvis.muteFix1', '1'); localStorage.removeItem('jarvis.muted'); } muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}   // one-time: clear a mute left on by the old full-silence build of silent mode
 
   // ======================= state =======================
   const LABEL = { idle: 'STANDBY', listening: 'LISTENING', thinking: 'PROCESSING', speaking: 'SPEAKING', offline: 'OFFLINE' };
