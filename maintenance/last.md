@@ -1,8 +1,7 @@
 STATUS: done
-TIME: 2026-10-05T16:17:43Z
-REQUEST: Add a "not now" quiet mode (toggle, duration, critical alerts pass, confirmations)
+TIME: 2026-10-05T16:23:06Z
+REQUEST: Automatic "build deployed / maintenance complete" notification (spoken + phone, once, respects quiet mode)
 RESULT:
-Owner, quiet mode is built. Say "not now", "quiet", "hold off" or "do not disturb", with an optional time like "for an hour", and I stop all unprompted alerts, remarks and nudges.
-Say "carry on" or "resume" to end it, or it ends by itself when the time is up; I confirm both ways.
-I still answer you directly, and stop-hit and kill-switch alerts still come through unless you say "absolute silence".
-It deploys on the next Railway build, no APK reinstall. I could not boot it here, so it is checked for syntax and the phrase parser only.
+Owner, I now announce my own updates. When the engineer's last push goes live, I tell you once, out loud if the app is open and always as a phone notification, with the push time and what changed.
+If quiet mode is on, I hold it and say it when quiet ends. Maintenance status still works, and asking it counts as the notice.
+It deploys on the next Railway build, no APK reinstall. Syntax-checked only, not run live.

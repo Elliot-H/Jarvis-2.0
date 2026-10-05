@@ -80,7 +80,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -3474,9 +3474,33 @@ handlers.maintenance_status = async () => {
     const txt = await r.text();
     const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1];
     const stale = state.maintLast && t && Date.parse(t) < state.maintLast.at - 60000;
+    if (!stale && state.maintLast && !state.maintLast.announced) { state.maintLast.announced = true; saveState(); }   // he asked: no auto notice needed
     return stale ? 'The engineer has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : txt.slice(0, 1500);
   } catch (e) { return `Could not read the report: ${e.message}`; }
 };
+// Auto "build deployed" notice: the engineer's last push carries a fresh maintenance/last.md. When a boot finds one newer than the
+// pending request, tell the Owner once (spoken if the app is open, plus a phone push). Held while quiet mode is on, never dropped.
+function deployNoteText(txt) {
+  const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1], st = (txt.match(/^STATUS:\s*(\S+)/m) || [])[1] || 'done';
+  const req = (txt.match(/^REQUEST:\s*(.+)$/m) || [])[1] || '';
+  const res = (txt.split(/^RESULT:\s*/m)[1] || '').replace(/\s+/g, ' ').trim();
+  const what = (res.match(/[^.!?]+[.!?]+/g) || [res]).slice(0, 2).join(' ').trim() || req;
+  const when = t && !isNaN(Date.parse(t)) ? new Date(t).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: state.location?.tz || process.env.TZ || 'America/New_York' }) : '';
+  const head = st === 'done' ? 'Owner, I have been updated and I am now current' : st === 'needs-owner' ? 'Owner, maintenance finished but it needs you' : 'Owner, maintenance did not complete';
+  return `${head}${when ? `, pushed ${when}` : ''}. ${what}`.slice(0, 600);
+}
+function deployNoteTick() {
+  const m = state.maintLast; if (!m || m.announced || quietBlocks(false)) return;
+  let txt; try { txt = fs.readFileSync(path.join(__dirname, 'maintenance', 'last.md'), 'utf8'); } catch { return; }
+  const t = Date.parse((txt.match(/^TIME:\s*(.+)$/m) || [])[1] || '');
+  if (!t || t < m.at - 60000) return;   // this build predates the engineer's report: not the finishing deploy yet
+  m.announced = true; saveState();
+  const msg = deployNoteText(txt);
+  console.log('deploy-note:', msg);
+  if (clients.size) deliver(msg, 'Jarvis updated');   // spoken; deliver() only pushes when no app is connected
+  push('Jarvis updated', msg).catch(() => {});
+}
+if (!process.env.JARVIS_SMOKE) { setTimeout(deployNoteTick, 20000); setInterval(deployNoteTick, 60_000); }
 // ---------- God Mode (A21): scan the room, pair a new speaker, connect it, play ----------
 handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   const say = t => broadcast({ type: 'activity', text: 'God Mode: ' + t });
