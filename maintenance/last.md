@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-05T14:10:00Z
-REQUEST: Fix the microphone: Jarvis is not hearing the Owner's voice commands
+TIME: 2026-10-05T15:26:46Z
+REQUEST: Build real resting stop orders (fixed and trailing) with list, amend, cancel, and wire into the Investment Watch
 RESULT:
-Owner, I found the likely cause. The old silent mode muted the microphone and saved that mute on your phone, and nothing ever cleared it. So the mic stayed off after a restart. I added a one-time reset of that saved mute in the app. It goes live on the Railway redeploy, and the next time you open Jarvis the mic should be on. No APK reinstall is needed. If it is still deaf, tap the mic button once and tell me. I could only syntax-check this, not test it on your phone.
+Owner, Jarvis can now place real stop orders at the broker. Fixed stops and trailing stops by percent or dollar amount, plus showing, moving and cancelling them. Every change is proposed first, read back with the symbol spelled out, shares, type and level, and only done after you say confirm in your next message. Positions under one whole share, or crypto trailing stops, are refused with the plain reason, and broker rejections are reported and logged as failed commands. The watch status now lists resting stops separately from alert levels, and alerts say either alert level touched, you need to act, or broker stop order resting. It goes live on the Railway redeploy, no APK reinstall. I could only test it against a mock broker, not the real one.
