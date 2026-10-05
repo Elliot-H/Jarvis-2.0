@@ -66,8 +66,50 @@ export async function assetName(symbol) {
 }
 export async function orders() {
   const o = await api(BASE, '/v2/orders?status=open&limit=100');
-  return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, status: x.status }));
+  return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, trailPercent: x.trail_percent ? +x.trail_percent : undefined, trailPrice: x.trail_price ? +x.trail_price : undefined, hwm: x.hwm ? +x.hwm : undefined, status: x.status }));
 }
+
+// ---- Resting stop orders at the broker (share-quantity based; never dollar based) ----
+// Callers (server.js stop_* tools) must have the Owner's explicit "confirm" in a LATER turn before any of these writes run.
+export const stopError = e => String(e?.message || e).replace(/\s*\[mode[^\]]*\]/i, '').replace(/\b(paper|live)\b[^.;,]*/gi, '').replace(/\s+/g, ' ').trim();
+export async function stopOrders() {
+  const o = await orders();
+  return o.filter(x => x.side === 'sell' && ['stop', 'stop_limit', 'trailing_stop'].includes(x.type));
+}
+// Can this symbol carry a resting stop, and for how many shares? {ok:false, reason} or {ok:true, symbol, held, qty, crypto, note}.
+export async function stopCheck(symbol) {
+  const s = normSymbol(symbol); if (!s) return { ok: false, reason: 'I do not recognise that symbol.' };
+  let pos = null;
+  try { pos = await api(BASE, '/v2/positions/' + encodeURIComponent(s.replace('/', ''))); } catch (e) { if (!/404/.test(e.message)) throw e; }
+  if (!pos) return { ok: false, symbol: s, reason: `You do not hold ${s}, so there is nothing for a stop order to protect.` };
+  const held = +pos.qty, avail = pos.qty_available != null ? +pos.qty_available : held;
+  if (!(held > 0)) return { ok: false, symbol: s, reason: `${s} is not a long position, so a sell stop cannot protect it.` };
+  const crypto = isCrypto(s);
+  if (crypto) return { ok: true, symbol: s, held, qty: avail, crypto, note: 'Crypto only supports a stop-limit order, not a trailing stop.' };
+  const whole = Math.floor(avail + 1e-9);
+  if (whole < 1) return { ok: false, symbol: s, held, reason: `${s}: you hold ${held} share${held === 1 ? '' : 's'}, under one whole share. The broker only accepts stop orders on whole shares, so this position cannot carry a stop.` };
+  const left = +(avail - whole).toFixed(6);
+  return { ok: true, symbol: s, held, qty: whole, crypto, note: left > 0 ? `You hold ${held} shares; the stop covers ${whole} whole shares and the last ${left} of a share cannot be covered.` : (avail < held ? `Only ${avail} of ${held} shares are free; the rest are committed to another order.` : null) };
+}
+// kind: 'stop' (fixed stop-loss) | 'trailing' (trailPercent or trailPrice). Sell side only.
+export async function placeStop({ symbol, qty, kind, stopPrice, trailPercent, trailPrice }) {
+  const s = normSymbol(symbol), crypto = isCrypto(s);
+  const body = { symbol: s, side: 'sell', qty: String(qty), time_in_force: 'gtc' };
+  if (kind === 'trailing') {
+    if (crypto) throw new Error('Crypto does not support trailing stops at the broker.');
+    body.type = 'trailing_stop'; if (trailPercent) body.trail_percent = String(trailPercent); else body.trail_price = String(trailPrice);
+  } else if (crypto) { body.type = 'stop_limit'; body.stop_price = String(stopPrice); body.limit_price = String(+(stopPrice * 0.99).toPrecision(6)); }
+  else { body.type = 'stop'; body.stop_price = String(stopPrice); }
+  const o = await api(BASE, '/v2/orders', { method: 'POST', body: JSON.stringify(body) });
+  return { id: o.id, status: o.status, symbol: o.symbol, type: o.type, qty: o.qty };
+}
+export async function amendStop(id, { stopPrice, trailPercent, trailPrice, limitPrice }) {
+  const body = {}; if (stopPrice) body.stop_price = String(stopPrice); if (limitPrice) body.limit_price = String(limitPrice);
+  if (trailPercent) body.trail = String(trailPercent); else if (trailPrice) body.trail = String(trailPrice);
+  const o = await api(BASE, '/v2/orders/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(body) });
+  return { id: o.id, status: o.status, symbol: o.symbol, type: o.type };
+}
+export async function cancelOrder(id) { await api(BASE, '/v2/orders/' + encodeURIComponent(id), { method: 'DELETE' }); return true; }
 // Read-only: filled SELL orders (newest first) so realised P&L can be shown per position.
 export async function sellFills(limit = 200) {
   const o = await api(BASE, `/v2/orders?status=closed&direction=desc&limit=${limit}`);

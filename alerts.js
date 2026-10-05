@@ -67,7 +67,9 @@ export function triggers(item, quote, hist, ctx, cfg) {
   const add = (key, title, what, level, cool, act) => out.push({ key: `${s}:${key}`, title: `${title}: ${s}`, what, level, act, move: day ?? win, cooldownMin: cool ?? cfg.infoCooldownHours * 60 });
   const floor = item.stop ?? p * 0.97;
   // sell side
-  if (item.stop && p <= item.stop) add('stop', 'SELL WARNING, STOP HIT', `price ${fp(p)} is at or under your stop ${fp(item.stop)}`, `stop ${fp(item.stop)}`, cfg.cooldownMin, 'I would exit here.');
+  const bsl = item.brokerStop?.stopPrice;
+  if (bsl && p <= bsl) add('bstop', 'BROKER STOP TRIGGERED', `price ${fp(p)} is at or under the broker stop order resting at ${fp(bsl)}`, `stop ${fp(bsl)}`, cfg.cooldownMin, 'The order is live at the broker and should fill; nothing for you to do unless it does not.');
+  else if (item.stop && p <= item.stop) add('stop', 'ALERT LEVEL TOUCHED', `price ${fp(p)} is at or under your alert level ${fp(item.stop)}`, `stop ${fp(item.stop)}`, cfg.cooldownMin, bsl ? `A broker stop order rests lower at ${fp(bsl)}, so it has not triggered.` : item.held === false ? 'Nothing is resting at the broker. I would exit here.' : 'No stop order is resting at the broker, so you need to act. I would exit here.');
   if (ctx && item.held !== false && p < ctx.e20 && ctx.macdDown && (ctx.volRatio ?? 0) >= 1) add('trend', 'SELL WARNING, UPTREND BREAK', `price ${fp(p)} is under the 20-day average ${fp(ctx.e20)} with MACD turning down on above-average volume (${ctx.volRatio.toFixed(1)}x)`, `20-day avg ${fp(ctx.e20)}`, 4 * 60, `I would trim, and exit if it loses ${fp(floor)}.`);
   const drop = (hi - p) / hi * 100;
   if (hist.length > 1 && drop >= cfg.dropPct) add('drop', 'SUDDEN DROP', `down ${drop.toFixed(1)}% in ${Math.round((Date.now() - first.t) / 60e3)} min (${fp(hi)} to ${fp(p)})`, item.stop ? `stop ${fp(item.stop)}` : null, cfg.cooldownMin, `I would hold, or trim if it loses ${fp(floor)}.`);

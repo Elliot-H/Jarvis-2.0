@@ -538,8 +538,81 @@ Object.assign(handlers, {
     return JSON.stringify({ offers: armedBuys.map(a => ({ symbol: a.symbol, alert: a.title, alertPrice: a.price, minutesAgo: Math.round((now - a.at) / 60000), dollars: Math.min(a.dollars, trade.MAX_ORDER, left) })), dailyBuyLeft: left, guide: 'He is answering a buy alert. Take the newest offer unless he named a symbol; call trade_propose with the offer dollars (he can ask for another multiple of 50 up to the per-order limit), then read it back and wait for confirm in his NEXT message. If dailyBuyLeft is 0 say the daily limit is used.' });
   },
   trade_cancel: async ({ all } = {}) => {
-    pendingTrade = null;
+    pendingTrade = null; pendingStop = null;
     try { return all ? await trade.cancelAll() : 'Pending trade cancelled.'; } catch (e) { return tradeFail(e); }
+  }
+});
+// Resting broker stop orders. Same guardrail as trades: propose -> Owner says confirm in a LATER user turn -> execute. Sell side, whole shares.
+let pendingStop = null;
+const stopDesc = o => o.type === 'trailing_stop' ? `trailing stop ${o.trailPercent ? o.trailPercent + '%' : '$' + o.trailPrice} trail${o.stopPrice ? ', now at ' + fmtP(o.stopPrice) : ''}` : `${o.type === 'stop_limit' ? 'stop-limit' : 'fixed stop'} at ${fmtP(o.stopPrice)}`;
+const spellSym = s => s.replace('/USD', '').split('').join('-');
+const stopFail = (cmd, e) => { const why = trade.stopError(e); recordFailure(cmd, 'broker rejected: ' + why.slice(0, 200)); return `The broker rejected it: ${why} Tell the Owner this reason plainly. It is logged as a failed command.`; };
+const stopCannot = (cmd, why) => { recordFailure(cmd, why.slice(0, 200)); return `CANNOT: ${why} Tell the Owner this plainly. It is logged as a failed command.`; };
+Object.assign(handlers, {
+  stop_list: async () => {
+    try {
+      const [st, pos] = await Promise.all([trade.stopOrders(), trade.positions()]);
+      const covered = new Set(st.map(o => o.symbol));
+      return JSON.stringify({ restingStops: st.map(o => ({ symbol: o.symbol, spelled: spellSym(o.symbol), shares: o.qty, type: o.type, stopPrice: o.stopPrice ?? null, trailPercent: o.trailPercent ?? null, trailPrice: o.trailPrice ?? null, highWaterMark: o.hwm ?? null, summary: stopDesc(o) })), heldWithoutBrokerStop: pos.filter(p => !covered.has(p.symbol) && !isDustVal(p.value)).map(p => p.symbol), guide: 'These are real orders resting at the broker, separate from the alert levels. If none, say there are no resting stops.' });
+    } catch (e) { return `Could not read the stop orders: ${trade.stopError(e)} Tell the Owner plainly.`; }
+  },
+  stop_propose: async ({ action, symbol, kind, stopPrice, trailPercent, trailPrice }) => {
+    if (!turn || turn.origin !== 'user') return 'Refused: stop orders can only be changed when the Owner asks, never from a scheduled or system task.';
+    const s = trade.normSymbol(symbol); if (!s) return 'Unrecognised symbol. Ask him to spell it.';
+    const cmd = `${action} stop on ${s}${stopPrice ? ' at ' + stopPrice : ''}${trailPercent ? ' trail ' + trailPercent + '%' : ''}${trailPrice ? ' trail $' + trailPrice : ''}`;
+    try {
+      const existing = (await trade.stopOrders()).filter(o => o.symbol === s);
+      if (action === 'set') {
+        if (existing.length) return `There is already a resting ${stopDesc(existing[0])} on ${s}. Offer to amend it instead (stop_propose action amend), or cancel it first.`;
+        kind ||= (trailPercent || trailPrice) ? 'trailing' : 'stop';
+        if (kind === 'trailing' && !(trailPercent || trailPrice)) return 'A trailing stop needs a trail percent or a trail amount in dollars. Ask him which.';
+        if (kind === 'trailing' && trailPercent && trailPrice) return 'Give either a trail percent or a trail amount, not both. Ask him which.';
+        if (kind === 'stop' && !stopPrice) return 'A fixed stop needs a stop price. Ask him for the level.';
+        if (trailPercent && trailPercent >= 50) return 'A trail of 50% or more looks like a mistake. Ask him to repeat the percent.';
+        const c = await trade.stopCheck(s);
+        if (!c.ok) return stopCannot(cmd, c.reason);
+        if (kind === 'trailing' && c.crypto) return stopCannot(cmd, `${s} is crypto, and the broker does not offer trailing stops on crypto. A fixed stop-limit order is possible instead.`);
+        const q = await trade.quote(s); const px = q.price;
+        if (kind === 'stop' && px && stopPrice >= px) return `Refused: a sell stop at ${stopPrice} must sit under the current price ${fmtP(px)}. Ask him to confirm the level.`;
+        if (kind === 'trailing' && trailPrice && px && trailPrice >= px) return `Refused: a $${trailPrice} trail is not under the current price ${fmtP(px)}. Ask him to repeat the amount.`;
+        const nm = await trade.assetName(s);
+        pendingStop = { action, symbol: s, qty: c.qty, kind, stopPrice, trailPercent, trailPrice, turnId: turn.id, at: Date.now() };
+        const what = kind === 'trailing' ? `trailing stop, trail ${trailPercent ? trailPercent + ' percent' : '$' + trailPrice}` : `${c.crypto ? 'stop-limit' : 'fixed stop'} at ${stopPrice}`;
+        return `PENDING (not placed): ${what} on ${c.qty} ${c.crypto ? '' : 'share' + (c.qty === 1 ? '' : 's') + ' '}of ${s}${nm ? ' (' + nm + ')' : ''}, good till cancelled; price now about ${fmtP(px)}.${c.note ? ' Note: ' + c.note : ''} Read it back with the ticker spelled letter by letter (${spellSym(s)}), the quantity, the stop type and the stop level or trail percent, then ask him to say confirm.`;
+      }
+      if (!existing.length) return `There is no resting stop order on ${s}. Say so plainly${action === 'amend' ? '; offer to set one' : ''}.`;
+      if (existing.length > 1) return `There are ${existing.length} stop orders on ${s}: ${existing.map(stopDesc).join('; ')}. Ask which one.`;
+      const o = existing[0];
+      if (action === 'cancel') {
+        pendingStop = { action, symbol: s, orderId: o.id, desc: stopDesc(o), qty: o.qty, turnId: turn.id, at: Date.now() };
+        return `PENDING (not cancelled): cancel the ${stopDesc(o)} on ${o.qty} shares of ${s}. After that, nothing rests at the broker for ${s}. Read it back with the ticker spelled out (${spellSym(s)}), then ask him to say confirm.`;
+      }
+      // amend
+      if (o.type === 'trailing_stop') {
+        if (!(trailPercent || trailPrice)) return `The stop on ${s} is a trailing stop (${stopDesc(o)}). To change it give a new trail percent or amount; to make it a fixed stop it has to be cancelled and set again.`;
+      } else {
+        if (!stopPrice) return `The stop on ${s} is a fixed stop (${stopDesc(o)}). Give the new stop price; to make it trailing it has to be cancelled and set again.`;
+        const px = (await trade.quote(s)).price; if (px && stopPrice >= px) return `Refused: a sell stop at ${stopPrice} must sit under the current price ${fmtP(px)}. Ask him to confirm the level.`;
+      }
+      pendingStop = { action, symbol: s, orderId: o.id, desc: stopDesc(o), qty: o.qty, stopPrice, trailPercent, trailPrice, limit: o.type === 'stop_limit', turnId: turn.id, at: Date.now() };
+      return `PENDING (not changed): amend the ${stopDesc(o)} on ${o.qty} shares of ${s} to ${trailPercent ? 'trail ' + trailPercent + ' percent' : trailPrice ? 'trail $' + trailPrice : 'stop at ' + stopPrice}. Read it back with the ticker spelled out (${spellSym(s)}), the quantity, the stop type and the new level, then ask him to say confirm.`;
+    } catch (e) { return stopFail(cmd, e); }
+  },
+  stop_confirm: async () => {
+    if (!pendingStop) return 'No stop change is pending.';
+    if (!turn || turn.origin !== 'user' || turn.id <= pendingStop.turnId) return 'Refused: he has not confirmed yet. Ask him to say confirm.';
+    if (Date.now() - pendingStop.at > 120000) { pendingStop = null; return 'That proposal expired (2 minutes). Propose again.'; }
+    const t = pendingStop; pendingStop = null;
+    const cmd = `${t.action} stop on ${t.symbol}`;
+    try {
+      let msg;
+      if (t.action === 'set') { const o = await trade.placeStop(t); msg = `Placed: ${t.kind === 'trailing' ? 'trailing stop' : 'stop'} on ${t.qty} ${t.symbol}, order status ${o.status}.`; }
+      else if (t.action === 'amend') { const o = await trade.amendStop(t.orderId, { ...t, limitPrice: t.limit && t.stopPrice ? +(t.stopPrice * 0.99).toPrecision(6) : undefined }); msg = `Amended: stop on ${t.symbol}, order status ${o.status}.`; }
+      else { await trade.cancelOrder(t.orderId); msg = `Cancelled: the stop on ${t.symbol}. Nothing rests at the broker for it now.`; }
+      state.tradeLog.push({ ...t, kind: 'stop-' + t.action, at: new Date().toISOString() }); state.tradeLog = state.tradeLog.slice(-200); saveState();
+      watchTick().catch(() => {});
+      return msg;
+    } catch (e) { return stopFail(cmd, e); }
   }
 });
 // Free market-data feeds (Finnhub, Twelve Data, Financial Modeling Prep). Analysis only.
@@ -1903,8 +1976,9 @@ async function watchTick() {
     const open = marketOpenNow();
     const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
     const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
+    const restStopOrd = new Map(ords.filter(o => o.side === 'sell' && ['stop', 'stop_limit', 'trailing_stop'].includes(o.type)).map(o => [o.symbol, o]));
     const items = new Map();   // key = Alpaca symbol form
-    for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, value: p.value, stop: restStop.get(p.symbol) ?? null });
+    for (const p of pos) items.set(p.symbol, { sym: p.symbol, qty: p.qty, price: p.price, prevClose: p.prevClose, entry: p.entry, held: true, value: p.value, stop: restStop.get(p.symbol) ?? null, brokerStop: restStopOrd.get(p.symbol) || null });
     const extra = state.sigWatch.filter(w => !items.has(w.symbol) && !pos.some(p => p.symbol.replace('/', '') === w.symbol));
     if (extra.length) { try { const px = await trade.latestPrices(extra.map(w => w.symbol)); let pcs = {}; try { pcs = await trade.prevCloses(extra.map(w => w.symbol)); for (const k in pcs) watch.prevCl.set(k, pcs[k]); } catch (e) { console.warn('watch prevClose', e.message); } for (const w of extra) if (px[w.symbol]) items.set(w.symbol, { sym: w.symbol, price: px[w.symbol], prevClose: watch.prevCl.get(w.symbol), held: false, stop: null }); } catch (e) { console.warn('watch prices', e.message); } }
     for (const w of state.sigWatch) { const it = items.get(w.symbol) || items.get(w.symbol + '/USD') || [...items.values()].find(i => i.sym.replace('/', '') === w.symbol + 'USD'); if (it) { it.floor = Math.max(it.floor || 0, w.floor || 0) || null; if (it.entry == null) it.entry = w.entry; } }
@@ -1920,9 +1994,9 @@ async function watchTick() {
       if (it.held && isDustVal(it.value)) continue;   // dust position: never alert
       const crypto = isCryptoSym(it.sym) || /USD$/.test(it.sym) && it.sym.length > 5;
       if (!crypto && !open) continue;
-      seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' stop ' + fmtP(it.stop) : ''}`);
+      seen.push(`${it.sym} ${fmtP(it.price)}${it.stop ? ' alert level ' + fmtP(it.stop) : ''}${it.brokerStop ? ' broker stop ' + (it.brokerStop.stopPrice ? fmtP(it.brokerStop.stopPrice) : 'trailing ' + (it.brokerStop.trailPercent ? it.brokerStop.trailPercent + '%' : '$' + it.brokerStop.trailPrice)) : ''}`);
       const C = acfg(), h = (watch.hist.get(it.sym) || []).filter(x => now - x.t <= C.dropWindowMin * 60e3); h.push({ t: now, p: it.price }); watch.hist.set(it.sym, h);
-      const stopTxt = it.stop ? `Trailing stop ${fmtP(it.stop)}.` : 'No stop set.';
+      const stopTxt = (it.stop ? `Alert level ${fmtP(it.stop)}.` : 'No alert level set.') + (it.brokerStop?.stopPrice ? ` Broker stop order resting at ${fmtP(it.brokerStop.stopPrice)}.` : it.held ? ' No stop order at the broker.' : '');
       const entry = it.entry ?? state.sigWatch.find(w => w.symbol === it.sym.replace('/USD', ''))?.entry, tgt = it.target ?? null;
       const tr = state.trail[wlKey(it.sym)];
       if (it.held && tr && (tr.tier || 0) > (tr.notified || 0) && (crypto || open)) {
@@ -1930,7 +2004,9 @@ async function watchTick() {
         tr.notified = tr.tier; saveState();
         await watchAlert(it.sym + ':scale' + tr.tier, `SCALE OUT ${tr.tier}: ${it.sym}`, `${it.sym} at ${fmtP(it.price)} reached +${tr.tier}R (entry ${fmtP(tr.entry)}, 1R is ${fmtP(tr.r)}). I would sell a third${third} to lock in profit.${tr.tier === 1 ? ` Stop moves up to at least breakeven plus costs, ${fmtP(it.stop)}, so this winner cannot turn into a loser.` : ' The last third rides the trailing stop.'} Trailing stop ${fmtP(it.stop)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       }
-      if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `STOP HIT: ${it.sym}`, `Stop hit: ${it.sym} at ${fmtP(it.price)}, under your trailing stop ${fmtP(it.stop)}. I would exit here.${it.held ? '' : ' (watch list)'}`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
+      const bs = it.brokerStop, bsLvl = bs ? (bs.stopPrice ?? null) : null;
+      if (bs && bsLvl && it.price <= bsLvl) await watchAlert(it.sym + ':bstop', `BROKER STOP TRIGGERED: ${it.sym}`, `${it.sym} at ${fmtP(it.price)} is at or under the broker stop order resting at ${fmtP(bsLvl)}. The order is live at the broker and should fill; nothing for you to do unless it does not.`, chartLink(it.sym, { stop: bsLvl, target: tgt, entry }));
+      else if (it.stop && it.price <= it.stop) await watchAlert(it.sym + ':stop', `ALERT LEVEL TOUCHED: ${it.sym}`, `Alert level touched: ${it.sym} at ${fmtP(it.price)}, under your alert level ${fmtP(it.stop)}.${bsLvl ? ` A broker stop order is resting lower, at ${fmtP(bsLvl)}, so it has not triggered.` : it.held ? ' No stop order is resting at the broker, so you need to act.' : ' (watch list, nothing is resting at the broker.)'} I would exit here.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       if (tgt && it.price >= tgt) await watchAlert(it.sym + ':target', `TARGET REACHED: ${it.sym}`, `Target reached: ${it.sym} at ${fmtP(it.price)}, target ${fmtP(tgt)}. I would take profit here, or let the trailing stop ride (now ${fmtP(it.stop)}).`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
       const hi = Math.max(...h.map(x => x.p)), drop = (hi - it.price) / hi * 100;
       if (drop >= C.dropPct && h.length > 1) await watchAlert(it.sym + ':drop', `SUDDEN DROP: ${it.sym}`, `Drop ${drop.toFixed(1)}% in ${Math.round((now - h[0].t) / 60e3)} min: ${it.sym} ${fmtP(hi)} to ${fmtP(it.price)}. ${stopTxt} I would hold, or trim if it loses ${fmtP(it.stop ?? it.price * 0.97)}.`, chartLink(it.sym, { stop: it.stop, target: tgt, entry }));
@@ -1953,7 +2029,7 @@ async function watchTick() {
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
-  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, brokerStopOrders: 'NOT built yet: Jarvis alerts your phone but there are no resting stop orders at Alpaca; say so plainly if asked', guide: 'Answer the interval as a real number (every N seconds). Be honest that an alert needs you to act and a resting broker stop does not exist yet.' });
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, restingBrokerStops: (watch.items || []).filter(i => i.brokerStop).map(i => ({ symbol: i.sym, shares: i.brokerStop.qty, type: i.brokerStop.type, stopPrice: i.brokerStop.stopPrice ?? null, trailPercent: i.brokerStop.trailPercent ?? null, trailPrice: i.brokerStop.trailPrice ?? null })), heldWithoutBrokerStop: (watch.items || []).filter(i => i.held && !i.brokerStop && !isDustVal(i.value)).map(i => i.sym), alertLevels: (watch.items || []).filter(i => i.stop).map(i => ({ symbol: i.sym, alertLevel: i.stop })), guide: 'Answer the interval as a real number (every N seconds). Report the resting broker stops (real orders at the broker, they execute on their own) separately from the alert levels (Jarvis only alerts the phone and the Owner must act). Positions in heldWithoutBrokerStop have no broker protection. To add one use stop_propose.' });
 };
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 // ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
@@ -2414,6 +2490,7 @@ app.post('/api/followups', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/depart-log', (_req, res) => res.json(state.departLog || []));
+app.get('/api/stop-orders', async (_req, res) => { try { res.json(await trade.stopOrders()); } catch (e) { res.status(502).json({ error: trade.stopError(e) }); } });   // read-only; placing/amending/cancelling only via stop_propose + stop_confirm
 app.get('/api/logs', (_req, res) => res.type('text/plain').send(logs.tail(300)));
 
 // Safe mode: a bare page with no fancy code, so Jarvis can still be reached (and asked to

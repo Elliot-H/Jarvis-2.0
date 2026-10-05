@@ -425,3 +425,9 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Mic deaf after old silent mode (2026-10-05)
 - Cause: the old full-silence build saved `jarvis.muted=1` on the phone; the newer build never clears it after a reload, so the mic stayed muted. Fix: one-time clear of `jarvis.muted` (flag `jarvis.muteFix1`) in public/app.js. Deliberate voice mutes made afterwards still persist. Web fix only, no APK reinstall.
+
+## Real resting stop orders (2026-10-05, maintenance)
+- trade.js: `stopOrders`, `stopCheck`, `placeStop` (stocks: `stop` or `trailing_stop` with trail_percent/trail_price, whole shares, gtc; crypto: `stop_limit` only, limit 1% under stop), `amendStop` (PATCH /v2/orders/{id}), `cancelOrder`, `stopError` (strips mode wording). server.js: tools `stop_list`, `stop_propose`, `stop_confirm` (module `pendingStop`, same propose -> later-turn confirm -> 2 min expiry guard as trades; refused unless turn.origin is user; `trade_cancel` clears it). Rejections and "cannot support a stop" cases call `recordFailure`.
+- watchTick now carries `brokerStop` (the resting order) per item. Alerts: `ALERT LEVEL TOUCHED` (+ "you need to act" when no broker stop) vs `BROKER STOP TRIGGERED` (order resting at the broker); same in alerts.js. watch_status lists restingBrokerStops, heldWithoutBrokerStop and alertLevels. `GET /api/stop-orders` is read-only.
+- Not done: the trailing alert level (trailUpdate) is independent of broker stops; an amended broker stop does not move it. Untested against live Alpaca (mock fetch only). No APK reinstall.
+
