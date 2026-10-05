@@ -2919,9 +2919,10 @@ async function obdScan(v, why = 'auto') {
   v.lastTry = Date.now(); saveState();
   const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
-  if (!d.ok) { if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
+  if (!d.ok) { v.reachable = false; if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
     if (why !== 'auto' || Date.now() - (v.failNote || 0) > 30 * 60e3) { v.failNote = Date.now(); console.log(`obd ${v.name}: ${d.detail || d.code || 'no answer'}`); } return { ok: false, why: d.detail || d.code || 'no answer' }; }
-  v.lastOk = Date.now();
+  if (!v.reachable) dlog('dongle-seen', { vehicle: v.name, rpm: d.rpm ?? null, volts: d.volts ?? null, why }); // dongle just came into range (or first read)
+  v.reachable = true; v.lastOk = Date.now();
   if (d.speedKph > 0) driveSignal('obd', d.speedKph * 0.621);
   const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
   const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
@@ -2957,19 +2958,19 @@ async function obdScan(v, why = 'auto') {
 // The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the Owner's.
 // Not connected yet (or last try failed) -> retry every OBD_RETRY_MIN so it connects as soon as it is in range; once connected, read
 // every OBD_EVERY_MIN. Alerts only for something new or concerning (see obdScan).
-const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 3) * 60e3;
+const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 0.75) * 60e3; // always-on: hunt for the dongle about every 45 s whenever the phone app is connected, any place, any hour
 const HUNT_GAP = Number(process.env.HUNT_GAP_SEC || 30) * 1e3;
 if (!state.seededTruck) { state.seededTruck = true; if (!state.vehicles.length) state.vehicles.push({ name: 'truck', dongle: 'OBDII' }); }
 let obdNote = 0;
 async function obdTick() {
-  if (!deviceClients.size || busy) { if (!deviceClients.size && state.vehicles.length && Date.now() - obdNote > 30 * 60e3) { obdNote = Date.now(); console.log('obd: skipped, the Jarvis phone app is not connected as a device (engine start cannot be seen until it reconnects)'); } return; }
+  if (!deviceClients.size) { if (state.vehicles.length && Date.now() - obdNote > 30 * 60e3) { obdNote = Date.now(); console.log('obd: skipped, the Jarvis phone app is not connected as a device (engine start cannot be seen until it reconnects)'); dlog('obd-skipped', { why: 'phone app not connected as a device' }); } return; } // always-on watch: a busy brain no longer pauses it (the scan runs on the phone)
   for (const v of state.vehicles) {
     const gap = state.shutdown?.active ? HUNT_GAP : v.lastOk && v.lastOk >= (v.lastTry || 0) ? OBD_WATCH : OBD_RETRY; // "shut the shop down" hunt: look every 30 s
     if (v.scanning) continue;
     if (!v.lastTry || Date.now() - v.lastTry > gap) { v.scanning = true; try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } finally { v.scanning = false; } }
   }
 }
-if (!process.env.JARVIS_SMOKE) setInterval(obdTick, 60_000);
+if (!process.env.JARVIS_SMOKE) setInterval(obdTick, 15_000);
 // Least-squares slope of resting voltage over at least 2 days of readings, as volts lost per day (positive = draining).
 function voltDropPerDay(pts) {
   if (!pts || pts.length < 3 || pts[pts.length - 1].t - pts[0].t < 2 * 86400e3) return null;
