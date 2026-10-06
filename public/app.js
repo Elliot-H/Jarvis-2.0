@@ -689,7 +689,9 @@
       // With the wake word engine healthy the recognizer is single-shot: one session per "Hey Jarvis" / mic tap / question, so it does not
       // re-open (and ding, through the Bluetooth speaker when music plays) every second. It only re-opens to finish a sentence he is mid-way through.
       const single = WAKE_FIRST && wakeEver && !wakeErrShown;
-      if (single && !pending && !carry) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
+      // While a listening window is still open (he just asked a question / a mic tap / "Hey Jarvis"), a session that ends with nothing heard
+      // (a blip: wake engine still releasing the mic, recognizer's own no-speech timeout) must NOT close the window: re-open until the window times out.
+      if (single && !pending && !carry && !(mode === 'active' && recWanted && !muted)) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
         manualMicUntil = 0;
         if (mode === 'active' && !pending) { mode = 'passive'; clearTimeout(activeTimer); setState('idle'); }
       } else if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
