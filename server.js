@@ -30,7 +30,7 @@ import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
 import { analyzePhoto, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
-import { talk, brainConfig, chatSystemPrompt } from './brain.js';
+import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -435,7 +435,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
 // BRAIN=openrouter (default once OPENROUTER_API_KEY is set) or BRAIN=claude (the old Haiku path).
 // Workshop mode (self-repair) always stays on Claude.
 const BRAIN = (process.env.BRAIN || (process.env.OPENROUTER_API_KEY || process.env.BRAIN_API_KEY ? 'openrouter' : 'claude')).toLowerCase();
-const TALK = brainConfig();
+const TALK = brainConfig(); setKeyNote(TALK);
 state.watchlist ||= [];
 state.watchlist = [...new Set(state.watchlist.map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))];   // NIGHT = Midnight on Cardano = CoinGecko id "midnight-3" ("night" has no data, "midnight" is a Polygon meme coin)
 if (!state.watchlist.includes('midnight-3') && !state.nightSeeded) { state.watchlist.push('midnight-3'); state.nightSeeded = true; }   // NIGHT is a coin, not a stock
@@ -2623,6 +2623,7 @@ function explainVoiceError(status, body) {
   if (status === 401) return 'The ElevenLabs API key is wrong or was deleted.';
   return `ElevenLabs error ${status}: ${b.slice(0, 160)}`;
 }
+app.get('/api/brain-status', async (_req, res) => { try { res.json(await keyStatus(TALK)); } catch (e) { res.status(500).json({ error: String(e.message || e) }); } });
 app.get('/api/voice-status', (_req, res) => res.json({ configured: Boolean(process.env.FISH_API_KEY || process.env.ELEVENLABS_API_KEY), ...voiceStatus }));
 
 // Fish Audio: community "JARVIS" voice model. Used first when FISH_API_KEY is set.

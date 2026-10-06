@@ -24,10 +24,18 @@ export function brainConfig(env = process.env) {
   };
 }
 
+// What OpenRouter actually said and which key was used, so a wrong-key / wrong-account / per-key-limit problem is visible instead of a generic "out of credit".
+let KEY_NOTE = '';
+export function setKeyNote(cfg, env = process.env) {
+  const k = cfg?.apiKey || '', v = env.BRAIN_API_KEY ? 'BRAIN_API_KEY' : 'OPENROUTER_API_KEY';
+  KEY_NOTE = k ? ` (Railway variable ${v}, key ending ${k.slice(-4)})` : ' (no API key set)';
+}
+const rawMsg = body => { try { const j = typeof body === 'string' ? JSON.parse(body) : body; return String(j?.error?.message || j?.message || '').slice(0, 220); } catch { return String(body || '').slice(0, 220); } };
 function explain(status, body) {
   const b = String(body || '');
+  const said = rawMsg(body);
+  if (status === 402 || /credit|insufficient|limit exceeded/i.test(b)) return `OpenRouter refused the request${KEY_NOTE}${said ? ': "' + said + '"' : ''}, sir. Check that this is the key on the account you topped up, and that the key has no credit limit.`;
   if (status === 401) return 'The OpenRouter key is wrong or was deleted, sir. Check OPENROUTER_API_KEY in Railway.';
-  if (status === 402 || /credit|insufficient|limit exceeded/i.test(b)) return 'I am out of OpenRouter credit, or the key hit its spending limit, sir. Top up at openrouter dot ai.';
   if (status === 429) return 'The model is rate limiting me, sir. Try again in a moment.';
   if (status === 404 || /not a valid model|no endpoints/i.test(b)) return 'That talk model name is not available on OpenRouter, sir. Check TALK_MODEL in Railway.';
   return `My brain returned error ${status}: ${b.slice(0, 160)}`;
@@ -113,5 +121,22 @@ export async function talk({ cfg = brainConfig(), model, system, prompt, history
     if (round === maxRounds - 1) { out.error = 'rounds'; out.text = 'I went round in circles on that one, sir. Try asking it another way.'; }
   }
   out.ms = Date.now() - t0;
+  return out;
+}
+
+/** OpenRouter's own view of the key Jarvis is using: per-key limit, usage, and the account credit balance. */
+export async function keyStatus(cfg = brainConfig()) {
+  const h = { Authorization: `Bearer ${cfg.apiKey}` }, out = { baseUrl: cfg.baseUrl, keyEnding: String(cfg.apiKey || '').slice(-4) };
+  if (!cfg.apiKey) return { ...out, error: 'No API key set (OPENROUTER_API_KEY / BRAIN_API_KEY).' };
+  try {
+    const k = await (await fetch(cfg.baseUrl + '/key', { headers: h, signal: AbortSignal.timeout(12000) })).json();
+    const d = k.data || {};
+    out.key = { label: d.label, limit: d.limit ?? null, limit_remaining: d.limit_remaining ?? null, usage: d.usage, is_free_tier: d.is_free_tier, error: k.error?.message };
+  } catch (e) { out.keyError = String(e.message || e); }
+  try {
+    const c = await (await fetch(cfg.baseUrl + '/credits', { headers: h, signal: AbortSignal.timeout(12000) })).json();
+    const d = c.data || {};
+    out.credits = d.total_credits != null ? { total: d.total_credits, used: d.total_usage, remaining: Math.round((d.total_credits - d.total_usage) * 100) / 100 } : { note: c.error?.message || 'balance not visible to this key' };
+  } catch (e) { out.creditsError = String(e.message || e); }
   return out;
 }
