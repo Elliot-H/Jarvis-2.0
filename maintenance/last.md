@@ -1,8 +1,6 @@
 STATUS: done
-TIME: 2026-10-05T21:15:02Z
-REQUEST: Make the vehicle OBD dongle watch always-on, not only during shut-the-shop-down
+TIME: 2026-10-06T15:40:21Z
+REQUEST: Split HUD Holdings into main list and a DUST group (under $5), NVDA into dust
 RESULT:
-Owner, the dongle watch was already separate from the shutdown protocol, but it was slow and paused whenever I was busy thinking. I now look for the truck and R8 dongles about every 45 seconds, any place and any hour, as long as the phone app is connected.
-A running engine on first sight triggers the full departure sequence: where you are headed, the bring list, then the offer of the short vehicle check.
-I also added log entries so I can see when the dongle is seen or when the phone app was asleep, which is the likely reason it was missed since October third.
-It goes live on the next Railway build, no APK reinstall. Syntax-checked only, not tested on the truck.
+Owner, the Holdings list now has a separate DUST group at the bottom. Any position worth under five dollars goes there, so NVDA, NEAR, PACB, TXT, XRP and XRPN move down, and only the real positions like SPCX stay on top.
+The main total no longer counts dust. It goes live on the next Railway build, no APK reinstall. Syntax-checked only, not viewed on the phone.

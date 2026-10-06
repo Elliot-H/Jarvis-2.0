@@ -439,3 +439,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Always-on dongle watch (2026-10-05)
 - The OBD watch was already independent of "shut the shop down" (obdTick runs whenever the phone app is connected as a device), but it ran only every 60 s tick, retried a missing dongle every 3 min, and skipped entirely while the brain was `busy`. Now: tick 15 s, `OBD_RETRY_MIN` default 0.75 (about 45 s), busy no longer pauses it. Running engine on first sight (or after the dongle dropped) = engine-start trigger at any place/hour (`vehicleDeparture` -> where to / bring list -> `vscanTail` offer, unchanged). New depart-log entries: `dongle-seen` (dongle came into range), `obd-skipped` (phone app not connected as a device). If the dongle is still never seen, check /api/depart-log: `obd-skipped` means the Android app's websocket is asleep (not a server problem). Server only, no APK reinstall. node --check only.
+
+## Holdings DUST group (2026-10-06)
+- HUD Holdings splits by market value: under $5 (`DUST_MAX` in public/app.js `renderHoldings`) goes to a "DUST" sub-group beneath the main table, one row each, sorted by value; main TOTAL excludes dust. Display only: server alert/watch dust (`dustUsd`, default $1) is unchanged.

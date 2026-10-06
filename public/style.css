@@ -198,7 +198,7 @@ body[data-muted="1"]::after{content:"MIC MUTED - DEAF MODE - TAP MIC TO RESUME";
 .holdings small{opacity:.8}
 .holdings .up td:last-child{color:#4dff9a}.holdings .dn td:last-child{color:#ff6b6b}
 .holdings .tot td{border-top:1px solid var(--cline);font-weight:600}
-.holdings .dust{margin-top:6px;font-size:10px;opacity:.5}
+.holdings .dust{margin-top:10px;font-size:11px;opacity:.75}.holdings .dust-h{font-size:9px;letter-spacing:.1em;color:var(--dim,#6fa);border-top:1px solid var(--cline);padding-top:4px}
 
 a.tk{color:inherit;text-decoration:underline dotted;cursor:pointer}
 .wtag{color:#3fe0ff;border:1px solid #3fe0ff;padding:0 3px;font-size:8px;letter-spacing:.1em}
