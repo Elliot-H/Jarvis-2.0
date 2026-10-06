@@ -445,3 +445,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Alert chart link: TradingView (2026-10-06)
 - `/chart` (public/chart.html, same URL alerts already use) now embeds the TradingView free widget (tv.js): range buttons 1D/1W/1M/3M/1Y/ALL, pan/zoom, symbol change. Crypto maps to COINBASE:XXXUSD, stocks to the bare ticker. Alert levels (stop/target/entry) show as text above the chart; the JARVIS LEVELS button toggles the old canvas chart (Yahoo/Kraken data, 1w max) which still draws them as lines. No server or APK change. Untested against live TradingView from the build workspace.
+
+## Departure dialogue: restart + notification fixes (2026-10-06, maintenance)
+- The three-stage spoken sequence (where to / bring list / vehicle-check offer) was already live dialogue via `deliver(..., question)`. Fixes: (1) Oct 2 miss: `obdScan` ignored a restart inside 3 min of the last ask (`recent`); after a seen key-off/restart (`sawOff`/`restarted`) the guard is now 45 s. (2) When the app is NOT connected the notification no longer carries the question; it only says "Open Jarvis, sir. I have a question for you." and the question is held 10 min and spoken on open. (3) `departAnswer` accepts an unsaved destination ("headed to Lowe's") and still chains the vehicle-check offer. Server only, no APK reinstall. node --check only; not driven live.

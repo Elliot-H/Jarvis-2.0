@@ -1150,7 +1150,8 @@ function deliver(text, title = 'Jarvis', question = false) {
     setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, question ? 300 : busy ? 6000 : 2500);
   } else {
     // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
-    if (question) pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 };
+    // The question itself is NOT sent as a notification: the push only says to open Jarvis, who then asks it aloud.
+    if (question) { pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 }; alertOut(title, 'Open Jarvis, sir. I have a question for you.').catch(() => {}); return; }
     alertOut(title, text).catch(() => {});
   }
 }
@@ -1341,6 +1342,8 @@ async function departAnswer(q, text) {
   let dest = state.places.find(p => p.name !== q.from && new RegExp(`\\b${placeKey(p.name).replace(/[^a-z0-9 ]/g, '')}\\b`).test(t)) || findPlace(t.replace(/^(?:i'?m )?(?:going |headed |heading |leaving )?(?:to |for )?(?:the )?/, ''));
   if (dest && q.from && dest.name === q.from) dest = null;
   if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
+  const named = !dest && !DEPART_YES.test(t) && t.match(/^(?:i'?m |im |we'?re )?(?:going|headed|heading|off|driving|running) (?:over )?(?:to|for|into) (?:the )?([a-z0-9' &.-]{2,40})$/); // an unsaved destination ("headed to Lowe's"): answer it here so the vehicle-check offer still follows
+  if (named) { finish(); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + vscanTail()); }
   if (!dest) { // leaving, destination unknown: still give the leave reminders for here
     if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
     finish();
@@ -2937,7 +2940,7 @@ async function obdScan(v, why = 'auto') {
     // A new start = never seen running, OR seen off/unreachable since it last ran (key off, then restart even a minute later), OR a long gap.
     // runSec (OBD run time since engine start) lower than the time since we last saw it running = key cycled between two scans.
     const restarted = d.runSec != null && prev.runSec != null && prev.rpm && v.lastRun && d.runSec + 20 < (now - v.lastRun) / 1000 + prev.runSec;
-    const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < 3 * 60e3; // 3 min: no double ask from one start
+    const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < ((v.sawOff || restarted) ? 45e3 : 3 * 60e3); // no double ask from one start, but a real key-off/restart (Oct 2) counts after 45 s
     dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, runSec: d.runSec ?? null, restarted: !!restarted, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
     if (newStart && !recent) { v.lastDepart = now; state.vscan = { vehicle: v.name, at: now, offered: false }; lines.unshift(vehicleDeparture(v)); }
   }
