@@ -442,3 +442,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Holdings DUST group (2026-10-06)
 - HUD Holdings splits by market value: under $5 (`DUST_MAX` in public/app.js `renderHoldings`) goes to a "DUST" sub-group beneath the main table, one row each, sorted by value; main TOTAL excludes dust. Display only: server alert/watch dust (`dustUsd`, default $1) is unchanged.
+
+## Alert chart link: TradingView (2026-10-06)
+- `/chart` (public/chart.html, same URL alerts already use) now embeds the TradingView free widget (tv.js): range buttons 1D/1W/1M/3M/1Y/ALL, pan/zoom, symbol change. Crypto maps to COINBASE:XXXUSD, stocks to the bare ticker. Alert levels (stop/target/entry) show as text above the chart; the JARVIS LEVELS button toggles the old canvas chart (Yahoo/Kraken data, 1w max) which still draws them as lines. No server or APK change. Untested against live TradingView from the build workspace.

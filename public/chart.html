@@ -7,11 +7,23 @@ button{background:transparent;color:#3fe0ff;border:1px solid #1d5a70;padding:6px
 canvas{display:block;width:100%;height:calc(100vh - 100px)}
 #msg{padding:0 12px;color:#8fb;font-size:13px;min-height:1.2em}#msg.err{color:#ff4d5e}
 </style></head><body>
-<header><h1 id="t">CHART</h1><span id="tfs"></span></header><div id="msg"></div><canvas id="c"></canvas>
+<header><h1 id="t">CHART</h1><span id="rng"></span><span id="tfs" style="display:none"></span><button id="mode" data-m="tv">JARVIS LEVELS</button><a id="tvl" target="_blank" rel="noopener" style="color:#3fe0ff;font-size:13px">Open in TradingView</a></header><div id="msg"></div><div id="tv" style="height:calc(100vh - 100px)"></div><canvas id="c" style="display:none"></canvas>
 <script>
 const P = new URLSearchParams(location.search), SYM = P.get('s') || '';
 const LV = P.getAll('lv').map(x => { const i = x.lastIndexOf(':'); return { name: x.slice(0, i).replace(/_/g, ' '), price: Number(x.slice(i + 1)) }; }).filter(l => l.name && Number.isFinite(l.price));
 let tf = '1d', data = null;
+// TradingView interactive chart (pan/zoom, all ranges). Crypto -> COINBASE:XXXUSD, stocks -> bare ticker.
+const RANGES = { '1D': ['1D', '5'], '1W': ['5D', '30'], '1M': ['1M', '60'], '3M': ['3M', 'D'], '1Y': ['12M', 'D'], 'ALL': ['ALL', 'W'] };
+const cm = SYM.toUpperCase().replace(/\s/g, '').match(/^([A-Z0-9]{2,10})[\/-]?USD$/), TVSYM = cm ? 'COINBASE:' + cm[1] + 'USD' : SYM.toUpperCase().replace(/[^A-Z.\-]/g, '');
+let rg = '1M';
+function tvLoad() {
+  $('rng').innerHTML = Object.keys(RANGES).map(k => `<button data-r="${k}" class="${k === rg ? 'on' : ''}">${k}</button>`).join('');
+  $('tv').innerHTML = ''; $('t').textContent = SYM.toUpperCase() || 'CHART';
+  $('tvl').href = 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(TVSYM);
+  $('msg').className = ''; $('msg').textContent = (LV.length ? 'Jarvis levels: ' + LV.map(l => `${l.name} ${fmt(l.price)}`).join(' · ') + ' · ' : '') + 'pinch/drag to zoom and pan; the toolbar at the bottom changes range too.';
+  const go = () => new TradingView.widget({ container_id: 'tv', autosize: true, symbol: TVSYM, interval: RANGES[rg][1], range: RANGES[rg][0], theme: 'dark', style: '1', timezone: 'Etc/UTC', locale: 'en', allow_symbol_change: true, withdateranges: true, hide_side_toolbar: true, save_image: false });
+  if (window.TradingView) go(); else { const sc = document.createElement('script'); sc.src = 'https://s3.tradingview.com/tv.js'; sc.onload = go; sc.onerror = () => { $('msg').className = 'err'; $('msg').textContent = 'TradingView did not load. Tap JARVIS LEVELS for the built-in chart.'; }; document.head.appendChild(sc); }
+}
 const $ = id => document.getElementById(id), cv = $('c'), fmt = v => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toPrecision(3));
 $('tfs').innerHTML = ['5m', '15m', '1h', '1d', '1w'].map(f => `<button data-f="${f}" class="${f === tf ? 'on' : ''}">${f}</button>`).join('');
 $('tfs').onclick = e => { const f = e.target.dataset.f; if (!f) return; tf = f; [...$('tfs').children].forEach(b => b.classList.toggle('on', b.dataset.f === f)); load(); };
@@ -41,5 +53,8 @@ function draw() {
   for (const l of lines) { if (l.price < lo || l.price > hi) continue; g.strokeStyle = g.fillStyle = l.c; g.beginPath(); g.moveTo(0, y(l.price)); g.lineTo(W - R, y(l.price)); g.stroke(); g.fillText(`${l.name} ${fmt(l.price)}`, 4, y(l.price) - 3); }
   g.setLineDash([]);
 }
-addEventListener('resize', draw); load();
+$('rng').onclick = e => { const r = e.target.dataset.r; if (!r) return; rg = r; tvLoad(); };
+$('mode').onclick = () => { const tv = $('mode').dataset.m === 'tv'; $('mode').dataset.m = tv ? 'own' : 'tv'; $('mode').textContent = tv ? 'TRADINGVIEW' : 'JARVIS LEVELS';
+  $('tv').style.display = tv ? 'none' : ''; $('rng').style.display = tv ? 'none' : ''; $('tvl').style.display = tv ? 'none' : ''; $('tfs').style.display = tv ? '' : 'none'; cv.style.display = tv ? 'block' : 'none'; if (tv) load(); else tvLoad(); };
+addEventListener('resize', draw); tvLoad();
 </script></body></html>
