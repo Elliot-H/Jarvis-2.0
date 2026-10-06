@@ -3322,6 +3322,29 @@ handlers.shut_shop_down = async ({ cancel } = {}) => {
     return `${notes.join(' ')} Tell the Owner in one or two short lines what was done, anything that FAILED, and that you are watching for the truck.`;
   } finally { shutdownBusy = false; }
 };
+// ---------- "We're gonna work out" protocol: gym speaker connects at ~30%, then Spotify's latest playlist ----------
+let workoutBusy = false;
+handlers.workout_mode = async ({ speaker_name } = {}) => {
+  if (workoutBusy) return 'Workout mode is already running. Say nothing more.';
+  workoutBusy = true;
+  try {
+    if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the gym speaker and Spotify could not be touched. Tell the Owner plainly.';
+    const isGym = x => /gym/i.test(`${x.area} ${x.alias}`);
+    let sp = state.speakers.find(isGym);
+    if (!sp) {
+      if (!speaker_name) {
+        const r = await deviceAction('bt_paired', {}, 10000);
+        return r.ok ? `No gym speaker is taught yet. Paired Bluetooth devices on the phone: ${r.detail}. Read them to the Owner and ask which one is the gym speaker; then call workout_mode again with speaker_name set to that exact name.` : `No gym speaker is taught yet and the paired list failed: ${r.detail}. Tell him plainly.`;
+      }
+      await handlers.speaker_save({ name: speaker_name, alias: 'gym speaker', area: 'gym', volume: 30 });
+      sp = state.speakers.find(isGym);
+    }
+    if (sp.volume == null) { sp.volume = 30; saveState(); }
+    turn = { id: turn.id, text: 'start the gym music on spotify', origin: 'user' };   // the music gate wants an explicit music request
+    const r = String(await handlers.music_control({ action: 'start', speaker: 'gym' }).catch(e => `Could not finish: ${e.message || e}`));
+    return `${r} Tell the Owner in one short line what happened (gym speaker connected at ${sp.volume}%, Spotify playing his latest playlist) and anything that FAILED. Only claim music if it says SUCCESS.`;
+  } finally { workoutBusy = false; }
+};
 if (state.shutdown?.active) { if (Date.now() - state.shutdown.startedAt > 30 * 60e3) state.shutdown.active = false; else { shutdownArm(); shutdownHunt(); } } // survive a restart
 // ---------- Gaming Mode (A32): TV (+soundbar) on -> HDMI to the PlayStation -> console awake -> game launched, every step proven ----------
 // Nothing here can reach a TV or PlayStation by itself: Railway is in the cloud, they are on the home/house LAN. A step only counts as done when a LAN
