@@ -66,6 +66,7 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - Holdings and watch-panel tickers open their chart when tapped; holdings show a WATCH tag for signal-watched symbols. Every holding row (and dust item) carries an auto-detected STOCK or CRYPTO badge.
 - WATCH LIST box sits directly under Holdings: every signal_watch symbol as a tappable chart link (price and stop when known). Updates live when symbols are added or removed. Every row (watched and auto position rows) shows BUY/WATCH/AVOID, entry, stop, target and price.
 - 2026-10-02: Holdings box: each holding has a sparkline (5d), live BUY/WATCH/AVOID verdict, stop, target, chart link and a watch-only "+ watch" button (same logic as alerts and the watch list).
+- 2026-10-06: Holdings box now starts with a line "FULL PORTFOLIO BALANCE" = Alpaca account equity (cash + all open positions, dust included), fetched with positions on each Investment Watch tick (`watch.holdings.equity`; kept at last value if the account call fails; hidden until first known).
 - 2026-10-02: HUD watch list now also shows the crypto watchlist (crypto_watch ids, e.g. NIGHT) with live CoinGecko price and 24h %; rows tagged STOCK/CRYPTO; a stock row the stock feed cannot price falls back to the crypto feed.
 - 2026-10-02: Every HUD watch row (SDEV, SCKT, NIGHT and the rest) prints a written call under it: action word (BUY/HOLD/SELL/WATCH/AVOID), trend, confidence, reasons, stop/target. (Work/HUD)
 - 2026-10-02: alerts carry Buy + Add to watch list buttons; WATCH LIST box always shown (positions + signal_watch).

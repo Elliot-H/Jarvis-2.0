@@ -2036,7 +2036,7 @@ async function watchTick() {
   watch.lastRun = Date.now();
   try {
     const open = marketOpenNow();
-    const [pos, ords] = await Promise.all([trade.positions(), trade.orders().catch(() => [])]);
+    const [pos, ords, acct] = await Promise.all([trade.positions(), trade.orders().catch(() => []), trade.account().catch(() => null)]);
     const restStop = new Map(ords.filter(o => o.side === 'sell' && o.stopPrice).map(o => [o.symbol, o.stopPrice]));
     const restStopOrd = new Map(ords.filter(o => o.side === 'sell' && ['stop', 'stop_limit', 'trailing_stop'].includes(o.type)).map(o => [o.symbol, o]));
     const items = new Map();   // key = Alpaca symbol form
@@ -2079,7 +2079,7 @@ async function watchTick() {
     // Bought = moved off the watch list into holdings (a watch row is never dropped any other way except his say-so).
     const bought = new Set(pos.filter(p => !isDustVal(p.value)).map(p => wlKey(p.symbol)));
     if (state.sigWatch.some(w => bought.has(wlKey(w.symbol)))) { state.sigWatch = state.sigWatch.filter(w => !bought.has(wlKey(w.symbol))); saveState(); broadcast(watchlistMsg(true)); }
-    watch.holdings = { at: Date.now(), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, entry: p.entry, qty: p.qty, costBasis: p.costBasis, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
+    watch.holdings = { at: Date.now(), equity: Number.isFinite(acct?.equity) ? acct.equity : (watch.holdings?.equity ?? null), positions: pos.map(p => ({ symbol: p.symbol, price: p.price, entry: p.entry, qty: p.qty, costBasis: p.costBasis, value: p.value, pnl: p.pnl, pnlPct: p.pnlPct, watch: state.sigWatch.some(w => w.symbol === p.symbol.replace('/USD', '').replace('/', '')) })) };
     broadcast(holdingsOut()); broadcast(watchlistMsg());
     watch.seen = seen; watch.lastOk = Date.now(); watch.error = null; watch.fails = 0;
   } catch (e) {
