@@ -611,7 +611,7 @@
     paintMute(); chip('#chipMic', 'ok', 'MIC'); setState('idle'); addActivity('Microphone on.');
     micNotBefore = 0; recBackoff = 0; startMicMeter(); if (rec) { recWanted = true; manualMicUntil = Date.now() + 15000; goActive(); }
   }
-  let rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
+  let recT0 = 0, rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
   // Every mic start goes through here so a cooldown is honoured no matter who asks (the phone's recognizer refuses
   // requests that come too fast, and hammering it makes it refuse for longer).
   // While music is playing the speech recognizer keeps pausing it (Android hands the recognizer audio focus), so the always-on
@@ -674,9 +674,10 @@
     if (!SR) { chip('#chipMic', 'bad', 'NO SPEECH API'); caption('Voice input needs Chrome or Edge. You can still type.', { typed: false, pre: '!!' }); return; }
     rec = new SR();
     rec.continuous = true; rec.interimResults = true; rec.lang = params.get('lang') || 'en-US';
-    rec.onstart = () => { recOn = true; };
+    rec.onstart = () => { recOn = true; recT0 = Date.now(); };
     rec.onend = () => {
       recOn = false;
+      { const dur = Date.now() - recT0; if (mode === 'active') addActivity('Mic session ended after ' + (dur / 1000).toFixed(1) + 's' + (lastRecErr && Date.now() - lastRecErrAt < 1500 ? ' (' + lastRecErr + ')' : '') + (pending || carry ? ', words heard' : ', nothing heard') + (recWanted ? ', re-opening' : '') + '.'); }
       // The browser ends a listening session by itself after a short silence. If we still want the mic,
       // do NOT send the command yet: keep the words so far and let the pause timer decide.
       if (pending && recWanted && !pending.wakeOnly) carry = lastHeard;
@@ -685,7 +686,7 @@
       // Android's recognizer refuses restarts that come too fast (error 10). Back off, then ease back down.
       if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
       recThrottled = false;
-      const wait = recBackoff || (recErrs.length >= 3 ? 8000 : 250);   // repeated failures: pause before retrying
+      const wait = recBackoff || (recErrs.length >= 3 ? 8000 : (Date.now() - recT0 < 1500 ? 700 : 250));   // a blip session: pause a beat so it does not flicker   // repeated failures: pause before retrying
       // With the wake word engine healthy the recognizer is single-shot: one session per "Hey Jarvis" / mic tap / question, so it does not
       // re-open (and ding, through the Bluetooth speaker when music plays) every second. It only re-opens to finish a sentence he is mid-way through.
       const single = WAKE_FIRST && wakeEver && !wakeErrShown;
@@ -737,7 +738,7 @@
   }
   function afterReply(text) {
     if (isQuestion(text)) setTimeout(() => { if (!speaking && state !== 'thinking') { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } }, 250);
-    else if (FOLLOW_UP) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 6000, quiet: true }); }, 250);
+    else if (FOLLOW_UP && !(WAKE_FIRST && wakeEver && !wakeErrShown)) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 6000, quiet: true }); }, 250);
     else resumeListening();
   }
   // Phones sometimes refuse to restart the mic right after audio playback; keep trying until it is really on.
