@@ -1151,9 +1151,21 @@ function deliver(text, title = 'Jarvis', question = false) {
   } else {
     // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
     // The question itself is NOT sent as a notification: the push only says to open Jarvis, who then asks it aloud.
-    if (question) { pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 }; alertOut(title, 'Open Jarvis, sir. I have a question for you.').catch(() => {}); return; }
-    alertOut(title, text).catch(() => {});
+    // Every line is also held and spoken aloud the moment the app opens, and sent as a Jarvis-voice audio clip (Telegram) so it is heard, not just read.
+    pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 };
+    sendVoiceClip(title, text).catch(() => {});
+    alertOut(title, question ? 'Open Jarvis, sir. I have a question for you.' : text).catch(() => {});
   }
+}
+// Jarvis actually saying the line: Fish JARVIS voice clip (cached by text) sent as a Telegram audio message. Needs FISH_API_KEY + Telegram; otherwise silent no-op.
+async function sendVoiceClip(title, text) {
+  if (!process.env.FISH_API_KEY || !process.env.TELEGRAM_BOT_TOKEN) return;
+  const chat = await tgChatId(); if (!chat) return;
+  const file = alertFile(text);
+  if (!fs.existsSync(file)) { const out = await fishFetch(text.slice(0, 400)); if (!out.r) return; fs.writeFileSync(file, Buffer.from(await out.r.arrayBuffer())); }
+  const f = new FormData(); f.append('chat_id', chat); f.append('title', String(title).slice(0, 60)); f.append('caption', text.slice(0, 900));
+  f.append('audio', new Blob([fs.readFileSync(file)], { type: 'audio/mpeg' }), 'jarvis.mp3');
+  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendAudio`, { method: 'POST', body: f, signal: AbortSignal.timeout(20000) });
 }
 // A question alert (departure checklist, "leaving?") must be answerable: send it through Telegram, where the Owner can reply
 // straight from the notification (see tgPoll), falling back to the normal push with a link that opens Jarvis.

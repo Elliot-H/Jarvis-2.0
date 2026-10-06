@@ -1,9 +1,8 @@
 STATUS: done
-TIME: 2026-10-06T21:48:35Z
-REQUEST: Add "we're gonna work out" protocol: gym speaker at 30% plus Spotify latest playlist
+TIME: 2026-10-06T23:50:00Z
+REQUEST: Make arrival/departure lines and the vehicle-data offer audible spoken audio, not just a push notification
 RESULT:
-Owner, "we're gonna work out", "we're going to work out" and "gonna work out" are now a protocol phrase that runs one tool, workout_mode.
-It connects the gym speaker at 30 percent and then plays your latest Spotify playlist.
-No gym speaker is taught yet, so the first time Jarvis will read you the phone's paired Bluetooth list; name the gym one and he saves it.
-Because Tasker can't take a speaker name from Jarvis, the gym speaker also needs its own Tasker task with its address, and Jarvis can't connect it until that exists.
-It goes live on the next Railway build, no APK reinstall. Syntax-checked only, not tested on hardware.
+Owner, when the app is open, every arrival, departure and the vehicle-data offer were already spoken, and that is unchanged.
+When the app was closed, only a text push went out, which is what you saw. Now Jarvis also records the exact line in his own voice and sends it as an audio message in Telegram, and he speaks it aloud the moment you open the app.
+A push alone can never speak, so the audio is the Telegram clip; it needs the Fish key and Telegram set, which you already have.
+It goes live on the next Railway build, no APK reinstall. Syntax-checked only, not tested on the phone.
