@@ -1152,7 +1152,7 @@ function deliver(text, title = 'Jarvis', question = false) {
     // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
     // The question itself is NOT sent as a notification: the push only says to open Jarvis, who then asks it aloud.
     // Every line is also held and spoken aloud the moment the app opens, and sent as a Jarvis-voice audio clip (Telegram) so it is heard, not just read.
-    pendingSay = { text, at: Date.now(), ttl: 10 * 60e3 };
+    holdLine(text, question);
     sendVoiceClip(title, text).catch(() => {});
     alertOut(title, question ? 'Open Jarvis, sir. I have a question for you.' : text).catch(() => {});
   }
@@ -1179,7 +1179,27 @@ async function alertOut(title, text) {
   }
   const err = await push(title, text); console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
 }
-const takePendingSay = () => { const p = pendingSay; pendingSay = null; return p && Date.now() - p.at < (p.ttl || 10000) ? ' ' + p.text : ''; };
+// Lines sent while the app was closed are held on disk (state.held, survives redeploys) until he opens the app, then spoken.
+// Questions keep for 45 min, other lines 20 min; up to 4 queued, oldest first. Oct 7 fix: the push said "I have a question"
+// but resuming the app (tapping the notification) never sent the startup greeting, so the held question was never asked.
+const HELD_Q_MS = 45 * 60e3, HELD_MS = 20 * 60e3;
+function holdLine(text, question) {
+  const now = Date.now();
+  state.held = (state.held || []).filter(h => h.text !== text && now - h.at < (h.q ? HELD_Q_MS : HELD_MS));
+  state.held.push({ text, at: now, q: !!question }); state.held = state.held.slice(-4); saveState();
+}
+function takeHeld() {
+  const now = Date.now(), live = (state.held || []).filter(h => now - h.at < (h.q ? HELD_Q_MS : HELD_MS));
+  if (!(state.held || []).length) return '';
+  state.held = [];
+  // The question is being asked NOW: restart its answer window so his reply counts as the answer.
+  if (live.some(h => h.q) && state.pendingQ) state.pendingQ.at = now;
+  saveState();
+  return live.map(h => h.text).join(' ');
+}
+const takePendingSay = () => { const p = pendingSay; pendingSay = null; const live = p && Date.now() - p.at < (p.ttl || 10000) ? p.text : ''; const h = takeHeld(); return [live, h].filter(Boolean).map(t => ' ' + t).join(''); };
+// App brought to the front (notification tap, resume, reconnect): speak whatever was held for him.
+function speakHeld() { const t = takeHeld(); if (!t) return false; remember('jarvis', t); broadcast({ type: 'say', text: t, speak: true }); return true; }
 let moveTimer = null;
 function onMove() {
   const L = state.location; if (!L) return;
@@ -2357,7 +2377,7 @@ app.get('/health', (_req, res) => res.send('ok'));
 // Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
 app.get('/open', (req, res) => {
   const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
-  const web = `/?buy=${encodeURIComponent(sym)}`, intent = `intent://open?buy=${encodeURIComponent(sym)}#Intent;scheme=jarvis;package=app.jarvis;S.browser_fallback_url=${encodeURIComponent((/^localhost/.test(req.get('host') || '') ? 'http' : 'https') + '://' + req.get('host') + web)};end`;
+  const web = `/?buy=${encodeURIComponent(sym)}`, intent = `intent://open?buy=${encodeURIComponent(sym)}#Intent;scheme=jarvis;package=app.jarvis.hud;S.browser_fallback_url=${encodeURIComponent((/^localhost/.test(req.get('host') || '') ? 'http' : 'https') + '://' + req.get('host') + web)};end`;
   res.set('Cache-Control', 'no-store').type('html').send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Jarvis</title><body style="background:#04121c;color:#7fe3ff;font:18px sans-serif;text-align:center;padding:60px 20px"><p>Opening Jarvis${sym ? ' to buy ' + sym : ''}...</p><p><a id=a href="${intent}" style="display:inline-block;padding:16px 28px;border:1px solid #7fe3ff;color:#7fe3ff;text-decoration:none;border-radius:6px">Open Jarvis</a></p><p style="font-size:14px;opacity:.7"><a href="${web}" style="color:#7fe3ff">No app? Open the web version</a></p><script>setTimeout(function(){location.href=${JSON.stringify(intent)}},150)</script>`);
 });
 // Alert button target: signed, watch-only (never places a buy).
@@ -2905,6 +2925,7 @@ wss.on('connection', ws => {
     }
     if (msg.type === 'mic_muted') { const r = 'Microphone muted.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'wake') briefing('wake', msg.memo);
+    if (msg.type === 'resume') setTimeout(speakHeld, 400);   // app came back to the front: ask the held question
     if (msg.type === 'interrupt' && current) { try { await current.interrupt(); } catch {} }
     if (msg.type === 'new_session') {
       state.sessionId = null; state.workSessionId = null; state.history = []; saveState();

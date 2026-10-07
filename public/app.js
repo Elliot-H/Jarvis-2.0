@@ -84,7 +84,7 @@
   let lostMidRequest = false; // a redeploy killed the socket while a request was in flight: its answer will never come
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-    ws.onopen = () => { if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
+    ws.onopen = () => { try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
     ws.onclose = () => { if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); setTimeout(connect, 2000); };
     ws.onmessage = e => handle(JSON.parse(e.data));
   }
@@ -976,6 +976,8 @@
       () => wake(), { timeout: 4000, maximumAge: 600000 });
     else wake();
   }
+  // Back to the front (tapped a Jarvis notification, switched back to the app): ask anything held while it was asleep.
+  document.addEventListener('visibilitychange', () => { if (booted && document.visibilityState === 'visible') send({ type: 'resume' }); });
   $('#bootBtn').onclick = boot;
   // Inside the Android app there is no tap-to-start: boot straight away, and let the side key jump to listening.
   if (/JarvisApp/.test(navigator.userAgent)) {

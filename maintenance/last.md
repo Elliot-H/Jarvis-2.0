@@ -1,8 +1,9 @@
 STATUS: done
-TIME: 2026-10-06T23:50:00Z
-REQUEST: Make arrival/departure lines and the vehicle-data offer audible spoken audio, not just a push notification
+TIME: 2026-10-07T23:55:00Z
+REQUEST: Notification says "I have a question for you" but when opened, Jarvis never asks it
 RESULT:
-Owner, when the app is open, every arrival, departure and the vehicle-data offer were already spoken, and that is unchanged.
-When the app was closed, only a text push went out, which is what you saw. Now Jarvis also records the exact line in his own voice and sends it as an audio message in Telegram, and he speaks it aloud the moment you open the app.
-A push alone can never speak, so the audio is the Telegram clip; it needs the Fish key and Telegram set, which you already have.
-It goes live on the next Railway build, no APK reinstall. Syntax-checked only, not tested on the phone.
+Owner, the question was being held and only spoken inside the startup greeting. Tapping the notification usually just brought the already-running app back to the front, which never sends that greeting, so the question was dropped.
+Now the app tells Jarvis every time it comes back to the front or reconnects, and he asks whatever is waiting right away. The question also restarts its answer window, so your yes or no counts.
+Held lines are now saved to disk (a redeploy no longer erases them), several can queue instead of the newest wiping the older one, and a question keeps for 45 minutes instead of 10.
+Also fixed the notification's "open" link, which pointed at the wrong app package.
+Goes live on the next Railway build, no APK reinstall. Server boot smoke-tested; not tested on the phone.
