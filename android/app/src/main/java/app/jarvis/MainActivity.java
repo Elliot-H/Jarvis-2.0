@@ -122,7 +122,7 @@ public class MainActivity extends Activity {
     });
 
     askPermissions();
-    web.loadUrl(origin + "/?app=1");
+    web.loadUrl(origin + "/?app=1" + buyParam(getIntent()));
     startKeepAlive();
   }
 
@@ -172,10 +172,24 @@ public class MainActivity extends Activity {
     } catch (Exception ignored) {}
   }
 
+  /** jarvis://open?buy=SYM (from an alert's Buy button) becomes "&buy=SYM" on the page address; anything else is empty. */
+  private static String buyParam(Intent i) {
+    try {
+      android.net.Uri u = i == null ? null : i.getData();
+      if (u == null || !"jarvis".equals(u.getScheme())) return "";
+      String sym = u.getQueryParameter("buy");
+      if (sym == null) return "";
+      sym = sym.toUpperCase().replaceAll("[^A-Z.\\-]", "");
+      return sym.isEmpty() || sym.length() > 12 ? "" : "&buy=" + sym;
+    } catch (Exception e) { return ""; }
+  }
+
   /** Side key / assistant launch while already open: jump straight to listening. */
   @Override protected void onNewIntent(Intent i) {
     super.onNewIntent(i);
     setIntent(i);
+    String buy = buyParam(i);
+    if (!buy.isEmpty() && web != null) { web.loadUrl(BuildConfig.BASE_URL + "/?app=1" + buy); return; }   // alert "Buy" button: jarvis://open?buy=SYM
     if (i.getBooleanExtra("silent", false)) return; // returning from another app: do not start listening
     if (web != null) web.evaluateJavascript("window.__jarvisWake&&window.__jarvisWake()", null);
   }

@@ -1745,7 +1745,7 @@ function watchLink(link) {
 }
 // Buy button: opens the HUD, which asks Jarvis to start the buy flow; nothing is bought until the Owner confirms by voice in a later turn.
 function buyLink(link) {
-  try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/?buy=${encodeURIComponent(sym)}`; } catch { return ''; }
+  try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/open?buy=${encodeURIComponent(sym)}`; } catch { return ''; }
 }
 // crypto briefs name several coins: link up to three tickers found in the text
 function cryptoLinks(text) {
@@ -2354,6 +2354,12 @@ app.post('/login', (req, res) => {
   res.redirect(303, safeNext(req.query.next) || '/');
 });
 app.get('/health', (_req, res) => res.send('ok'));
+// Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
+app.get('/open', (req, res) => {
+  const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
+  const web = `/?buy=${encodeURIComponent(sym)}`, intent = `intent://open?buy=${encodeURIComponent(sym)}#Intent;scheme=jarvis;package=app.jarvis;S.browser_fallback_url=${encodeURIComponent((/^localhost/.test(req.get('host') || '') ? 'http' : 'https') + '://' + req.get('host') + web)};end`;
+  res.set('Cache-Control', 'no-store').type('html').send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Jarvis</title><body style="background:#04121c;color:#7fe3ff;font:18px sans-serif;text-align:center;padding:60px 20px"><p>Opening Jarvis${sym ? ' to buy ' + sym : ''}...</p><p><a id=a href="${intent}" style="display:inline-block;padding:16px 28px;border:1px solid #7fe3ff;color:#7fe3ff;text-decoration:none;border-radius:6px">Open Jarvis</a></p><p style="font-size:14px;opacity:.7"><a href="${web}" style="color:#7fe3ff">No app? Open the web version</a></p><script>setTimeout(function(){location.href=${JSON.stringify(intent)}},150)</script>`);
+});
 // Alert button target: signed, watch-only (never places a buy).
 app.get('/watch-add', async (req, res) => {
   const sym = String(req.query.s || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12), k = String(req.query.k || '');
