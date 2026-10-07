@@ -1174,7 +1174,7 @@ async function alertOut(title, text) {
   if (q && Date.now() - q.at < 15000) {
     // Pushover is the Owner's alert app (custom Jarvis sound): question alerts always go there. Telegram, when set, only adds a copy he can reply to.
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.PUSHOVER_APP_TOKEN) pushTelegram(title, text).then(e => e && console.warn('telegram copy failed:', e)).catch(() => {});
-    const err = await push(title, text, publicBase() || undefined);
+    const err = await push(title, text, (publicBase() ? publicBase().replace(/\/+$/, '') + '/open' : undefined));
     console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
   }
   const err = await push(title, text); console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
