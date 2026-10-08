@@ -119,6 +119,11 @@ public class MainActivity extends Activity {
       @Override public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
         if (req.isForMainFrame()) ui.postDelayed(() -> web.loadUrl(origin + "/?app=1"), 4000);
       }
+      /** Android killed the page's renderer while the app sat in the background (the service kept the app alive): the screen goes black. Rebuild it. */
+      @Override public boolean onRenderProcessGone(WebView v, android.webkit.RenderProcessGoneDetail d) {
+        ui.post(() -> { try { recreate(); } catch (Exception e) { web.loadUrl(origin + "/?app=1"); } });
+        return true;
+      }
     });
 
     askPermissions();
@@ -194,7 +199,20 @@ public class MainActivity extends Activity {
     if (web != null) web.evaluateJavascript("window.__jarvisWake&&window.__jarvisWake()", null);
   }
 
-  @Override protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
+  private boolean resumedOnce = false;
+  @Override protected void onResume() {
+    super.onResume();
+    if (web == null) return;
+    web.onResume();
+    if (!resumedOnce) { resumedOnce = true; return; }
+    // Coming back to the app: if the page does not answer, or answers with an empty screen (black), reload it.
+    final boolean[] answered = {false};
+    web.evaluateJavascript("(document.body&&document.body.children.length)||0", v -> {
+      answered[0] = true;
+      if (v == null || v.equals("null") || v.equals("0")) web.loadUrl(BuildConfig.BASE_URL + "/?app=1");
+    });
+    ui.postDelayed(() -> { if (!answered[0] && !isFinishing()) { try { recreate(); } catch (Exception e) { web.loadUrl(BuildConfig.BASE_URL + "/?app=1"); } } }, 3000);
+  }
   @Override protected void onDestroy() { if (stt != null) stt.release(); super.onDestroy(); }
   @Override public void onBackPressed() {
     if (web != null && web.canGoBack()) web.goBack(); else moveTaskToBack(true);
