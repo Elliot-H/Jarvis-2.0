@@ -39,22 +39,38 @@ public class ObdBridge {
         BluetoothAdapter ad = ((BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
         if (ad == null || !ad.isEnabled()) { reply(id, err("bt_off", "Bluetooth is off on the phone.")); return; }
         BluetoothDevice dev = null;
+        java.util.ArrayList<BluetoothDevice> byName = new java.util.ArrayList<>();
         for (BluetoothDevice d : ad.getBondedDevices()) {
           String n = d.getName() == null ? "" : d.getName();
-          if (d.getAddress().equalsIgnoreCase(dongle) || (!dongle.isEmpty() && n.toLowerCase().contains(dongle.toLowerCase()))) { dev = d; break; }
+          if (d.getAddress().equalsIgnoreCase(dongle)) { dev = d; break; }   // an exact address always wins
+          if (!dongle.isEmpty() && n.toLowerCase().contains(dongle.toLowerCase())) byName.add(d);
+        }
+        if (dev == null && byName.size() == 1) dev = byName.get(0);
+        if (dev == null && byName.size() > 1) {
+          StringBuilder sb = new StringBuilder();
+          for (BluetoothDevice d : byName) sb.append(d.getName()).append(" = ").append(d.getAddress()).append("; ");
+          reply(id, err("ambiguous", "Two or more paired devices are named like \"" + dongle + "\": " + sb + "Set each vehicle up with its own Bluetooth address instead of the name.")); return;
         }
         if (dev == null) { reply(id, err("not_paired", "No paired Bluetooth device matches \"" + dongle + "\". Pair the OBD dongle in the phone's Bluetooth settings first.")); return; }
         try { ad.cancelDiscovery(); } catch (Exception ignored) {}
-        s = dev.createRfcommSocketToServiceRecord(SPP);
-        try { s.connect(); }
-        catch (Exception e) {
-          try { s.close(); } catch (Exception ignored) {}
-          try { s = (BluetoothSocket) dev.getClass().getMethod("createRfcommSocket", int.class).invoke(dev, 1); s.connect(); } // some clones only answer on channel 1
-          catch (Exception e2) { reply(id, err("out_of_range", "Could not reach the dongle (out of range, or the vehicle is off and it is asleep).")); return; }
+        // Cheap clone dongles often refuse the first try: secure socket, insecure socket, channel 1, then the whole round once more after a pause.
+        String lastErr = "";
+        for (int round = 0; round < 2 && s == null; round++) {
+          for (int mode = 0; mode < 3 && s == null; mode++) {
+            BluetoothSocket t = null;
+            try {
+              t = mode == 0 ? dev.createRfcommSocketToServiceRecord(SPP)
+                : mode == 1 ? dev.createInsecureRfcommSocketToServiceRecord(SPP)
+                : (BluetoothSocket) dev.getClass().getMethod("createRfcommSocket", int.class).invoke(dev, 1);
+              t.connect(); s = t;
+            } catch (Exception e) { lastErr = String.valueOf(e.getMessage()); try { if (t != null) t.close(); } catch (Exception ignored) {} }
+          }
+          if (s == null && round == 0) Thread.sleep(1500);
         }
+        if (s == null) { reply(id, err("out_of_range", "Could not open a connection to " + dev.getName() + " (" + dev.getAddress() + "): " + lastErr + ". Check the car's ignition is on, the dongle's light is lit, and the dongle is not connected to another phone. Some dongles are Bluetooth LE type, which this app cannot use.")); return; }
         InputStream in = s.getInputStream(); OutputStream out = s.getOutputStream();
         for (String c : new String[]{"ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP0"}) cmd(in, out, c, c.equals("ATZ") ? 2500 : 1500);
-        JSONObject r = new JSONObject().put("ok", true).put("dongle", dev.getName());
+        JSONObject r = new JSONObject().put("ok", true).put("dongle", dev.getName()).put("address", dev.getAddress());
         String volts = cmd(in, out, "ATRV", 1500).replaceAll("[^0-9.]", "");
         if (!volts.isEmpty()) r.put("volts", Double.parseDouble(volts));
         if (clear) {
