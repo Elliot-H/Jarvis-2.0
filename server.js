@@ -2434,11 +2434,11 @@ Object.assign(handlers, {
     if (!list.length) return `${b.id} has no channels connected in Buffer yet.`;
     let pick = list;
     if (channels?.length) { const w = channels.map(x => String(x).toLowerCase()); pick = list.filter(c => w.some(x => c.service.toLowerCase().includes(x) || c.name.toLowerCase().includes(x))); if (!pick.length) return `No channel like ${channels.join(', ')} for ${b.id}. It has: ${list.map(c => `${c.service} ${c.name}`).join(', ')}.`; }
-    let videoUrl = '';
-    if (mediaFile) { const f = media.outPath(mediaFile); if (!f) return `No finished media called ${mediaFile}. Make one with media_prepare first.`; const base = publicBase(); if (!base) return 'No public address for Jarvis (PUBLIC_URL), so Buffer cannot fetch the file.'; const u = `${base}/m/${path.basename(f)}`; if (/\.mp4$/i.test(f)) videoUrl = u; else imageUrl = u; }
+    let videoUrl = '', mediaInfo = null;
+    if (mediaFile) { const f = media.outPath(mediaFile); if (!f) return `No finished media called ${mediaFile}. Make one with media_prepare first.`; const base = publicBase(); if (!base) return 'No public address for Jarvis (PUBLIC_URL), so Buffer cannot fetch the file.'; const u = `${base}/m/${path.basename(f)}`; mediaInfo = media.infoOf(f); if (/\.mp4$/i.test(f)) videoUrl = u; else imageUrl = u; }
     const svc = pick.map(c => c.service.toLowerCase()); if (/instagram/.test(svc.join(' ')) && !imageUrl && !videoUrl) return 'Instagram will not take a text-only post. Give me a photo or video (media_prepare) or limit it to other channels.'; if (svc.includes('youtube') && !videoUrl) return 'YouTube Shorts need a video. Use media_prepare on a video, or limit it to other channels.';
     let whenISO = ''; if (when) { const t = Date.parse(when); if (t > Date.now() + 60e3) whenISO = new Date(t).toISOString(); }
-    const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', videoUrl, channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now(), req: lastSocialReq };
+    const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', videoUrl, mediaInfo, channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now(), req: lastSocialReq };
     (state.social ||= []).push(d); state.social = state.social.slice(-30); saveState();
     if (process.env.SOCIAL_AUTOPOST === '1') return `Draft ${d.id}: "${text}". ` + await socSend(d);
     const base = publicBase(), link = base ? `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}` : '';
@@ -2503,7 +2503,8 @@ const socWarn = d => {
 };
 const socView = (d, k, note = '') => {
   const chans = (d.channelNames || []).map(n => { const [svc, ...r] = n.split(' '); return socCard(d, svc, r.join(' ')); }).join('');
-  const warn = socWarn(d).map(x => `<div class="warn">${esc(x)}</div>`).join('');
+  const mi = d.mediaInfo, resLine = mi && mi.srcW ? `<div class="${mi.low ? 'warn' : ''}" style="${mi.low ? '' : 'opacity:.6;margin:6px 0'}">Original photo: ${mi.srcW} x ${mi.srcH} px${mi.low ? ' (low resolution, it will look soft or blocky; upload the original from the gallery)' : ' (good)'}</div>` : '';
+  const warn = resLine + socWarn(d).map(x => `<div class="warn">${esc(x)}</div>`).join('');
   return `<style>.card{background:#fff;color:#111;border-radius:12px;overflow:hidden;margin:14px 0;max-width:460px}.warn{background:#4a1d1d;border:1px solid #ff6b6b;color:#ffd0d0;padding:10px;border-radius:6px;margin:8px 0;max-width:460px}textarea{width:100%;max-width:460px;min-height:130px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px;padding:10px;font:inherit}button{padding:14px 24px;font-size:17px;border-radius:6px;margin:6px 6px 0 0;border:1px solid #7fe3ff;background:#0b3b52;color:#cfefff}.sec{background:none;border-color:#567;color:#9bb}</style>
 <h3 style="margin:0">PREVIEW: ${esc(d.brand)}</h3><div style="opacity:.7;margin-bottom:6px">Posts to: ${esc((d.channelNames || []).join(', '))}${note ? `<br><b style="color:#7fe3ff">${esc(note)}</b>` : ''}</div>${warn}${chans}
 <form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="k" value="${esc(k)}"><div style="opacity:.7;margin:10px 0 4px">Caption (edit it, then Save)</div><textarea name="text">${esc(d.text)}</textarea><div><button name="act" value="save" class="sec">Save changes</button> <button name="act" value="post">Post it</button> <button name="act" value="skip" class="sec">Delete</button> <button name="act" value="retry" class="sec">Try again</button></div></form>`;

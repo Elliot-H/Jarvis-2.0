@@ -30,6 +30,7 @@ export const findRaw = q => {
   if (!q || q === 'latest' || q === 'last') return all[0] || null;
   return all.find(x => x.file.toLowerCase() === q) || all.find(x => x.file.toLowerCase().includes(q)) || null;
 };
+export const infoOf = f => { try { return JSON.parse(fs.readFileSync(path.join(OUT, path.basename(String(f)) + '.json'), 'utf8')); } catch { return null; } };
 export const outPath = f => { const n = path.basename(String(f || '')); const p = path.join(OUT, n); return /^[\w.-]+$/.test(n) && fs.existsSync(p) ? p : ''; };
 // Finished files older than 30 days go; raw uploads stay.
 export const cleanup = () => { for (const f of fs.readdirSync(OUT)) { try { const p = path.join(OUT, f); if (Date.now() - fs.statSync(p).mtimeMs > 30 * 864e5) fs.unlinkSync(p); } catch {} } };
@@ -84,8 +85,10 @@ export async function preparePhoto(file, { shape = 'portrait', headline = '', su
     layers.push({ input: Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="0.45" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0.92"/></linearGradient></defs><rect x="0" y="${y0 - 90}" width="${W}" height="${boxH + 90}" fill="url(#g)"/><rect x="${pad}" y="${y0 + Math.round(H * 0.012)}" width="${Math.round(W * 0.12)}" height="8" fill="${br.color}"/>${tag}${text}${subT}</svg>`), top: 0, left: 0 });
   }
   const id = crypto.randomBytes(8).toString('hex'), name = `${id}.jpg`;
-  await (layers.length ? img.composite(layers) : img).jpeg({ quality: 88, mozjpeg: true }).toFile(path.join(OUT, name));
-  return { name, kind: 'photo', shape, srcW: sw, srcH: sh, low: Math.max(sw || 0, sh || 0) < 1000 };
+  await (layers.length ? img.composite(layers) : img).jpeg({ quality: 93, mozjpeg: true, chromaSubsampling: '4:4:4' }).toFile(path.join(OUT, name));
+  const low = Math.max(sw || 0, sh || 0) < 1000;
+  try { fs.writeFileSync(path.join(OUT, name + '.json'), JSON.stringify({ srcW: sw, srcH: sh, outW: W, outH: H, bytes: fs.statSync(src).size, low })); } catch {}
+  return { name, kind: 'photo', shape, srcW: sw, srcH: sh, low };
 }
 
 const run = (cmd, args, ms) => new Promise((res, rej) => {
