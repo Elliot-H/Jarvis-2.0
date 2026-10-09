@@ -37,14 +37,15 @@ public class SttBridge {
   private boolean ready = false;        // recognizer said it is actually hearing audio
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
-  private long readyAt = 0, lastRms = 0; private int rmsCount = 0;
+  private long readyAt = 0, lastRms = 0, lastDeadReset = 0; private int rmsCount = 0;
   /** A session that says "ready" but never delivers audio levels is a dead mic (another app or the wake engine holds it): the page shows
    *  "listening" while nothing hears him. Reset it so the page opens a fresh one. */
   private final Runnable deadCheck = new Runnable() { @Override public void run() {
     if (!running || !ready) return;
     long now = System.currentTimeMillis();
-    boolean dead = rmsCount > 0 ? now - lastRms > 3500 : now - readyAt > 5000;
-    if (dead) { emit("diag", "mic was open but no audio reached it (" + (rmsCount > 0 ? "levels stopped" : "no levels at all") + "), restarting it"); reset(); emit("error", "aborted"); emit("end", ""); return; }
+    boolean dead = rmsCount > 0 && now - lastRms > 3500;   // only when levels WERE flowing and then stopped (never judge a phone that sends no levels)
+    if (dead && now - lastDeadReset < 60000) dead = false;   // at most one restart a minute: never a beep loop
+    if (dead) { lastDeadReset = now; emit("diag", "mic was open but no audio reached it (" + (rmsCount > 0 ? "levels stopped" : "no levels at all") + "), restarting it"); reset(); emit("error", "aborted"); emit("end", ""); return; }
     ui.postDelayed(this, 1000);
   } };
   // While music plays, feed the recognizer our own mic audio (AudioRecord takes no audio focus) instead of letting it open the mic

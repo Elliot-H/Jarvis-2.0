@@ -611,7 +611,7 @@
     paintMute(); chip('#chipMic', 'ok', 'MIC'); setState('idle'); addActivity('Microphone on.');
     micNotBefore = 0; recBackoff = 0; startMicMeter(); if (rec) { recWanted = true; manualMicUntil = Date.now() + 15000; goActive(); }
   }
-  let recT0 = 0, rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
+  let recT0 = 0, blipN = 0, rec, recOn = false, recWanted = false, mode = 'passive', activeTimer, recErrs = [], lastRecErr = '', lastRecErrAt = 0, recBackoff = 0, recThrottled = false, micNotBefore = 0, lastMicStart = 0;
   // Every mic start goes through here so a cooldown is honoured no matter who asks (the phone's recognizer refuses
   // requests that come too fast, and hammering it makes it refuse for longer).
   // While music is playing the speech recognizer keeps pausing it (Android hands the recognizer audio focus), so the always-on
@@ -692,7 +692,11 @@
       const single = WAKE_FIRST && wakeEver && !wakeErrShown;
       // While a listening window is still open (he just asked a question / a mic tap / "Hey Jarvis"), a session that ends with nothing heard
       // (a blip: wake engine still releasing the mic, recognizer's own no-speech timeout) must NOT close the window: re-open until the window times out.
-      if (single && !pending && !carry && !(mode === 'active' && recWanted && !muted)) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
+      // Never loop: a window that keeps ending in under 1.5 s with nothing heard (open, beep, close, beep...) is given up after 3 tries.
+      if (mode === 'active' && !pending && !carry && Date.now() - recT0 < 1500) blipN++;
+      const looping = blipN >= 3;
+      if (looping) { blipN = 0; micNotBefore = Date.now() + 10000; addActivity('Mic kept closing by itself; stopped re-opening it. Tap the mic or say "Hey Jarvis".'); }
+      if (single && !pending && !carry && (looping || !(mode === 'active' && recWanted && !muted))) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
         manualMicUntil = 0;
         if (mode === 'active' && !pending) { mode = 'passive'; clearTimeout(activeTimer); setState('idle'); }
       } else if (recWanted) setTimeout(() => { if (recWanted && !recOn) startMic(); }, Math.max(wait, micNotBefore - Date.now()) + 50);
@@ -769,7 +773,7 @@
   function goActive(o = {}) {
     if (muted) return;
     stopSpeaking(false);
-    mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
+    blipN = 0; mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
     caption('', {});
     clearTimeout(uttTimer); pending = null; carry = ''; lastHeard = ''; uttStart = lastLen;
     recWanted = true; ensureMic();
