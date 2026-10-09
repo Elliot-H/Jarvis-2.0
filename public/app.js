@@ -906,19 +906,31 @@
   socBtn.addEventListener('click', () => { if (!booted) return boot(); openSocial(''); });
   socInput.addEventListener('change', () => {
     const f = socInput.files?.[0]; $('#socPrompt')?.remove(); if (!f) return;
-    if (socBrandHint) return uploadSocial(f, socBrandHint);
+    if (socBrandHint) return askTopic(f, socBrandHint);
     const box = document.createElement('div'); box.id = 'socPick';
     box.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(2,6,12,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px';
     const h = document.createElement('div'); h.textContent = 'POST TO WHICH BRAND?'; h.style.cssText = 'font:700 14px Orbitron,sans-serif;letter-spacing:.2em;color:#3fe0ff;margin-bottom:6px'; box.appendChild(h);
     for (const [label, val] of BRAND_BTNS) {
       const b = document.createElement('button'); b.textContent = label;
       b.style.cssText = 'width:min(320px,86vw);padding:16px;font:700 15px Orbitron,sans-serif;letter-spacing:.15em;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff';
-      b.onclick = () => { box.remove(); uploadSocial(f, val); }; box.appendChild(b);
+      b.onclick = () => { box.remove(); askTopic(f, val); }; box.appendChild(b);
     }
     const x = document.createElement('button'); x.textContent = 'CANCEL'; x.style.cssText = 'padding:10px 20px;background:none;color:#7aa;border:1px solid #356'; x.onclick = () => { box.remove(); socInput.value = ''; }; box.appendChild(x);
     document.body.appendChild(box);
   });
-  function uploadSocial(f, brand) {
+  function askTopic(f, brand) {
+    const box = document.createElement('div'); box.id = 'socTopic';
+    box.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(2,6,12,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px';
+    const h = document.createElement('div'); h.textContent = 'WHAT IS THE POST ABOUT?'; h.style.cssText = 'font:700 14px Orbitron,sans-serif;letter-spacing:.2em;color:#3fe0ff';
+    const t = document.createElement('textarea'); t.placeholder = 'Topic (e.g. carbon fibre wrap, new sub install)'; t.rows = 3;
+    t.style.cssText = 'width:min(360px,86vw);padding:12px;font:16px system-ui;background:#041422;color:#cfefff;border:1px solid #3fe0ff';
+    const go = (topic) => { box.remove(); uploadSocial(f, brand, topic); };
+    const ok = document.createElement('button'); ok.textContent = 'CONTINUE'; ok.style.cssText = 'width:min(360px,86vw);padding:16px;font:700 15px Orbitron,sans-serif;letter-spacing:.15em;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff'; ok.onclick = () => go(t.value.trim());
+    const sk = document.createElement('button'); sk.textContent = 'NO TOPIC, YOU PICK'; sk.style.cssText = 'padding:10px 20px;background:none;color:#7aa;border:1px solid #356'; sk.onclick = () => go('');
+    const x = document.createElement('button'); x.textContent = 'CANCEL'; x.style.cssText = sk.style.cssText; x.onclick = () => { box.remove(); socInput.value = ''; };
+    box.append(h, t, ok, sk, x); document.body.appendChild(box); setTimeout(() => t.focus(), 50);
+  }
+  function uploadSocial(f, brand, topic) {
     socInput.value = ''; socBrandHint = ''; setState('thinking'); addActivity(`Social: uploading ${f.name}`);
     const x = new XMLHttpRequest();
     x.open('POST', '/api/media?name=' + encodeURIComponent(f.name) + '&label=' + encodeURIComponent(brand || 'social'));
@@ -928,7 +940,7 @@
       if (x.status === 401) return location.reload();
       if (x.status !== 200) { setState('idle'); const m = 'The upload failed: ' + (() => { try { return JSON.parse(x.responseText).error; } catch { return x.status; } })(); addLog('system', m); return caption(m); }
       let file = ''; try { file = JSON.parse(x.responseText).file; } catch {}
-      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}. Do the whole thing now without asking me anything: check what it shows, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`, true);
+      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}${topic ? `. Topic of the post (from the Owner, build the headline and caption around it): ${topic}` : ''}. Do the whole thing now without asking me anything: check what it shows, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`, true);
     };
     x.onerror = () => { setState('idle'); const m = 'The upload failed (connection). Try again on a better signal.'; addLog('system', m); caption(m); };
     x.send(f);

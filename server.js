@@ -2526,6 +2526,13 @@ app.post('/social-approve', express.urlencoded({ extended: false }), async (req,
   if (!d.seen) { d.seen = true; return socPage(res, 'Preview', socView(d, k, 'Look it over, then tap Post it.')); }
   socDone(res, await socSend(d));
 });
+// Drafts list for the HUD button (PIN-protected like the rest): each pending draft links to its signed preview.
+app.get('/socials', (_req, res) => {
+  const l = (state.social || []).slice().reverse();
+  const row = d => `<div style="border:1px solid #2a5d78;border-radius:8px;padding:12px;margin:10px 0;max-width:520px"><b>${esc(d.brand)}</b> <span style="opacity:.6">${esc((d.channelNames || []).join(', '))} · ${esc(d.status)}</span><div style="white-space:pre-wrap;margin:8px 0">${esc(String(d.text || '').slice(0, 300))}</div>${d.status === 'pending' ? `<a style="color:#7fe3ff" href="/social-approve?id=${esc(d.id)}&k=${socSig(d.id)}">Review / approve</a>` : ''}</div>`;
+  const pend = l.filter(d => d.status === 'pending'), rest = l.filter(d => d.status !== 'pending').slice(0, 10);
+  socPage(res, 'Social drafts', `<h2 style="margin-top:0">Social drafts waiting: ${pend.length}</h2>${pend.map(row).join('') || '<p>No drafts waiting. If you expected one, it may have been lost in a redeploy; ask Jarvis to make it again.</p>'}${rest.length ? '<h3>Recent</h3>' + rest.map(row).join('') : ''}<p><a style="color:#7fe3ff" href="/">Back to Jarvis</a></p>`);
+});
 // Alert button target: signed, watch-only (never places a buy).
 app.get('/watch-add', async (req, res) => {
   const sym = String(req.query.s || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12), k = String(req.query.k || '');
