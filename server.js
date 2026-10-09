@@ -2414,7 +2414,8 @@ const socFind = id => { const l = state.social || []; return id ? l.find(d => d.
 async function socSend(d) {
   const b = social.findBrand(d.brand); if (!b) return `No Buffer key for ${d.brand} any more.`;
   const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, videoUrl: d.videoUrl, channelIds: d.channelIds, whenISO: d.whenISO });
-  const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'failed'; d.sentAt = Date.now(); d.result = res; saveState();
+  const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'pending'; d.sentAt = Date.now(); if (!ok) d.lastError = 'Buffer: ' + (res.map(r => r.error).filter(Boolean)[0] || 'no answer'); // a failed post stays waiting so he can retry it
+  d.result = res; saveState();
   const bad = res.filter(r => !r.ok).map((r, i) => `${(d.channelNames || [])[d.channelIds.indexOf(r.ch)] || r.ch}: ${r.error}`);
   return `${ok ? `Queued on ${ok} of ${res.length} channel${res.length > 1 ? 's' : ''} for ${d.brand}${d.whenISO ? ' at the time you set' : ' (next slot in Buffer)'}.` : 'Nothing was posted.'}${bad.length ? ' Problem: ' + bad.join('; ') : ''}`;
 }
@@ -2507,7 +2508,7 @@ const socView = (d, k, note = '') => {
 <h3 style="margin:0">PREVIEW: ${esc(d.brand)}</h3><div style="opacity:.7;margin-bottom:6px">Posts to: ${esc((d.channelNames || []).join(', '))}${note ? `<br><b style="color:#7fe3ff">${esc(note)}</b>` : ''}</div>${warn}${chans}
 <form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="k" value="${esc(k)}"><div style="opacity:.7;margin:10px 0 4px">Caption (edit it, then Save)</div><textarea name="text">${esc(d.text)}</textarea><div><button name="act" value="save" class="sec">Save changes</button> <button name="act" value="post">Post it</button> <button name="act" value="skip" class="sec">Delete</button> <button name="act" value="retry" class="sec">Try again</button></div></form>`;
 };
-const socDone = (res, msg) => socPage(res, 'Social', `${esc(msg)}<script>try{parent.postMessage({social:'done'},'*')}catch(e){}</script>`);
+const socDone = (res, msg, ok = true) => socPage(res, ok ? 'Social' : 'Not posted', ok ? `${esc(msg)}<script>try{parent.postMessage({social:'done'},'*')}catch(e){}</script>` : `<h3 style="color:#ff8b8b">It did not post</h3><p style="white-space:pre-wrap">${esc(msg)}</p><p style="opacity:.7">Nothing was sent. Screenshot this and send it to Claude, or go back and try again.</p><p><a style="color:#7fe3ff" href="javascript:history.back()">Back to the preview</a></p>`);
 const socGate = (req, res) => {
   const b = req.method === 'POST' ? req.body : req.query, id = String(b?.id || ''), k = String(b?.k || ''), want = socSig(id);
   if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) { socPage(res, 'Social', 'Bad or expired link.', 400); return null; }
@@ -2531,7 +2532,9 @@ app.post('/social-approve', express.urlencoded({ extended: false }), async (req,
     return socDone(res, 'Deleted. Rebuilding the draft now, a new preview will open in a moment.');
   }
   if (!d.seen) { d.seen = true; return socPage(res, 'Preview', socView(d, k, 'Look it over, then tap Post it.')); }
-  socDone(res, await socSend(d));
+  let out; try { out = await socSend(d); } catch (e) { out = `Error: ${e.message}`; d.status = 'pending'; }
+  console.log(`  social post ${d.id} (${d.brand}): ${out}`);
+  socDone(res, out, d.status === 'posted');
 });
 // Drafts list for the HUD button (PIN-protected like the rest): each pending draft links to its signed preview.
 app.get('/socials', (_req, res) => {
