@@ -2413,7 +2413,7 @@ const socSig = id => crypto.createHmac('sha256', SECRET).update('social:' + id).
 const socFind = id => { const l = state.social || []; return id ? l.find(d => d.id === id) : [...l].reverse().find(d => d.status === 'pending'); };
 async function socSend(d) {
   const b = social.findBrand(d.brand); if (!b) return `No Buffer key for ${d.brand} any more.`;
-  const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, videoUrl: d.videoUrl, channelIds: d.channelIds, whenISO: d.whenISO });
+  const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, videoUrl: d.videoUrl, channelIds: d.channelIds, services: (d.channelNames || []).map(n => String(n).split(' ')[0]), whenISO: d.whenISO });
   const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'pending'; d.sentAt = Date.now(); if (!ok) d.lastError = 'Buffer: ' + (res.map(r => r.error).filter(Boolean)[0] || 'no answer'); // a failed post stays waiting so he can retry it
   d.result = res; saveState();
   const bad = res.filter(r => !r.ok).map((r, i) => `${(d.channelNames || [])[d.channelIds.indexOf(r.ch)] || r.ch}: ${r.error}`);

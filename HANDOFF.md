@@ -466,3 +466,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Post preview (2026-10-09, maintenance)
 - server.js socView/socCard/socWarn/socGate; GET /social-approve marks d.seen; POST acts save|post|skip (post with edited text saves it first; first post tap without seen shows the preview). social_approve (voice) refuses until d.seen. Client showSocialPreview(url) iframe overlay in app.js; page postMessage {social:'done'} closes it.
+
+## Buffer post metadata (2026-10-09, maintenance)
+- Buffer rejects posts without a per-network type: social.js `meta()` adds `metadata: { facebook: { type: post } }`, `{ instagram: { type: post|reel, shouldShareToFeed: true } }` (reel when video), `{ youtube: { title (first line, max 100), categoryId "26", privacy public, madeForKids false } }`. Instagram shape is from Buffer's own example; facebook/youtube shapes come from other projects' integrations (unverified against Buffer docs). If Buffer complains about a field, the preview now shows its message.

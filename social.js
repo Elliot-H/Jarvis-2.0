@@ -29,10 +29,18 @@ export async function channelsFor(brand) {
   cache.set(brand.id, { at: Date.now(), list }); return list;
 }
 // Create the post on each channel. whenISO (UTC) schedules it; without it the post goes to the next queue slot.
-export async function publish(brand, { text, imageUrl, videoUrl, channelIds, whenISO }) {
+// Buffer wants a post type per network (error seen: "Facebook posts require a type (post, story, or reel)"). Shapes from Buffer's own example (instagram) and published integrations (facebook, youtube); an unknown field comes back as Buffer's error text.
+const meta = (service, { videoUrl, text }) => {
+  const s = String(service || '').toLowerCase();
+  if (s.includes('facebook')) return 'metadata: { facebook: { type: post } }';
+  if (s.includes('instagram')) return `metadata: { instagram: { type: ${videoUrl ? 'reel' : 'post'}, shouldShareToFeed: true } }`;
+  if (s.includes('youtube')) return `metadata: { youtube: { title: ${JSON.stringify(String(text).split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 100) || 'New video')}, categoryId: "26", privacy: public, madeForKids: false } }`;
+  return '';
+};
+export async function publish(brand, { text, imageUrl, videoUrl, channelIds, services = [], whenISO }) {
   const out = [];
-  for (const ch of channelIds) {
-    const q = `mutation { createPost(input: { text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch)}, schedulingType: automatic, mode: ${whenISO ? 'customScheduled' : 'addToQueue'}${whenISO ? `, dueAt: ${JSON.stringify(whenISO)}` : ''}${videoUrl ? `, assets: [{ video: { url: ${JSON.stringify(videoUrl)} } }]` : imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''} }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`;
+  for (const [i, ch] of channelIds.entries()) {
+    const q = `mutation { createPost(input: { text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch)}, schedulingType: automatic, mode: ${whenISO ? 'customScheduled' : 'addToQueue'}${whenISO ? `, dueAt: ${JSON.stringify(whenISO)}` : ''}${videoUrl ? `, assets: [{ video: { url: ${JSON.stringify(videoUrl)} } }]` : imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}${meta(services[i], { videoUrl, text }) ? ', ' + meta(services[i], { videoUrl, text }) : ''} }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`;
     try { const d = await gql(brand.key, q), r = d.createPost || {}; out.push(r.post ? { ch, ok: true, id: r.post.id, dueAt: r.post.dueAt } : { ch, ok: false, error: r.message || 'no result' }); }
     catch (e) { out.push({ ch, ok: false, error: e.message }); }
   }
