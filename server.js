@@ -2417,7 +2417,7 @@ async function socSend(d) {
   const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'pending'; d.sentAt = Date.now(); if (!ok) d.lastError = 'Buffer: ' + (res.map(r => r.error).filter(Boolean)[0] || 'no answer'); // a failed post stays waiting so he can retry it
   d.result = res; saveState();
   const bad = res.filter(r => !r.ok).map((r, i) => `${(d.channelNames || [])[d.channelIds.indexOf(r.ch)] || r.ch}: ${r.error}`);
-  return `${ok ? `Queued on ${ok} of ${res.length} channel${res.length > 1 ? 's' : ''} for ${d.brand}${d.whenISO ? ' at the time you set' : ' (next slot in Buffer)'}.` : 'Nothing was posted.'}${bad.length ? ' Problem: ' + bad.join('; ') : ''}`;
+  return `${ok ? `Queued on ${ok} of ${res.length} channel${res.length > 1 ? 's' : ''} for ${d.brand}${d.whenISO ? ' at the time you set' : ' to publish in about a minute (check Buffer if it is not on the page by then)'}.` : 'Nothing was posted.'}${bad.length ? ' Problem: ' + bad.join('; ') : ''}`;
 }
 Object.assign(handlers, {
   social_status: async () => {

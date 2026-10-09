@@ -39,6 +39,8 @@ const meta = (service, { videoUrl, text }) => {
 };
 export async function publish(brand, { text, imageUrl, videoUrl, channelIds, services = [], whenISO }) {
   const out = [];
+  // No time given = publish about a minute from now (Buffer's documented customScheduled). The queue mode only posts at the channel's saved posting-schedule slots, so a post can sit there for hours or forever. SOCIAL_QUEUE=1 brings the queue back.
+  if (!whenISO && process.env.SOCIAL_QUEUE !== '1') whenISO = new Date(Date.now() + 75e3).toISOString();
   for (const [i, ch] of channelIds.entries()) {
     const q = `mutation { createPost(input: { text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch)}, schedulingType: automatic, mode: ${whenISO ? 'customScheduled' : 'addToQueue'}${whenISO ? `, dueAt: ${JSON.stringify(whenISO)}` : ''}${videoUrl ? `, assets: [{ video: { url: ${JSON.stringify(videoUrl)} } }]` : imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''}${meta(services[i], { videoUrl, text }) ? ', ' + meta(services[i], { videoUrl, text }) : ''} }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`;
     try { const d = await gql(brand.key, q), r = d.createPost || {}; out.push(r.post ? { ch, ok: true, id: r.post.id, dueAt: r.post.dueAt } : { ch, ok: false, error: r.message || 'no result' }); }
