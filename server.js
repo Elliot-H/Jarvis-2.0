@@ -963,7 +963,7 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|silent mode|death mode|text only|text-only|no mic,? no talk(ing)?|no talk(ing)? no mic|no more (talking|voice)|mute (your )?voice)\b/;
+const SILENT_ON = /\b(go silent|be silent|silent mode|death mode|text only|text-only|no mic,? no talk(ing)?|no talk(ing)? no mic|no more (talking|voice)|mute (your )?voice|(i )?need a minute|(give|gimme) me a (minute|moment|sec(ond)?)|need a minute (please|here)?)\b/;
 const SILENT_OFF = /\b(silent (mode )?(is )?off|death mode (is )?off|(turn|switch|take) (it |the |your )?(silent|death) mode off|(end|stop|cancel|disable|exit|leave) (the |your )?(silent|death) ?(mode)?|(turn|switch|take) off (the |your )?(silent|death) mode|you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again|talk again|unmute|un mute|voice back)\b/;
 // Silent mode ends by itself after SILENT_MAX_HOURS (default 8) so it can never get stuck on.
 function silentActive() {
@@ -980,7 +980,7 @@ function silentAnswer(text) {
   if (!on && !off) return false;
   setSilent(on);
   broadcast({ type: 'log', role: 'user', text }); remember('user', text);
-  const reply = on ? 'Silent mode on. Replies in text only, no wake-up calls. Say "silent mode off" or tap the TEXT ONLY chip to end it. It also ends by itself after 8 hours.' : 'Silent mode off. Voice is back on, sir.';
+  const reply = on ? 'Silent mode on. Replies in text only, no wake-up calls, phone alerts muted. Say "silent mode off" or tap the TEXT ONLY chip to end it. It also ends by itself after 8 hours.' : 'Silent mode off. Voice and phone alerts are back on, sir.';
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
@@ -1159,6 +1159,7 @@ function deliver(text, title = 'Jarvis', question = false) {
 }
 // Jarvis actually saying the line: Fish JARVIS voice clip (cached by text) sent as a Telegram audio message. Needs FISH_API_KEY + Telegram; otherwise silent no-op.
 async function sendVoiceClip(title, text) {
+  if (silentActive()) return;   // silent mode mutes phone alerts too
   if (!process.env.FISH_API_KEY || !process.env.TELEGRAM_BOT_TOKEN) return;
   const chat = await tgChatId(); if (!chat) return;
   const file = alertFile(text);
@@ -1806,6 +1807,7 @@ function rememberRec(link, title, body) {
   } catch {}
 }
 async function push(title, body, link, force = false) {
+  if (silentActive()) { console.log(`silent mode: held back phone alert "${title}"`); return null; }   // silent mode mutes every phone alert (Pushover/Telegram/ntfy), even forced ones; they resume when it ends
   if (!force && quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(body))) { console.log(`quiet mode: held back "${title}"`); return null; }
   const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first), buy = buyLink(first);
   if (watch) rememberRec(first, title, body);
@@ -2930,7 +2932,7 @@ wss.on('connection', ws => {
       try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
       state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
-    if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice is back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
+    if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice and phone alerts are back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
     if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());

@@ -1,9 +1,8 @@
 STATUS: done
-TIME: 2026-10-09T14:33:37Z
-REQUEST: Add silent/text-only mode and mic mute with voice triggers; note the maintenance credit error
+TIME: 2026-10-09T14:45:00Z
+REQUEST: Add "I need a minute" as a silent mode trigger and mute phone notifications while silent mode is on
 RESULT:
-Owner, silent mode and mic mute were already built, so I only widened the phrases.
-Saying "no mic, no talk" now mutes the mic and switches to text only. "Talk again", "unmute" and "voice back on" now end silent mode.
-Plain "mute" and "quiet mode" still mean quiet alerts, which I left alone. A muted mic cannot hear you, so wake it by tapping the mic button.
+Owner, "I need a minute", "give me a minute" and "need a minute" now turn on silent mode, and "voice back on" ends it.
+While silent mode is on, every phone alert is held back, including Pushover, Telegram and ntfy, whatever phrase started it. Held alerts are dropped, not queued, and they come back when silent mode ends.
+Silent mode still ends by itself after 8 hours. Plain "quiet mode" still means the separate quiet-alerts mode, which I left alone.
 This goes live on the next Railway build, no APK reinstall. Syntax checked only.
-The credit error is not fixable from the repo: please check that the Anthropic key behind the maintenance path in Railway has credit or is replaced.
