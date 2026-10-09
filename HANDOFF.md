@@ -451,3 +451,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Spoken arrive/leave when the app is closed (2026-10-06)
 - `deliver()` (server.js): app connected = spoken live (unchanged). App not connected = every line (arrive, leave, vehicle-data offer, questions) is now held 10 min and spoken aloud when the app opens, AND sent as a Jarvis-voice (Fish) audio clip via Telegram `sendAudio` (`sendVoiceClip`, needs FISH_API_KEY + TELEGRAM_BOT_TOKEN; clip cached in data/). The normal push still goes out. A push alone can't speak; the clip plays in the Telegram chat. Server only, no APK reinstall. Syntax-checked only.
+
+## Silent/mic phrases widened (2026-10-09, maintenance)
+- Silent mode and mic mute already existed (see above). Added triggers: "no mic no talk" (client mutes the mic AND sends the text to the server, which turns silent mode on), "talk again", "unmute", "voice back" now end silent mode. Bare "mute"/"quiet mode" still mean Quiet (no unprompted output), unchanged. Mic unmute is by tapping the mic button (a muted mic cannot hear a voice command). Web/server only, no APK reinstall.
+- Maintenance routine failure "credit balance is too low": the routine runs on the Owner's Claude plan via MAINT_ROUTINE_TOKEN; if the error shows, the key in use is an API key with no credit. Owner must check which Anthropic key the Railway fire path uses; not fixable from the repo.

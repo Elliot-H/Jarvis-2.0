@@ -591,7 +591,7 @@
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   // Hard mute: "stop listening" shuts the recognizer, the wake engine and the mic meter. Only a manual tap (mic button, core, SPACE) lifts it; kept across reloads.
-  const MUTE_RE = /\b(stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|deaf mode|(go|enter|turn on|activate) deaf( mode)?|mic(rophone)? (off|mute|muted)|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
+  const MUTE_RE = /\b(no mic,? no talk(ing)?|no talk(ing)?,? no mic|stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|deaf mode|(go|enter|turn on|activate) deaf( mode)?|mic(rophone)? (off|mute|muted)|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
   function paintMute() {
     document.body.dataset.muted = muted ? '1' : '';
     if (muted) { chip('#chipMic', 'bad', 'MIC MUTED'); $('#coreState').textContent = 'MUTED'; $('#coreHint').textContent = 'Mic is off. Tap the mic button to wake ' + cfg.userTitle; }
@@ -868,7 +868,7 @@
   function submit(text) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
-    if (MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); muteMic(); return; }
+    if (MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
     if (LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);

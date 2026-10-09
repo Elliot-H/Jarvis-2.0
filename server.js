@@ -963,8 +963,8 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|silent mode|death mode|text only|text-only|no more (talking|voice)|mute (your )?voice)\b/;
-const SILENT_OFF = /\b(silent (mode )?(is )?off|death mode (is )?off|(turn|switch|take) (it |the |your )?(silent|death) mode off|(end|stop|cancel|disable|exit|leave) (the |your )?(silent|death) ?(mode)?|(turn|switch|take) off (the |your )?(silent|death) mode|you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again)\b/;
+const SILENT_ON = /\b(go silent|be silent|silent mode|death mode|text only|text-only|no mic,? no talk(ing)?|no talk(ing)? no mic|no more (talking|voice)|mute (your )?voice)\b/;
+const SILENT_OFF = /\b(silent (mode )?(is )?off|death mode (is )?off|(turn|switch|take) (it |the |your )?(silent|death) mode off|(end|stop|cancel|disable|exit|leave) (the |your )?(silent|death) ?(mode)?|(turn|switch|take) off (the |your )?(silent|death) mode|you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again|talk again|unmute|un mute|voice back)\b/;
 // Silent mode ends by itself after SILENT_MAX_HOURS (default 8) so it can never get stuck on.
 function silentActive() {
   if (!state.silent) return false;

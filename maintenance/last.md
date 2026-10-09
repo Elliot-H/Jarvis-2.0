@@ -1,9 +1,9 @@
 STATUS: done
-TIME: 2026-10-07T23:55:00Z
-REQUEST: Notification says "I have a question for you" but when opened, Jarvis never asks it
+TIME: 2026-10-09T14:33:37Z
+REQUEST: Add silent/text-only mode and mic mute with voice triggers; note the maintenance credit error
 RESULT:
-Owner, the question was being held and only spoken inside the startup greeting. Tapping the notification usually just brought the already-running app back to the front, which never sends that greeting, so the question was dropped.
-Now the app tells Jarvis every time it comes back to the front or reconnects, and he asks whatever is waiting right away. The question also restarts its answer window, so your yes or no counts.
-Held lines are now saved to disk (a redeploy no longer erases them), several can queue instead of the newest wiping the older one, and a question keeps for 45 minutes instead of 10.
-Also fixed the notification's "open" link, which pointed at the wrong app package.
-Goes live on the next Railway build, no APK reinstall. Server boot smoke-tested; not tested on the phone.
+Owner, silent mode and mic mute were already built, so I only widened the phrases.
+Saying "no mic, no talk" now mutes the mic and switches to text only. "Talk again", "unmute" and "voice back on" now end silent mode.
+Plain "mute" and "quiet mode" still mean quiet alerts, which I left alone. A muted mic cannot hear you, so wake it by tapping the mic button.
+This goes live on the next Railway build, no APK reinstall. Syntax checked only.
+The credit error is not fixable from the repo: please check that the Anthropic key behind the maintenance path in Railway has credit or is replaced.
