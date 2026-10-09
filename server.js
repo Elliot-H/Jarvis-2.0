@@ -703,12 +703,15 @@ async function runTalk({ text, promptWithContext, chatPrompt, spoken, origin, la
       prompt: promptWithContext,
       tools: TALK_TOOLS,
       budgetUsd: CHAT_BUDGET,
+      maxRounds: /^Social post:/i.test(text) ? 14 : 6, // the social flow is describe, edit, draft: more steps than a normal question
       signal: ac.signal,
       onTool: (name, args) => { console.log(`  tool: ${name}`); if (!name.startsWith('openrouter')) broadcast({ type: 'activity', text: prettyTool(name, args) }); },
       run: async (name, args) => {
         if (name === 'use_workshop') { await handlers.use_workshop(); return { text: 'Switching to workshop mode.', stop: true }; }
         if (!handlers[name]) return `Unknown tool ${name}.`;
-        return handlers[name](args);
+        const out = await handlers[name](args);
+        if (/^(media|social)_/.test(name)) console.log(`  tool result ${name}: ${String(out && out.text || out).replace(/\s+/g, ' ').slice(0, 220)}`);
+        return out;
       }
     });
   } finally {
