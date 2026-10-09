@@ -1141,7 +1141,7 @@ function dlog(event, detail) {
 let pendingSay = null;
 // Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
 function deliver(text, title = 'Jarvis', question = false) {
-  text = text.replace(/\s+/g, ' ').trim(); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
+  text = tripDedupe(text.replace(/\s+/g, ' ').trim()); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
   if (clients.size) {
@@ -1221,7 +1221,7 @@ function onMove() {
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
-    const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : null; // only an ANSWERED vehicle-start question counts as handled
+    const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : (tripOn() ? { answered: true } : null); // an ANSWERED departure question (this trip) counts as handled, whatever place it recorded
     dlog('leave', { place: prev.name, vehicleHandled: !!dep, arrivedAt: pl ? pl.name : null, quiet: quietNow(), clients: clients.size });
     if (!dep) parts.push(...eventLines('leave', prev.name, Math.random, true));
     const dest = pl || dep ? null : guessNext(prevKey);
@@ -1236,6 +1236,7 @@ function onMove() {
     if (!pl && !dep && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
   }
   if (pl && rearmed) { // arrived somewhere
+    state.trip = null;   // trip over: the next start asks again
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
@@ -1270,7 +1271,7 @@ async function checklistAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 3 * 60e3 || (CHECK_CMD.test(t) && !CHECK_NO.test(t))) return false; // stale or an unrelated request: let it through, keep nothing
-  const done = () => { state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
+  const done = () => { tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
   if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + vscanTail()); }
   if (/^(yes|yeah|yep|yup|i do|i did)$/.test(t)) { q.at = Date.now(); saveState(); return say('What is it, sir?'); }
   // Destination: the one guessed at departure, else a saved place named in the answer ("...for the camden house").
@@ -1288,7 +1289,7 @@ async function checklistAnswer(q, text) {
   if (!dest) { q.items = [...(q.items || []), ...items]; q.at = Date.now(); saveState(); return say(`Got ${listJoin(items)}. Where are you headed, sir?`); }
   const all = [...(q.items || []), ...items];
   for (const it of all) await handlers.bring_add({ place: dest.name, item: it });
-  state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState();
+  tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState();
   return say(`Noted, sir. ${listJoin(all)} for ${dest.name}.` + vscanTail());
 }
 // Yes / no to "Headed home, sir?"
@@ -1313,7 +1314,24 @@ function hereNow() {
   const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 6 * 3600e3) return null;
   const p = placeFor(L, state.at || ''); return p ? state.places.find(x => x.name === p.name) || p : null;
 }
+// ONE trip = one set of questions. From the first departure question until he arrives somewhere (max TRIP_MS), once he has answered ANY departure
+// question (engine start, checklist, destination) no other departure question is asked, and a reminder sentence already spoken is not spoken again.
+const TRIP_MS = 45 * 60e3;
+const tripOn = () => { const t = state.trip; return !!t && !!t.answeredAt && Date.now() - t.answeredAt < TRIP_MS; };
+function tripAnswered() { const t = state.trip && Date.now() - state.trip.at < TRIP_MS ? state.trip : (state.trip = { at: Date.now(), said: [] }); t.answeredAt = Date.now(); }
+function tripDedupe(text) {
+  const t = state.trip; if (!t || Date.now() - t.at > TRIP_MS) return text;
+  const said = new Set(t.said || []);
+  const keep = String(text).split(/(?<=[.?!])\s+/).filter(sn => {
+    const k = sn.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    if (k.length < 25 || !/bring|forget|remember|before you go|headed|leaving|grab|safe travels/.test(k)) return true;
+    if (said.has(k)) return false; said.add(k); return true;
+  });
+  t.said = [...said].slice(-40); return keep.join(' ');
+}
 function vehicleDeparture(v) {
+  if (tripOn()) return '';   // already answered for this trip: never ask again
+  state.trip = { at: Date.now(), said: [], answeredAt: 0 };
   const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
   if (nextGuess) opts.push(nextGuess.name); // only a real guess is offered; never list every saved place
@@ -1367,10 +1385,10 @@ async function vscanAnswer(q, text) {
 }
 async function departAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
-  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
-  const finish = () => { state.pendingQ = null; if (state.departed) state.departed.answered = true; if (q.from) state.lastCheck = { from: q.from, at: Date.now(), answered: true }; saveState(); };
+  const say = reply => { reply = tripDedupe(reply) || 'Very good, sir.'; broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  const finish = () => { tripAnswered(); state.pendingQ = null; if (state.departed) state.departed.answered = true; if (q.from) state.lastCheck = { from: q.from, at: Date.now(), answered: true }; saveState(); };
   if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 10) { state.pendingQ = null; saveState(); return false; }
-  if (DEPART_NO.test(t)) { state.pendingQ = null; state.departed = null; saveState(); return say('Very good, sir.'); }
+  if (DEPART_NO.test(t)) { state.pendingQ = null; state.departed = null; state.trip = null; saveState(); return say('Very good, sir.'); }
   let dest = state.places.find(p => p.name !== q.from && new RegExp(`\\b${placeKey(p.name).replace(/[^a-z0-9 ]/g, '')}\\b`).test(t)) || findPlace(t.replace(/^(?:i'?m )?(?:going |headed |heading |leaving )?(?:to |for )?(?:the )?/, ''));
   if (dest && q.from && dest.name === q.from) dest = null;
   if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
@@ -1482,7 +1500,7 @@ function driveFix(lat, lon, speedMs) { // every phone position (background /api/
 }
 function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
   const now = Date.now(), d = state.departed;
-  const asked = (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
+  const asked = tripOn() || (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
   const qFresh = !!state.pendingQ && now - (state.pendingQ.at || 0) < 3 * 60e3;   // answers are only accepted for 3 min; an older question must not block this one (Oct 4: a stale one silenced the 12:18 departure)
   if (state.pendingQ && !qFresh) state.pendingQ = null;
   dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: qFresh, nav: navLive(), at: state.at || null });
