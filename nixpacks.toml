@@ -1,3 +1,6 @@
-# ffmpeg for editing post videos (media.js). "..." keeps the default Node packages.
+# Node 22: sharp (photo editing) needs Node 20.9+. ffmpeg for editing post videos (media.js). "..." keeps the default Node packages.
 [phases.setup]
 nixPkgs = ["...", "ffmpeg"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
