@@ -870,6 +870,7 @@
     if (!text) return;
     if (MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
+    if (SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
     if (LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);
     setState('thinking');
@@ -886,6 +887,51 @@
   }
   setInterval(() => { if (booted) sendLocation(); }, 60000); // once a minute so arrive/leave is noticed with the app open
 
+
+
+  // ======================= social button: pick a photo/video, Jarvis edits, captions, adds music and drafts the post =======================
+  const socInput = $('#socInput'), socBtn = $('#socBtn');
+  const SOC_RE = /\b(post (this|that|it|these) (on|to|for) (the |my )?(socials?|social media)|(make|do|create) (me )?(a )?social( media)? post|(open|use|hit|press) (the )?social( media)? button|(put|share) (this|that|it) on (the )?(socials?|social media))\b/i;
+  const BRAND_BTNS = [['DEFIANT', 'Defiant'], ['MYONLINECARGUY', 'MyOnlineCarGuy'], ['NEXUS', 'Nexus'], ['MYGURU', 'MyGuru'], ['YOU PICK', '']];
+  let socBrandHint = '';
+  function openSocial(brand) { socBrandHint = brand || ''; try { socInput.click(); } catch {} if (!navigator.userActivation?.isActive) showSocPrompt(); }
+  function showSocPrompt() {
+    if ($('#socPrompt')) return;
+    const b = document.createElement('button'); b.id = 'socPrompt'; b.textContent = 'TAP TO PICK PHOTO / VIDEO';
+    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;padding:22px 30px;font:700 16px Orbitron,sans-serif;letter-spacing:.2em;background:#041422;color:#3fe0ff;border:2px solid #3fe0ff;box-shadow:0 0 24px rgba(63,224,255,.5)';
+    b.onclick = () => { b.remove(); socInput.click(); };
+    document.body.appendChild(b); setTimeout(() => b.remove(), 20000);
+  }
+  socBtn.addEventListener('click', () => { if (!booted) return boot(); openSocial(''); });
+  socInput.addEventListener('change', () => {
+    const f = socInput.files?.[0]; $('#socPrompt')?.remove(); if (!f) return;
+    if (socBrandHint) return uploadSocial(f, socBrandHint);
+    const box = document.createElement('div'); box.id = 'socPick';
+    box.style.cssText = 'position:fixed;inset:0;z-index:70;background:rgba(2,6,12,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px';
+    const h = document.createElement('div'); h.textContent = 'POST TO WHICH BRAND?'; h.style.cssText = 'font:700 14px Orbitron,sans-serif;letter-spacing:.2em;color:#3fe0ff;margin-bottom:6px'; box.appendChild(h);
+    for (const [label, val] of BRAND_BTNS) {
+      const b = document.createElement('button'); b.textContent = label;
+      b.style.cssText = 'width:min(320px,86vw);padding:16px;font:700 15px Orbitron,sans-serif;letter-spacing:.15em;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff';
+      b.onclick = () => { box.remove(); uploadSocial(f, val); }; box.appendChild(b);
+    }
+    const x = document.createElement('button'); x.textContent = 'CANCEL'; x.style.cssText = 'padding:10px 20px;background:none;color:#7aa;border:1px solid #356'; x.onclick = () => { box.remove(); socInput.value = ''; }; box.appendChild(x);
+    document.body.appendChild(box);
+  });
+  function uploadSocial(f, brand) {
+    socInput.value = ''; socBrandHint = ''; setState('thinking'); addActivity(`Social: uploading ${f.name}`);
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/media?name=' + encodeURIComponent(f.name) + '&label=' + encodeURIComponent(brand || 'social'));
+    x.setRequestHeader('Content-Type', f.type || 'application/octet-stream');
+    x.upload.onprogress = e => { if (e.lengthComputable) caption(`Uploading ${Math.round(e.loaded / e.total * 100)}%`); };
+    x.onload = () => {
+      if (x.status === 401) return location.reload();
+      if (x.status !== 200) { setState('idle'); const m = 'The upload failed: ' + (() => { try { return JSON.parse(x.responseText).error; } catch { return x.status; } })(); addLog('system', m); return caption(m); }
+      let file = ''; try { file = JSON.parse(x.responseText).file; } catch {}
+      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}. Do the whole thing now without asking me anything: look at it, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`);
+    };
+    x.onerror = () => { setState('idle'); const m = 'The upload failed (connection). Try again on a better signal.'; addLog('system', m); caption(m); };
+    x.send(f);
+  }
 
   // ======================= camera: photo analysis =======================
   const camInput = $('#camInput'), camBtn = $('#camBtn');

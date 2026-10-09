@@ -2434,6 +2434,7 @@ Object.assign(handlers, {
     let whenISO = ''; if (when) { const t = Date.parse(when); if (t > Date.now() + 60e3) whenISO = new Date(t).toISOString(); }
     const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', videoUrl, channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now() };
     (state.social ||= []).push(d); state.social = state.social.slice(-30); saveState();
+    if (process.env.SOCIAL_AUTOPOST === '1') return `Draft ${d.id}: "${text}". ` + await socSend(d);
     const base = publicBase(); if (base) push(`Post for ${b.id}?`, text.slice(0, 400) + `\n(${d.channelNames.join(', ')})`, `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}`).catch(() => {});
     return `Draft ${d.id} for ${b.id} on ${d.channelNames.join(', ')}: "${text}". Read it to the Owner and ask whether to post it. Only social_approve after he says yes.`;
   },
@@ -2444,13 +2445,23 @@ Object.assign(handlers, {
 });
 
 Object.assign(handlers, {
-  media_list: async () => { const l = media.listRaw(10); return l.length ? 'Uploaded, newest first: ' + l.map(x => `${x.file} (${x.kind}, ${new Date(x.at).toLocaleString('en-US', { timeZone: process.env.TZ || 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})`).join('; ') + '.' : 'Nothing uploaded yet. The Owner adds photos and videos at /media on the Jarvis site.'; },
-  media_prepare: async ({ file, shape, headline, sub, brand, start, seconds }) => {
+  media_list: async () => { const mu = media.listMusic().length, l = media.listRaw(10); return `Music library: ${mu ? mu + ' track' + (mu > 1 ? 's' : '') : 'empty (he can add audio files at /media)'}. ` + (l.length ? 'Uploaded, newest first: ' + l.map(x => `${x.file} (${x.kind}, ${new Date(x.at).toLocaleString('en-US', { timeZone: process.env.TZ || 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})`).join('; ') + '.' : 'Nothing uploaded yet. The Owner adds photos and videos at /media on the Jarvis site or with the SOCIAL button.'); },
+  media_describe: async ({ file, focus }) => {
     const f = media.findRaw(file); if (!f) return `No uploaded file matches "${file || 'latest'}". Use media_list.`;
     try {
-      const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline, start, seconds, brand }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline, sub, brand });
+      let image, extra = '';
+      if (f.kind === 'video') { image = 'data:image/jpeg;base64,' + (await media.frameOf(f.file)).toString('base64'); const d = await media.durationOf(path.join(media.RAW, f.file)); extra = ` It is a video${d ? ` about ${Math.round(d)} seconds long` : ''}${await media.hasAudio(path.join(media.RAW, f.file)) ? ' with sound' : ' with no sound'}; this is a frame from it.`; }
+      else image = await media.photoSmall(f.file);
+      const r = await analyzePhoto({ image, question: `This is raw material for a social media post for a car audio, tint and customization shop and related brands. Say what the vehicle is (make, model, colour if visible), what work or product is shown, how good it looks, and what the best angle for a short punchy post would be. Mention if any face, licence plate or customer paperwork is visible.${focus ? ' Owner note: ' + focus : ''}` });
+      return `${r.spoken} ${r.details}${extra}`.slice(0, 1500);
+    } catch (e) { return `Could not look at ${f.file}: ${e.message}`; }
+  },
+  media_prepare: async ({ file, shape, headline, sub, brand, start, seconds, music }) => {
+    const f = media.findRaw(file); if (!f) return `No uploaded file matches "${file || 'latest'}". Use media_list.`;
+    try {
+      const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline, start, seconds, brand, music }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline, sub, brand });
       const base = publicBase();
-      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}.${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
+      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}${r.music ? ' with a music bed' : ''}.${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
     } catch (e) { return `Could not edit ${f.file}: ${e.message}`; }
   }
 });
@@ -2461,7 +2472,7 @@ app.post('/api/media', express.raw({ type: () => true, limit: '300mb' }), (req, 
   if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Empty upload.' });
   const file = media.saveRaw(req.body, ext, req.query.label); res.json({ ok: true, file });
 });
-app.get('/media', (_req, res) => res.send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis media</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:24px;line-height:1.5"><h2>Send Jarvis photos and videos</h2><p>Pick the raw files. Then tell Jarvis "make a post for Defiant from the latest upload".</p><input id="f" type="file" accept="image/*,video/*" multiple style="display:block;margin:14px 0;color:#cfefff"><input id="l" placeholder="What is it? (optional, e.g. tint job Audi Q5)" style="width:100%;padding:12px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px"><button id="b" style="margin-top:14px;padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Upload</button><pre id="o" style="white-space:pre-wrap"></pre><script>
+app.get('/media', (_req, res) => res.send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis media</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:24px;line-height:1.5"><h2>Send Jarvis photos and videos</h2><p>Pick the raw photos and videos. Audio files (mp3, m4a, wav) go into the music library Jarvis uses under videos. Then tell Jarvis "make a post for Defiant from the latest upload".</p><input id="f" type="file" accept="image/*,video/*,audio/*" multiple style="display:block;margin:14px 0;color:#cfefff"><input id="l" placeholder="What is it? (optional, e.g. tint job Audi Q5)" style="width:100%;padding:12px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px"><button id="b" style="margin-top:14px;padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Upload</button><pre id="o" style="white-space:pre-wrap"></pre><script>
 const o=document.getElementById('o');document.getElementById('b').onclick=async()=>{const fs=[...document.getElementById('f').files];if(!fs.length){o.textContent='Pick a file first.';return}
 for(const f of fs){o.textContent+='Uploading '+f.name+'...\\n';await new Promise(r=>{const x=new XMLHttpRequest();x.open('POST','/api/media?name='+encodeURIComponent(f.name)+'&label='+encodeURIComponent(document.getElementById('l').value));x.setRequestHeader('Content-Type',f.type||'application/octet-stream');x.upload.onprogress=e=>{o.textContent=o.textContent.replace(/\\d+%$/,'')+Math.round(e.loaded/e.total*100)+'%'};x.onload=()=>{o.textContent+='\\n'+(x.status==200?'Saved.':'Failed: '+x.responseText)+'\\n';r()};x.onerror=()=>{o.textContent+='\\nFailed (connection).\\n';r()};x.send(f)})}}
 </script></body>`));
