@@ -463,3 +463,6 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Social button (2026-10-09, maintenance)
 - public/index.html #socBtn + app.js (SOC_RE, openSocial, uploadSocial): upload to /api/media then `submit('Social post: new upload <file>, brand X ...')`. Persona section 'Social button' tells the brain the workflow. Tools media_describe (vision.js analyzePhoto on a resized photo or ffmpeg frame), media_prepare music param (media.js pickMusic, MUSIC dir, amix under original sound, fade out). SOCIAL_AUTOPOST=1 makes social_draft send immediately. Voice trigger opens the picker; browsers only allow that from a tap, so a TAP TO PICK button shows if the open is blocked. No APK change: the existing file chooser handles image/video.
+
+## Post preview (2026-10-09, maintenance)
+- server.js socView/socCard/socWarn/socGate; GET /social-approve marks d.seen; POST acts save|post|skip (post with edited text saves it first; first post tap without seen shows the preview). social_approve (voice) refuses until d.seen. Client showSocialPreview(url) iframe overlay in app.js; page postMessage {social:'done'} closes it.

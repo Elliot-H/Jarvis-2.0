@@ -129,6 +129,7 @@
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
+      case 'social_preview': showSocialPreview(m.url); break;
       case 'holdings': renderHoldings(m); break;
       case 'watchlist': renderWatchlist(m); break;
       case 'connections': renderConns(m.connections); break;
@@ -932,6 +933,18 @@
     x.onerror = () => { setState('idle'); const m = 'The upload failed (connection). Try again on a better signal.'; addLog('system', m); caption(m); };
     x.send(f);
   }
+
+  // The post preview: full-screen over the HUD; Post / Skip live inside the page and it tells us when it is finished.
+  function showSocialPreview(url) {
+    $('#socPreview')?.remove();
+    const box = document.createElement('div'); box.id = 'socPreview';
+    box.style.cssText = 'position:fixed;inset:0;z-index:80;background:#02060c;display:flex;flex-direction:column';
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #1d4a63;font:700 13px Orbitron,sans-serif;letter-spacing:.18em;color:#3fe0ff';
+    bar.innerHTML = '<span>POST PREVIEW</span>'; const x = document.createElement('button'); x.textContent = 'CLOSE'; x.style.cssText = 'padding:8px 14px;background:none;color:#9bb;border:1px solid #567'; x.onclick = () => box.remove(); bar.appendChild(x);
+    const fr = document.createElement('iframe'); fr.src = url; fr.style.cssText = 'flex:1;border:0;width:100%;background:#02060c';
+    box.appendChild(bar); box.appendChild(fr); document.body.appendChild(box);
+  }
+  window.addEventListener('message', e => { if (e.data && e.data.social === 'done') setTimeout(() => $('#socPreview')?.remove(), 2500); });
 
   // ======================= camera: photo analysis =======================
   const camInput = $('#camInput'), camBtn = $('#camBtn');

@@ -2435,11 +2435,12 @@ Object.assign(handlers, {
     const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', videoUrl, channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now() };
     (state.social ||= []).push(d); state.social = state.social.slice(-30); saveState();
     if (process.env.SOCIAL_AUTOPOST === '1') return `Draft ${d.id}: "${text}". ` + await socSend(d);
-    const base = publicBase(); if (base) push(`Post for ${b.id}?`, text.slice(0, 400) + `\n(${d.channelNames.join(', ')})`, `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}`).catch(() => {});
-    return `Draft ${d.id} for ${b.id} on ${d.channelNames.join(', ')}: "${text}". Read it to the Owner and ask whether to post it. Only social_approve after he says yes.`;
+    const base = publicBase(), link = base ? `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}` : '';
+    if (link) { push(`Post for ${b.id}?`, text.slice(0, 400) + `\n(${d.channelNames.join(', ')})`, link).catch(() => {}); broadcast({ type: 'social_preview', url: link }); }
+    return `Draft ${d.id} for ${b.id} on ${d.channelNames.join(', ')}: "${text}". The preview is open on his screen now${link ? '' : ' (no public address, so it could not be shown)'} and a phone alert has the same link. Say ONE short line: what you made and that the preview is on screen, then ask him to look and say post it, or tap Post it in the preview. Do not read the whole caption aloud. Only social_approve after he says yes.`;
   },
   social_list: async () => { const l = (state.social || []).filter(d => d.status === 'pending'); return l.length ? l.map(d => `${d.id} (${d.brand}): ${d.text.slice(0, 120)}`).join(' | ') : 'No drafts waiting.'; },
-  social_approve: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting for approval.'; return socSend(d); },
+  social_approve: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting for approval.'; if (!d.seen && publicBase()) { broadcast({ type: 'social_preview', url: `${publicBase()}/social-approve?id=${d.id}&k=${socSig(d.id)}` }); return 'He has not opened the preview yet, so nothing was posted. I put it on his screen again. Tell him to look it over and say post it, or tap Post it.'; } return socSend(d); },
   social_edit: async ({ id, text }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.text = String(text).trim(); saveState(); return `Draft ${d.id} now reads: "${d.text}". Ask whether to post it.`; },
   social_skip: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.status = 'skipped'; saveState(); return 'Discarded.'; },
 });
@@ -2479,20 +2480,48 @@ for(const f of fs){o.textContent+='Uploading '+f.name+'...\\n';await new Promise
 setInterval(() => { try { media.cleanup(); } catch {} }, 6 * 3600e3);
 const socPage = (res, title, body, code = 200) => res.status(code).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:28px;line-height:1.45">${body}</body>`);
 const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-// A link preview must never post: the GET only shows the draft; posting is a button (POST).
+// The preview: a phone-style mock of each channel's post, the full caption (editable), warnings, and the Post / Skip buttons. A link preview (GET) never posts; posting is a button (POST).
+const socCard = (d, svc, name) => {
+  const cap = esc(d.text), media = d.videoUrl ? `<video src="${esc(d.videoUrl)}" controls playsinline muted loop preload="metadata" style="width:100%;display:block;background:#000;max-height:70vh"></video>` : d.imageUrl ? `<img src="${esc(d.imageUrl)}" style="width:100%;display:block">` : '<div style="padding:26px;text-align:center;color:#888;background:#111">No photo or video (text only)</div>';
+  const head = `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px"><div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3fe0ff,#7c5cff)"></div><div><b>${esc(name || d.brand)}</b><div style="font-size:12px;opacity:.6">${esc(svc)}${d.whenISO ? ' · scheduled' : ' · next queue slot'}</div></div></div>`;
+  if (/youtube/i.test(svc)) { const title = d.text.split('\n')[0].slice(0, 100); return `<div class="card">${head}${media}<div style="padding:10px 12px"><b>${esc(title)}</b><div style="font-size:12px;opacity:.6">YouTube Shorts · title is the first line (max 100 characters)</div></div></div>`; }
+  return `<div class="card">${head}${media}<div style="padding:10px 12px;white-space:pre-wrap;line-height:1.4">${cap}</div></div>`;
+};
+const socWarn = d => {
+  const w = [], tags = (d.text.match(/#\w+/g) || []).length, svcs = (d.channelNames || []).join(' ').toLowerCase();
+  if (/instagram/.test(svcs) && d.text.length > 2200) w.push('Instagram caption is over 2,200 characters.');
+  if (/instagram/.test(svcs) && tags > 30) w.push('Instagram allows 30 hashtags at most.');
+  if (/youtube/.test(svcs) && d.text.split('\n')[0].length > 100) w.push('First line is over 100 characters; YouTube will cut the title.');
+  if (/instagram/.test(svcs) && !d.imageUrl && !d.videoUrl) w.push('Instagram needs a photo or video.');
+  return w;
+};
+const socView = (d, k, note = '') => {
+  const chans = (d.channelNames || []).map(n => { const [svc, ...r] = n.split(' '); return socCard(d, svc, r.join(' ')); }).join('');
+  const warn = socWarn(d).map(x => `<div class="warn">${esc(x)}</div>`).join('');
+  return `<style>.card{background:#fff;color:#111;border-radius:12px;overflow:hidden;margin:14px 0;max-width:460px}.warn{background:#4a1d1d;border:1px solid #ff6b6b;color:#ffd0d0;padding:10px;border-radius:6px;margin:8px 0;max-width:460px}textarea{width:100%;max-width:460px;min-height:130px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px;padding:10px;font:inherit}button{padding:14px 24px;font-size:17px;border-radius:6px;margin:6px 6px 0 0;border:1px solid #7fe3ff;background:#0b3b52;color:#cfefff}.sec{background:none;border-color:#567;color:#9bb}</style>
+<h3 style="margin:0">PREVIEW: ${esc(d.brand)}</h3><div style="opacity:.7;margin-bottom:6px">Posts to: ${esc((d.channelNames || []).join(', '))}${note ? `<br><b style="color:#7fe3ff">${esc(note)}</b>` : ''}</div>${warn}${chans}
+<form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="k" value="${esc(k)}"><div style="opacity:.7;margin:10px 0 4px">Caption (edit it, then Save)</div><textarea name="text">${esc(d.text)}</textarea><div><button name="act" value="save" class="sec">Save changes</button> <button name="act" value="post">Post it</button> <button name="act" value="skip" class="sec">Skip</button></div></form>`;
+};
+const socDone = (res, msg) => socPage(res, 'Social', `${esc(msg)}<script>try{parent.postMessage({social:'done'},'*')}catch(e){}</script>`);
+const socGate = (req, res) => {
+  const b = req.method === 'POST' ? req.body : req.query, id = String(b?.id || ''), k = String(b?.k || ''), want = socSig(id);
+  if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) { socPage(res, 'Social', 'Bad or expired link.', 400); return null; }
+  const d = socFind(id); if (!d) { socPage(res, 'Social', 'That draft is gone.', 404); return null; }
+  return { d, k };
+};
 app.get('/social-approve', (req, res) => {
-  const id = String(req.query.id || ''), k = String(req.query.k || ''), want = socSig(id);
-  if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return socPage(res, 'Social', 'Bad or expired link.', 400);
-  const d = socFind(id); if (!d) return socPage(res, 'Social', 'That draft is gone.', 404);
+  const g = socGate(req, res); if (!g) return; const { d, k } = g;
   if (d.status !== 'pending') return socPage(res, 'Social', `Already ${esc(d.status)}.`);
-  socPage(res, 'Post it?', `<h3>${esc(d.brand)}: post this?</h3><p style="white-space:pre-wrap">${esc(d.text)}</p>${d.imageUrl ? `<p><img src="${esc(d.imageUrl)}" style="max-width:100%"></p>` : ''}${d.videoUrl ? `<p><video src="${esc(d.videoUrl)}" controls playsinline style="max-width:100%;max-height:60vh"></video></p>` : ''}<p style="opacity:.7">${esc(d.channelNames.join(', '))}</p><form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><button style="padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Post it</button></form><form method="post" action="/social-approve" style="margin-top:14px"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><input type="hidden" name="skip" value="1"><button style="padding:10px 20px;background:none;color:#9bb;border:1px solid #567;border-radius:6px">Skip it</button></form>`);
+  d.seen = true; saveState(); socPage(res, 'Preview', socView(d, k));
 });
 app.post('/social-approve', express.urlencoded({ extended: false }), async (req, res) => {
-  const id = String(req.body?.id || ''), k = String(req.body?.k || ''), want = socSig(id);
-  if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return socPage(res, 'Social', 'Bad or expired link.', 400);
-  const d = socFind(id); if (!d || d.status !== 'pending') return socPage(res, 'Social', 'Nothing waiting.');
-  if (req.body?.skip) { d.status = 'skipped'; saveState(); return socPage(res, 'Skipped', 'Skipped. Nothing was posted.'); }
-  socPage(res, 'Posted', esc(await socSend(d)));
+  const g = socGate(req, res); if (!g) return; const { d, k } = g;
+  if (d.status !== 'pending') return socDone(res, `Already ${d.status}.`);
+  const act = String(req.body?.act || (req.body?.skip ? 'skip' : 'post'));
+  if (act === 'save' || (act === 'post' && req.body?.text && String(req.body.text).trim() !== d.text)) { const t = String(req.body?.text || '').trim(); if (t) { d.text = t.slice(0, 4000); saveState(); } if (act === 'save') return socPage(res, 'Preview', socView(d, k, 'Saved.')); }
+  if (act === 'skip') { d.status = 'skipped'; saveState(); return socDone(res, 'Skipped. Nothing was posted.'); }
+  if (!d.seen) { d.seen = true; return socPage(res, 'Preview', socView(d, k, 'Look it over, then tap Post it.')); }
+  socDone(res, await socSend(d));
 });
 // Alert button target: signed, watch-only (never places a buy).
 app.get('/watch-add', async (req, res) => {
