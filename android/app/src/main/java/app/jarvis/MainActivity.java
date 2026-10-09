@@ -86,6 +86,16 @@ public class MainActivity extends Activity {
         picker = cb;
         try {
           Intent cam = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+          // Without an output file the camera app hands back only a tiny thumbnail (that is what made posts pixelated). Give it a file to save the full-size photo in.
+          camUri = null;
+          try {
+            android.content.ContentValues cv = new android.content.ContentValues();
+            cv.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "jarvis_" + System.currentTimeMillis() + ".jpg");
+            cv.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            if (android.os.Build.VERSION.SDK_INT >= 29) cv.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Jarvis");
+            camUri = getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+            if (camUri != null) { cam.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, camUri); cam.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+          } catch (Exception e) { camUri = null; }
           Intent pick = p.createIntent();
           Intent chooser = Intent.createChooser(pick, "Photo for Jarvis");
           if (cam.resolveActivity(getPackageManager()) != null) chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
@@ -144,11 +154,19 @@ public class MainActivity extends Activity {
     if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ);
   }
 
+  private Uri camUri;
   @Override protected void onActivityResult(int code, int result, Intent data) {
     super.onActivityResult(code, result, data);
     if (code != PICK || picker == null) return;
     Uri[] out = null;
-    if (result == RESULT_OK && data != null) {
+    Uri cu = camUri; camUri = null;
+    boolean picked = result == RESULT_OK && data != null && data.getData() != null;
+    if (cu != null && !picked) {
+      // Camera result: the full-size photo is in the file we gave it; an abandoned shot leaves an empty row to remove.
+      if (result == RESULT_OK) out = new Uri[]{cu};
+      else { try { getContentResolver().delete(cu, null, null); } catch (Exception ignored) {} }
+    } else if (cu != null) { try { getContentResolver().delete(cu, null, null); } catch (Exception ignored) {} }
+    if (out == null && result == RESULT_OK && data != null) {
       if (data.getData() != null) out = new Uri[]{data.getData()};
       else if (data.getExtras() != null && data.getExtras().get("data") instanceof android.graphics.Bitmap) {
         try {

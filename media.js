@@ -68,6 +68,7 @@ async function sharp() {
 export async function preparePhoto(file, { shape = 'portrait', headline = '', sub = '', brand = '' } = {}) {
   const S = await sharp(), [W, H] = SHAPES[shape] || SHAPES.portrait, br = brandOf(brand);
   const src = path.join(RAW, path.basename(file));
+  const meta = await S(src).metadata(), sw = meta.orientation >= 5 ? meta.height : meta.width, sh = meta.orientation >= 5 ? meta.width : meta.height;
   // rotate() applies the phone's orientation; normalise + modulate gives a light "pro" lift without crushing it.
   let img = S(src).rotate().resize(W, H, { fit: 'cover', position: 'attention' }).normalise({ lower: 2, upper: 99 }).modulate({ saturation: 1.12, brightness: 1.03 }).sharpen({ sigma: 0.8 });
   const layers = [];
@@ -84,7 +85,7 @@ export async function preparePhoto(file, { shape = 'portrait', headline = '', su
   }
   const id = crypto.randomBytes(8).toString('hex'), name = `${id}.jpg`;
   await (layers.length ? img.composite(layers) : img).jpeg({ quality: 88, mozjpeg: true }).toFile(path.join(OUT, name));
-  return { name, kind: 'photo', shape };
+  return { name, kind: 'photo', shape, srcW: sw, srcH: sh, low: Math.max(sw || 0, sh || 0) < 1000 };
 }
 
 const run = (cmd, args, ms) => new Promise((res, rej) => {

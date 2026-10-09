@@ -2468,7 +2468,7 @@ Object.assign(handlers, {
     try {
       const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline, start, seconds, brand, music }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline, sub, brand });
       const base = publicBase();
-      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}${r.music ? ' with a music bed' : ''}.${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
+      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}${r.music ? ' with a music bed' : ''}.${r.low ? ` WARNING: the original is only ${r.srcW}x${r.srcH} pixels, so it will look soft or pixelated. Tell him in one line and ask for the original from the gallery (he can upload it with the SOCIAL button, picking from the gallery, not the camera shortcut).` : ''}${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
     } catch (e) { return `Could not edit ${f.file}: ${e.message}`; }
   }
 });
