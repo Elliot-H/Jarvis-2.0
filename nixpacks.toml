@@ -1,0 +1,3 @@
+# ffmpeg for editing post videos (media.js). "..." keeps the default Node packages.
+[phases.setup]
+nixPkgs = ["...", "ffmpeg"]

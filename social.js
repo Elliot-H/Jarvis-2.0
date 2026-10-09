@@ -29,10 +29,10 @@ export async function channelsFor(brand) {
   cache.set(brand.id, { at: Date.now(), list }); return list;
 }
 // Create the post on each channel. whenISO (UTC) schedules it; without it the post goes to the next queue slot.
-export async function publish(brand, { text, imageUrl, channelIds, whenISO }) {
+export async function publish(brand, { text, imageUrl, videoUrl, channelIds, whenISO }) {
   const out = [];
   for (const ch of channelIds) {
-    const q = `mutation { createPost(input: { text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch)}, schedulingType: automatic, mode: ${whenISO ? 'customScheduled' : 'addToQueue'}${whenISO ? `, dueAt: ${JSON.stringify(whenISO)}` : ''}${imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''} }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`;
+    const q = `mutation { createPost(input: { text: ${JSON.stringify(text)}, channelId: ${JSON.stringify(ch)}, schedulingType: automatic, mode: ${whenISO ? 'customScheduled' : 'addToQueue'}${whenISO ? `, dueAt: ${JSON.stringify(whenISO)}` : ''}${videoUrl ? `, assets: [{ video: { url: ${JSON.stringify(videoUrl)} } }]` : imageUrl ? `, assets: [{ image: { url: ${JSON.stringify(imageUrl)} } }]` : ''} }) { ... on PostActionSuccess { post { id dueAt } } ... on MutationError { message } } }`;
     try { const d = await gql(brand.key, q), r = d.createPost || {}; out.push(r.post ? { ch, ok: true, id: r.post.id, dueAt: r.post.dueAt } : { ch, ok: false, error: r.message || 'no result' }); }
     catch (e) { out.push({ ch, ok: false, error: e.message }); }
   }

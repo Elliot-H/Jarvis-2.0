@@ -455,3 +455,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Silent/mic phrases widened (2026-10-09, maintenance)
 - Silent mode and mic mute already existed (see above). Added triggers: "no mic no talk" (client mutes the mic AND sends the text to the server, which turns silent mode on), "talk again", "unmute", "voice back" now end silent mode. Bare "mute"/"quiet mode" still mean Quiet (no unprompted output), unchanged. Mic unmute is by tapping the mic button (a muted mic cannot hear a voice command). Web/server only, no APK reinstall.
 - Maintenance routine failure "credit balance is too low": the routine runs on the Owner's Claude plan via MAINT_ROUTINE_TOKEN; if the error shows, the key in use is an API key with no credit. Owner must check which Anthropic key the Railway fire path uses; not fixable from the repo.
+
+## Post media (2026-10-09, maintenance)
+- `media.js`: raw uploads (private) in DATA_DIR/media/raw, finished posts in media/out served publicly at /m/<16 hex>.jpg|mp4 (PUBLIC_FILES regex in server.js). Upload page GET /media, POST /api/media (raw body, 300 MB, PIN cookie). Tools in tools.js MEDIA_TOOLS (media_list, media_prepare); social_draft takes mediaFile and refuses Instagram without media and YouTube without video. social.js publish sends `assets: [{ video: { url } }]` or image.
+- Needs ffmpeg: `nixpacks.toml` adds it on Railway. sharp is an npm dependency. Font bundled at config/fonts (Railway has none); media.js points FONTCONFIG_FILE at it.
+- Unknown: whether Buffer needs extra YouTube/Instagram video metadata (title, reel type) via API; first real Short will show. Without a Railway Volume, media is wiped on every push.

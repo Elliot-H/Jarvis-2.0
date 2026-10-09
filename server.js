@@ -14,9 +14,10 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as social from './social.js';
+import * as media from './media.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
@@ -687,7 +688,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -2407,7 +2408,7 @@ const socSig = id => crypto.createHmac('sha256', SECRET).update('social:' + id).
 const socFind = id => { const l = state.social || []; return id ? l.find(d => d.id === id) : [...l].reverse().find(d => d.status === 'pending'); };
 async function socSend(d) {
   const b = social.findBrand(d.brand); if (!b) return `No Buffer key for ${d.brand} any more.`;
-  const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, channelIds: d.channelIds, whenISO: d.whenISO });
+  const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, videoUrl: d.videoUrl, channelIds: d.channelIds, whenISO: d.whenISO });
   const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'failed'; d.sentAt = Date.now(); d.result = res; saveState();
   const bad = res.filter(r => !r.ok).map((r, i) => `${(d.channelNames || [])[d.channelIds.indexOf(r.ch)] || r.ch}: ${r.error}`);
   return `${ok ? `Queued on ${ok} of ${res.length} channel${res.length > 1 ? 's' : ''} for ${d.brand}${d.whenISO ? ' at the time you set' : ' (next slot in Buffer)'}.` : 'Nothing was posted.'}${bad.length ? ' Problem: ' + bad.join('; ') : ''}`;
@@ -2419,7 +2420,7 @@ Object.assign(handlers, {
     for (const b of bs) { try { const ch = await social.channelsFor(b); out.push(`${b.id}: ${ch.map(c => `${c.service} ${c.name}`).join(', ') || 'no channels connected in Buffer'}`); } catch (e) { out.push(`${b.id}: key did not work (${e.message})`); } }
     return out.join('. ') + '.';
   },
-  social_draft: async ({ brand, text, imageUrl, channels, when }) => {
+  social_draft: async ({ brand, text, imageUrl, mediaFile, channels, when }) => {
     const b = social.findBrand(brand);
     if (!b) { const bs = social.brands(); return bs.length ? `No Buffer account for "${brand}". Connected: ${bs.map(x => x.id).join(', ')}.` : 'No Buffer accounts connected yet. Add BUFFER_KEY_<BRAND> in Railway.'; }
     text = String(text || '').trim(); if (!text) return 'Need the post text.';
@@ -2427,8 +2428,11 @@ Object.assign(handlers, {
     if (!list.length) return `${b.id} has no channels connected in Buffer yet.`;
     let pick = list;
     if (channels?.length) { const w = channels.map(x => String(x).toLowerCase()); pick = list.filter(c => w.some(x => c.service.toLowerCase().includes(x) || c.name.toLowerCase().includes(x))); if (!pick.length) return `No channel like ${channels.join(', ')} for ${b.id}. It has: ${list.map(c => `${c.service} ${c.name}`).join(', ')}.`; }
+    let videoUrl = '';
+    if (mediaFile) { const f = media.outPath(mediaFile); if (!f) return `No finished media called ${mediaFile}. Make one with media_prepare first.`; const base = publicBase(); if (!base) return 'No public address for Jarvis (PUBLIC_URL), so Buffer cannot fetch the file.'; const u = `${base}/m/${path.basename(f)}`; if (/\.mp4$/i.test(f)) videoUrl = u; else imageUrl = u; }
+    const svc = pick.map(c => c.service.toLowerCase()); if (/instagram/.test(svc.join(' ')) && !imageUrl && !videoUrl) return 'Instagram will not take a text-only post. Give me a photo or video (media_prepare) or limit it to other channels.'; if (svc.includes('youtube') && !videoUrl) return 'YouTube Shorts need a video. Use media_prepare on a video, or limit it to other channels.';
     let whenISO = ''; if (when) { const t = Date.parse(when); if (t > Date.now() + 60e3) whenISO = new Date(t).toISOString(); }
-    const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now() };
+    const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', videoUrl, channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now() };
     (state.social ||= []).push(d); state.social = state.social.slice(-30); saveState();
     const base = publicBase(); if (base) push(`Post for ${b.id}?`, text.slice(0, 400) + `\n(${d.channelNames.join(', ')})`, `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}`).catch(() => {});
     return `Draft ${d.id} for ${b.id} on ${d.channelNames.join(', ')}: "${text}". Read it to the Owner and ask whether to post it. Only social_approve after he says yes.`;
@@ -2438,6 +2442,30 @@ Object.assign(handlers, {
   social_edit: async ({ id, text }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.text = String(text).trim(); saveState(); return `Draft ${d.id} now reads: "${d.text}". Ask whether to post it.`; },
   social_skip: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.status = 'skipped'; saveState(); return 'Discarded.'; },
 });
+
+Object.assign(handlers, {
+  media_list: async () => { const l = media.listRaw(10); return l.length ? 'Uploaded, newest first: ' + l.map(x => `${x.file} (${x.kind}, ${new Date(x.at).toLocaleString('en-US', { timeZone: process.env.TZ || 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})`).join('; ') + '.' : 'Nothing uploaded yet. The Owner adds photos and videos at /media on the Jarvis site.'; },
+  media_prepare: async ({ file, shape, headline, sub, brand, start, seconds }) => {
+    const f = media.findRaw(file); if (!f) return `No uploaded file matches "${file || 'latest'}". Use media_list.`;
+    try {
+      const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline, start, seconds, brand }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline, sub, brand });
+      const base = publicBase();
+      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}.${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
+    } catch (e) { return `Could not edit ${f.file}: ${e.message}`; }
+  }
+});
+app.get('/m/:file', (req, res) => { const p = media.outPath(req.params.file); if (!p) return res.status(404).end(); res.set('Cache-Control', 'public, max-age=86400'); res.sendFile(p); });
+app.post('/api/media', express.raw({ type: () => true, limit: '300mb' }), (req, res) => {
+  const ext = media.extFor(req.headers['content-type'], req.query.name);
+  if (!ext) return res.status(415).json({ error: 'Photos (jpg, png, webp, heic) and videos (mp4, mov) only.' });
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Empty upload.' });
+  const file = media.saveRaw(req.body, ext, req.query.label); res.json({ ok: true, file });
+});
+app.get('/media', (_req, res) => res.send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis media</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:24px;line-height:1.5"><h2>Send Jarvis photos and videos</h2><p>Pick the raw files. Then tell Jarvis "make a post for Defiant from the latest upload".</p><input id="f" type="file" accept="image/*,video/*" multiple style="display:block;margin:14px 0;color:#cfefff"><input id="l" placeholder="What is it? (optional, e.g. tint job Audi Q5)" style="width:100%;padding:12px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px"><button id="b" style="margin-top:14px;padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Upload</button><pre id="o" style="white-space:pre-wrap"></pre><script>
+const o=document.getElementById('o');document.getElementById('b').onclick=async()=>{const fs=[...document.getElementById('f').files];if(!fs.length){o.textContent='Pick a file first.';return}
+for(const f of fs){o.textContent+='Uploading '+f.name+'...\\n';await new Promise(r=>{const x=new XMLHttpRequest();x.open('POST','/api/media?name='+encodeURIComponent(f.name)+'&label='+encodeURIComponent(document.getElementById('l').value));x.setRequestHeader('Content-Type',f.type||'application/octet-stream');x.upload.onprogress=e=>{o.textContent=o.textContent.replace(/\\d+%$/,'')+Math.round(e.loaded/e.total*100)+'%'};x.onload=()=>{o.textContent+='\\n'+(x.status==200?'Saved.':'Failed: '+x.responseText)+'\\n';r()};x.onerror=()=>{o.textContent+='\\nFailed (connection).\\n';r()};x.send(f)})}}
+</script></body>`));
+setInterval(() => { try { media.cleanup(); } catch {} }, 6 * 3600e3);
 const socPage = (res, title, body, code = 200) => res.status(code).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:28px;line-height:1.45">${body}</body>`);
 const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 // A link preview must never post: the GET only shows the draft; posting is a button (POST).
@@ -2446,7 +2474,7 @@ app.get('/social-approve', (req, res) => {
   if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return socPage(res, 'Social', 'Bad or expired link.', 400);
   const d = socFind(id); if (!d) return socPage(res, 'Social', 'That draft is gone.', 404);
   if (d.status !== 'pending') return socPage(res, 'Social', `Already ${esc(d.status)}.`);
-  socPage(res, 'Post it?', `<h3>${esc(d.brand)}: post this?</h3><p style="white-space:pre-wrap">${esc(d.text)}</p>${d.imageUrl ? `<p><img src="${esc(d.imageUrl)}" style="max-width:100%"></p>` : ''}<p style="opacity:.7">${esc(d.channelNames.join(', '))}</p><form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><button style="padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Post it</button></form><form method="post" action="/social-approve" style="margin-top:14px"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><input type="hidden" name="skip" value="1"><button style="padding:10px 20px;background:none;color:#9bb;border:1px solid #567;border-radius:6px">Skip it</button></form>`);
+  socPage(res, 'Post it?', `<h3>${esc(d.brand)}: post this?</h3><p style="white-space:pre-wrap">${esc(d.text)}</p>${d.imageUrl ? `<p><img src="${esc(d.imageUrl)}" style="max-width:100%"></p>` : ''}${d.videoUrl ? `<p><video src="${esc(d.videoUrl)}" controls playsinline style="max-width:100%;max-height:60vh"></video></p>` : ''}<p style="opacity:.7">${esc(d.channelNames.join(', '))}</p><form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><button style="padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Post it</button></form><form method="post" action="/social-approve" style="margin-top:14px"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><input type="hidden" name="skip" value="1"><button style="padding:10px 20px;background:none;color:#9bb;border:1px solid #567;border-radius:6px">Skip it</button></form>`);
 });
 app.post('/social-approve', express.urlencoded({ extended: false }), async (req, res) => {
   const id = String(req.body?.id || ''), k = String(req.body?.k || ''), want = socSig(id);
@@ -2501,7 +2529,7 @@ app.all('/api/outbox/:id/sent', (req, res) => {
 });
 // picked up but never confirmed within 2 hours: put it back so the next run retries
 setInterval(() => { let c = false; for (const f of state.followups) if (f.status === 'sending' && Date.now() - f.pickedAt > 2 * 3600e3) { f.status = 'approved'; c = true; } if (c) saveState(); }, 10 * 60_000);
-const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png)$/;
+const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png|m\/[\w-]{8,40}\.(jpg|mp4))$/;
 app.use((req, res, next) => {
   if (authed(req) || PUBLIC_FILES.test(req.path)) return next();
   // Claude can run and read the model test remotely with BENCH_TOKEN (set in Railway); only the bench and talk-model routes accept it.
