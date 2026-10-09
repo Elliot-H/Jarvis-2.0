@@ -42,7 +42,7 @@ export async function analyzePhoto({ image, question = '', cfg = visionConfig(),
       headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' },
       signal: signal || AbortSignal.timeout(60000),
       body: JSON.stringify({
-        model: cfg.model, max_tokens: 900, usage: { include: true },
+        model: cfg.model, max_tokens: 2500, usage: { include: true },
         reasoning: { effort: 'low', exclude: true },
         response_format: { type: 'json_object' },
         messages: [
@@ -59,11 +59,11 @@ export async function analyzePhoto({ image, question = '', cfg = visionConfig(),
   if (!res.ok) throw new Error(explain(res.status, raw));
   let j; try { j = JSON.parse(raw); } catch { throw new Error('The vision model sent back something unreadable.'); }
   const content = String(j.choices?.[0]?.message?.content || '').trim();
-  if (!content) throw new Error('The vision model gave no answer for that photo.');
+  if (!content) throw new Error(`The vision model gave no answer for that photo (it stopped because: ${j.choices?.[0]?.finish_reason || j.choices?.[0]?.native_finish_reason || 'unknown'}${j.error?.message ? '; ' + String(j.error.message).slice(0, 120) : ''}).`);
   let out;
   try { out = JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
   catch { out = { spoken: content.slice(0, 500), title: 'Image analysis', details: content }; }
-  const spoken = String(out.spoken || '').trim();
-  if (!spoken) throw new Error('The vision model gave no answer for that photo.');
+  const spoken = String(out.spoken || out.description || out.summary || out.details || '').trim().slice(0, 600) || (typeof out === 'object' ? '' : String(out).slice(0, 600));
+  if (!spoken) throw new Error(`The vision model answered but with nothing readable (${content.slice(0, 100).replace(/\s+/g, ' ')}).`);
   return { spoken, title: String(out.title || 'Image analysis').slice(0, 60), details: String(out.details || '').trim(), cost: Number(j.usage?.cost) || 0, ms: Date.now() - t0 };
 }

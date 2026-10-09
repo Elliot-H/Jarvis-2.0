@@ -866,13 +866,13 @@
   // Alert "Buy" button lands here as /?buy=SYM: hand it to Jarvis once connected; he proposes and waits for the Owner's spoken confirm.
   const BUY_SYM = (params.get('buy') || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
   if (BUY_SYM) { try { history.replaceState(null, '', location.pathname); } catch {} const t = setInterval(() => { if (ws && ws.readyState === 1) { clearInterval(t); addLog('user', 'Buy ' + BUY_SYM); send({ type: 'ask', text: `I want to buy ${BUY_SYM}. Start the buy flow and wait for my confirmation.` }); } }, 1000); setTimeout(() => clearInterval(t), 60000); }
-  function submit(text) {
+  function submit(text, raw) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
-    if (MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
+    if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
-    if (SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
-    if (LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
+    if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
+    if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);
     setState('thinking');
     startFillers(text);
@@ -895,7 +895,7 @@
   const SOC_RE = /\b(post (this|that|it|these) (on|to|for) (the |my )?(socials?|social media)|(make|do|create) (me )?(a )?social( media)? post|(open|use|hit|press) (the )?social( media)? button|(put|share) (this|that|it) on (the )?(socials?|social media))\b/i;
   const BRAND_BTNS = [['DEFIANT', 'Defiant'], ['MYONLINECARGUY', 'MyOnlineCarGuy'], ['NEXUS', 'Nexus'], ['MYGURU', 'MyGuru'], ['YOU PICK', '']];
   let socBrandHint = '';
-  function openSocial(brand) { socBrandHint = brand || ''; try { socInput.click(); } catch {} if (!navigator.userActivation?.isActive) showSocPrompt(); }
+  function openSocial(brand) { socBrandHint = brand || ''; try { socInput.click(); } catch {} if (navigator.userActivation && !navigator.userActivation.isActive) showSocPrompt(); }
   function showSocPrompt() {
     if ($('#socPrompt')) return;
     const b = document.createElement('button'); b.id = 'socPrompt'; b.textContent = 'TAP TO PICK PHOTO / VIDEO';
@@ -928,7 +928,7 @@
       if (x.status === 401) return location.reload();
       if (x.status !== 200) { setState('idle'); const m = 'The upload failed: ' + (() => { try { return JSON.parse(x.responseText).error; } catch { return x.status; } })(); addLog('system', m); return caption(m); }
       let file = ''; try { file = JSON.parse(x.responseText).file; } catch {}
-      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}. Do the whole thing now without asking me anything: look at it, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`);
+      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}. Do the whole thing now without asking me anything: check what it shows, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`, true);
     };
     x.onerror = () => { setState('idle'); const m = 'The upload failed (connection). Try again on a better signal.'; addLog('system', m); caption(m); };
     x.send(f);
