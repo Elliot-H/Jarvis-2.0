@@ -233,3 +233,12 @@ export const MUSIC_TOOLS = [
   { name: 'led_setup', description: 'Fix LED chip order from what the Owner saw during led_test (seen_red = the color shown when red was commanded, etc. e.g. "green","red","blue"), or set chip_order (RGB, RBG, GRB, GBR, BRG, BGR). light_type (number, e.g. 134 for SPI RGB) ONLY if the Owner explicitly asks. Never use it unprompted.', shape: { seen_red: z.string().optional(), seen_green: z.string().optional(), seen_blue: z.string().optional(), chip_order: z.string().optional(), light_type: z.number().optional() } },
   { name: 'bluetooth_connect', description: 'Connect a taught speaker without playing music. device = alias or area (omit to use the one for where he is). Sets its default volume (65% unless changed).', shape: { device: z.string().optional() } }
 ];
+
+export const SOCIAL_TOOLS = [
+  { name: 'social_status', description: 'Which brands have a Buffer account connected for social posting (BUFFER_KEY_<BRAND> in Railway) and which channels (Facebook, Instagram, YouTube...) each one posts to. Use for "can you post for Defiant", "what social accounts are connected".', shape: {} },
+  { name: 'social_draft', description: 'Write a social post draft for a brand and hold it for the Owner\'s approval. NEVER posts by itself. brand = defiant, myonlinecarguy, nexus, myguru (as set up). text = the finished caption in the brand voice (no customer names, plates or faces unless the Owner said it is OK). imageUrl only if he gave a public https link. channels = optional names/services to limit it (e.g. ["facebook"]); default all channels of that brand. Then read the draft back and ask if he wants it posted; he approves with social_approve.', shape: { brand: z.string(), text: z.string(), imageUrl: z.string().optional(), channels: z.array(z.string()).optional(), when: z.string().optional() } },
+  { name: 'social_list', description: 'List drafts waiting for approval, with ids.', shape: {} },
+  { name: 'social_approve', description: 'The Owner clearly said to post it ("yes post it", "approve", "send it"). Posts the draft (latest waiting one, or by id) to Buffer. Only after he says so in his own words.', shape: { id: z.string().optional() } },
+  { name: 'social_edit', description: 'Change the wording of a waiting draft.', shape: { id: z.string().optional(), text: z.string() } },
+  { name: 'social_skip', description: 'Discard a waiting draft (latest, or by id).', shape: { id: z.string().optional() } },
+];

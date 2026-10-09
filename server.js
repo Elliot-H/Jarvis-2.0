@@ -14,8 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS } from './tools.js';
 import * as news from './news.js';
+import * as social from './social.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
@@ -80,7 +81,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -686,7 +687,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -2399,6 +2400,60 @@ app.get('/open', (req, res) => {
   const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
   const web = `/?buy=${encodeURIComponent(sym)}`, intent = `intent://open?buy=${encodeURIComponent(sym)}#Intent;scheme=jarvis;package=app.jarvis.hud;S.browser_fallback_url=${encodeURIComponent((/^localhost/.test(req.get('host') || '') ? 'http' : 'https') + '://' + req.get('host') + web)};end`;
   res.set('Cache-Control', 'no-store').type('html').send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Jarvis</title><body style="background:#04121c;color:#7fe3ff;font:18px sans-serif;text-align:center;padding:60px 20px"><p>Opening Jarvis${sym ? ' to buy ' + sym : ''}...</p><p><a id=a href="${intent}" style="display:inline-block;padding:16px 28px;border:1px solid #7fe3ff;color:#7fe3ff;text-decoration:none;border-radius:6px">Open Jarvis</a></p><p style="font-size:14px;opacity:.7"><a href="${web}" style="color:#7fe3ff">No app? Open the web version</a></p><script>setTimeout(function(){location.href=${JSON.stringify(intent)}},150)</script>`);
+});
+
+// ---------- Social posting (Buffer): Jarvis drafts, the Owner approves, then it is sent. ----------
+const socSig = id => crypto.createHmac('sha256', SECRET).update('social:' + id).digest('hex').slice(0, 24);
+const socFind = id => { const l = state.social || []; return id ? l.find(d => d.id === id) : [...l].reverse().find(d => d.status === 'pending'); };
+async function socSend(d) {
+  const b = social.findBrand(d.brand); if (!b) return `No Buffer key for ${d.brand} any more.`;
+  const res = await social.publish(b, { text: d.text, imageUrl: d.imageUrl, channelIds: d.channelIds, whenISO: d.whenISO });
+  const ok = res.filter(r => r.ok).length; d.status = ok ? 'posted' : 'failed'; d.sentAt = Date.now(); d.result = res; saveState();
+  const bad = res.filter(r => !r.ok).map((r, i) => `${(d.channelNames || [])[d.channelIds.indexOf(r.ch)] || r.ch}: ${r.error}`);
+  return `${ok ? `Queued on ${ok} of ${res.length} channel${res.length > 1 ? 's' : ''} for ${d.brand}${d.whenISO ? ' at the time you set' : ' (next slot in Buffer)'}.` : 'Nothing was posted.'}${bad.length ? ' Problem: ' + bad.join('; ') : ''}`;
+}
+Object.assign(handlers, {
+  social_status: async () => {
+    const bs = social.brands(); if (!bs.length) return 'No Buffer accounts connected yet. Add BUFFER_KEY_<BRAND> (for example BUFFER_KEY_DEFIANT) in Railway.';
+    const out = [];
+    for (const b of bs) { try { const ch = await social.channelsFor(b); out.push(`${b.id}: ${ch.map(c => `${c.service} ${c.name}`).join(', ') || 'no channels connected in Buffer'}`); } catch (e) { out.push(`${b.id}: key did not work (${e.message})`); } }
+    return out.join('. ') + '.';
+  },
+  social_draft: async ({ brand, text, imageUrl, channels, when }) => {
+    const b = social.findBrand(brand);
+    if (!b) { const bs = social.brands(); return bs.length ? `No Buffer account for "${brand}". Connected: ${bs.map(x => x.id).join(', ')}.` : 'No Buffer accounts connected yet. Add BUFFER_KEY_<BRAND> in Railway.'; }
+    text = String(text || '').trim(); if (!text) return 'Need the post text.';
+    let list; try { list = await social.channelsFor(b); } catch (e) { return `Buffer would not answer for ${b.id}: ${e.message}`; }
+    if (!list.length) return `${b.id} has no channels connected in Buffer yet.`;
+    let pick = list;
+    if (channels?.length) { const w = channels.map(x => String(x).toLowerCase()); pick = list.filter(c => w.some(x => c.service.toLowerCase().includes(x) || c.name.toLowerCase().includes(x))); if (!pick.length) return `No channel like ${channels.join(', ')} for ${b.id}. It has: ${list.map(c => `${c.service} ${c.name}`).join(', ')}.`; }
+    let whenISO = ''; if (when) { const t = Date.parse(when); if (t > Date.now() + 60e3) whenISO = new Date(t).toISOString(); }
+    const d = { id: crypto.randomBytes(3).toString('hex'), brand: b.id, text, imageUrl: imageUrl || '', channelIds: pick.map(c => c.id), channelNames: pick.map(c => `${c.service} ${c.name}`), whenISO, status: 'pending', at: Date.now() };
+    (state.social ||= []).push(d); state.social = state.social.slice(-30); saveState();
+    const base = publicBase(); if (base) push(`Post for ${b.id}?`, text.slice(0, 400) + `\n(${d.channelNames.join(', ')})`, `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}`).catch(() => {});
+    return `Draft ${d.id} for ${b.id} on ${d.channelNames.join(', ')}: "${text}". Read it to the Owner and ask whether to post it. Only social_approve after he says yes.`;
+  },
+  social_list: async () => { const l = (state.social || []).filter(d => d.status === 'pending'); return l.length ? l.map(d => `${d.id} (${d.brand}): ${d.text.slice(0, 120)}`).join(' | ') : 'No drafts waiting.'; },
+  social_approve: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting for approval.'; return socSend(d); },
+  social_edit: async ({ id, text }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.text = String(text).trim(); saveState(); return `Draft ${d.id} now reads: "${d.text}". Ask whether to post it.`; },
+  social_skip: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.status = 'skipped'; saveState(); return 'Discarded.'; },
+});
+const socPage = (res, title, body, code = 200) => res.status(code).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:28px;line-height:1.45">${body}</body>`);
+const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+// A link preview must never post: the GET only shows the draft; posting is a button (POST).
+app.get('/social-approve', (req, res) => {
+  const id = String(req.query.id || ''), k = String(req.query.k || ''), want = socSig(id);
+  if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return socPage(res, 'Social', 'Bad or expired link.', 400);
+  const d = socFind(id); if (!d) return socPage(res, 'Social', 'That draft is gone.', 404);
+  if (d.status !== 'pending') return socPage(res, 'Social', `Already ${esc(d.status)}.`);
+  socPage(res, 'Post it?', `<h3>${esc(d.brand)}: post this?</h3><p style="white-space:pre-wrap">${esc(d.text)}</p>${d.imageUrl ? `<p><img src="${esc(d.imageUrl)}" style="max-width:100%"></p>` : ''}<p style="opacity:.7">${esc(d.channelNames.join(', '))}</p><form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><button style="padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Post it</button></form><form method="post" action="/social-approve" style="margin-top:14px"><input type="hidden" name="id" value="${esc(id)}"><input type="hidden" name="k" value="${esc(k)}"><input type="hidden" name="skip" value="1"><button style="padding:10px 20px;background:none;color:#9bb;border:1px solid #567;border-radius:6px">Skip it</button></form>`);
+});
+app.post('/social-approve', express.urlencoded({ extended: false }), async (req, res) => {
+  const id = String(req.body?.id || ''), k = String(req.body?.k || ''), want = socSig(id);
+  if (k.length !== want.length || !crypto.timingSafeEqual(Buffer.from(k), Buffer.from(want))) return socPage(res, 'Social', 'Bad or expired link.', 400);
+  const d = socFind(id); if (!d || d.status !== 'pending') return socPage(res, 'Social', 'Nothing waiting.');
+  if (req.body?.skip) { d.status = 'skipped'; saveState(); return socPage(res, 'Skipped', 'Skipped. Nothing was posted.'); }
+  socPage(res, 'Posted', esc(await socSend(d)));
 });
 // Alert button target: signed, watch-only (never places a buy).
 app.get('/watch-add', async (req, res) => {
