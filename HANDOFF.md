@@ -458,7 +458,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Post media (2026-10-09, maintenance)
 - `media.js`: raw uploads (private) in DATA_DIR/media/raw, finished posts in media/out served publicly at /m/<16 hex>.jpg|mp4 (PUBLIC_FILES regex in server.js). Upload page GET /media, POST /api/media (raw body, 300 MB, PIN cookie). Tools in tools.js MEDIA_TOOLS (media_list, media_prepare); social_draft takes mediaFile and refuses Instagram without media and YouTube without video. social.js publish sends `assets: [{ video: { url } }]` or image.
-- Needs ffmpeg: `nixpacks.toml` adds it on Railway. sharp is an npm dependency. Font bundled at config/fonts (Railway has none); media.js points FONTCONFIG_FILE at it.
+- Needs ffmpeg: `nixpacks.toml` (Nixpacks) and `railpack.json` (Railpack, deploy aptPackages) add it on Railway. 2026-10-10: Railway reported "ffmpeg not installed"; likely the builder ignored nixpacks.toml. As a guaranteed fallback media.js uses npm `ffmpeg-static`/`ffprobe-static` when no system ffmpeg is on PATH; that build has no drawtext, so headlines are drawn as a sharp PNG overlay (`headlineOverlay`). sharp is an npm dependency. Font bundled at config/fonts (Railway has none); media.js points FONTCONFIG_FILE at it.
 - Unknown: whether Buffer needs extra YouTube/Instagram video metadata (title, reel type) via API; first real Short will show. Without a Railway Volume, media is wiped on every push.
 
 ## Social button (2026-10-09, maintenance)

@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-10T16:05:00Z
-REQUEST: Remove every remaining "Owner" from spoken output, including app-side strings.
+TIME: 2026-10-10T18:58:03Z
+REQUEST: Install ffmpeg on the server so video posts work (media_prepare, media_describe).
 RESULT:
-Done, sir. I searched the server, persona, prompts, web app and Android source. The only literal Owner left was in internal comments and a Tasker menu label, which you never hear. The earlier replies were most likely the old build announcing before Railway finished redeploying, or an old report being read back. I added a safety net so any spoken line or deploy notice containing Owner now says sir. Only server.js changed, so it is live after the Railway redeploy and no APK reinstall is needed.
+Done, sir. I could not touch the Railway machine directly, so I fixed it in the code. Railway most likely ignored the old ffmpeg setting, so I added the newer one and also bundled ffmpeg into the app as a backup. I tested a frame grab and a 9:16 crop with headline, with and without music, on a sample mp4 with no system ffmpeg, and all worked. Your own mv2r79ozf2fb-defiant.mp4 lives on the server, so I could not test that exact file. It goes live after the Railway redeploy, and no APK reinstall is needed.
