@@ -1,5 +1,5 @@
 // Google Calendar for Jarvis: read, add and change events, including their colours.
-// Auth: a Google "service account". The Owner shares his calendar with the service account's email
+// Auth: a Google "service account". The user shares his calendar with the service account's email
 // ("Make changes to events"), so there is no login, no consent screen and no token that expires.
 // Env: GOOGLE_CALENDAR_KEY (the service account's JSON key, pasted whole), GOOGLE_CALENDAR_ID (usually his Gmail address), TZ.
 
@@ -30,7 +30,7 @@ const cleanId = s => { const r = String(s).trim().replace(/^["']|["']$/g, '').tr
 export const calIds = () => [...new Set(String(process.env.GOOGLE_CALENDAR_ID || '').split(/[,;\n]/).map(cleanId).filter(Boolean))];
 export const calId = () => calIds()[0] || '';
 export const configured = () => Boolean(process.env.GOOGLE_CALENDAR_KEY && calId());
-const NOT_SET = 'The calendar is not connected yet. It needs GOOGLE_CALENDAR_KEY and GOOGLE_CALENDAR_ID (one or more calendar ids, comma separated) in Railway. Tell the Owner plainly.';
+const NOT_SET = 'The calendar is not connected yet. It needs GOOGLE_CALENDAR_KEY and GOOGLE_CALENDAR_ID (one or more calendar ids, comma separated) in Railway. Tell the user plainly.';
 
 function key() {
   try { const k = JSON.parse(process.env.GOOGLE_CALENDAR_KEY); if (k.client_email && k.private_key) return k; } catch {}
@@ -81,7 +81,7 @@ async function call(method, pathAndQuery, body, id = calId()) {
   return r.status === 204 ? {} : r.json();
 }
 
-// Plain "2026-10-03T14:00" is read in the Owner's time zone; anything with Z or an offset is left alone; a bare date is an all-day event.
+// Plain "2026-10-03T14:00" is read in the user's time zone; anything with Z or an offset is left alone; a bare date is an all-day event.
 const hasZone = s => /(Z|[+-]\d\d:?\d\d)$/.test(s);
 function when(v) {
   const s = String(v).trim();
@@ -126,7 +126,7 @@ export async function list({ from, to, query, max = 100 } = {}, meanings = {}) {
   return { from: d1, to: d2, count: kept.length, events: kept, ...(unreachable.length ? { unreachable } : {}) };
 }
 
-/** Count events per colour and show sample titles, so the Owner can say what each colour means. */
+/** Count events per colour and show sample titles, so the user can say what each colour means. */
 export async function colorSurvey(days = 60, meanings = {}) {
   if (!configured()) throw new Error(NOT_SET);
   const now = Date.now();
@@ -205,7 +205,7 @@ export async function update({ eventId, title, start, end, colorId, location, no
   throw lastErr;
 }
 
-/** Diagnostics for the Owner: which robot account this is, which calendars it can see, and whether each configured id works. */
+/** Diagnostics for the User: which robot account this is, which calendars it can see, and whether each configured id works. */
 export async function check() {
   const out = { robotEmail: null, configured: calIds(), perCalendar: [], visibleCalendars: [], problem: null, sample: [] };
   try { out.robotEmail = key().client_email; } catch (e) { out.problem = e.message; return out; }

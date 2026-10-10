@@ -124,7 +124,7 @@ const handlers = {
   },
   show_panel: async ({ id, title, body }) => {
     holdPanel(id, { title, body });
-    return `NOT on screen yet: "${title}" is held until the Owner approves. Give your spoken answer, then end by asking "Would you like to see it on screen, sir?" Do not call show_panel again; it appears only if he says yes.`;
+    return `NOT on screen yet: "${title}" is held until the user approves. Give your spoken answer, then end by asking "Would you like to see it on screen, sir?" Do not call show_panel again; it appears only if he says yes.`;
   },
   hide_panel: async ({ id }) => {
     if (id === '*') state.panels = {}; else delete state.panels[id];
@@ -317,7 +317,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   console.log(`turn ${turn.id}: ${mode} mode (${mode === 'work' ? WORK_MODEL : talkLocal ? talkModel() : CHAT_MODEL})`);
   escalate = false;
   const now = new Date();
-  // Always the Owner's own time zone (his phone's, else TZ, else Eastern): the server itself runs on UTC.
+  // Always the user's own time zone (his phone's, else TZ, else Eastern): the server itself runs on UTC.
   const ownerTz = state.location?.tz || process.env.TZ || 'America/New_York';
   const clock = `\n\n# Right now\nLocal time: ${now.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: ownerTz })} (${ownerTz}).`;
   const hud = `\nOn the HUD: ${Object.values(state.stats).map(s => `${s.label}=${s.value}${s.delta ? ` (${s.delta})` : ''}`).join('; ') || 'nothing yet'}.`;
@@ -345,7 +345,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   ];
   // Talk mode: short, lean prompt = fast and cheap. Workshop mode: full engineering prompt.
   const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
-    .map(h => `${h.role === 'user' ? 'Owner' : 'You'}: ${h.text}`).join('\n');
+    .map(h => `${h.role === 'user' ? 'User' : 'You'}: ${h.text}`).join('\n');
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
   const live = (clock + hud + failed + memoryContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
@@ -361,7 +361,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
       options: {
         cwd: WORKSPACE,
         model: mode === 'work' ? WORK_MODEL : CHAT_MODEL,
-        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: persona + '\n\nEach message starts with a <context> block (time, HUD, failed requests) supplied by the app, not typed by the Owner.' } : chatPrompt,
+        systemPrompt: mode === 'work' ? { type: 'preset', preset: 'claude_code', append: persona + '\n\nEach message starts with a <context> block (time, HUD, failed requests) supplied by the app, not typed by the user.' } : chatPrompt,
         ...(mode === 'chat' ? { thinking: { type: 'disabled' } } : {}),
         mcpServers,
         allowedTools: allowed,
@@ -446,7 +446,7 @@ Object.assign(handlers, {
     try {
       const r = await crypto_.scan({ top, watch: state.watchlist });
       return `${JSON.stringify(r)}\n\n${crypto_.PLAYBOOK}\n\n${news.AUTO_NEWS}`;
-    } catch (e) { return `Could not get market data: ${e.message}. Tell the Owner plainly and call note_failure.`; }
+    } catch (e) { return `Could not get market data: ${e.message}. Tell the user plainly and call note_failure.`; }
   },
   crypto_trending: async () => {
     try { return JSON.stringify(await crypto_.trending()); }
@@ -478,14 +478,14 @@ Object.assign(handlers, {
 Object.assign(handlers, {
   chart_read: async ({ symbol, timeframe }) => {
     try { return JSON.stringify({ ...(await chart.read({ symbol, timeframe })), newsStep: news.AUTO_NEWS }); }
-    catch (e) { return `Could not read the chart: ${e.message} Tell the Owner plainly.`; }
+    catch (e) { return `Could not read the chart: ${e.message} Tell the user plainly.`; }
   }
 });
 
 Object.assign(handlers, {
   market_outlook: async ({ symbol }) => {
     try { return JSON.stringify(await outlook({ symbol })); }
-    catch (e) { return `Could not build the outlook: ${e.message} Tell the Owner plainly.`; }
+    catch (e) { return `Could not build the outlook: ${e.message} Tell the user plainly.`; }
   }
 });
 
@@ -493,7 +493,7 @@ Object.assign(handlers, {
 state.tradeLog ||= [];
 let pendingTrade = null;
 // Buy offers staged by alerts: a BUY-WATCH or dip alert leaves a $50 offer ready, so "buy it" is one step from the confirm.
-// An offer never trades by itself: it only tells Jarvis what he can propose; the Owner must still say confirm.
+// An offer never trades by itself: it only tells Jarvis what he can propose; the user must still say confirm.
 let armedBuys = []; const ARM_MS = 60 * 60e3, ARM_DOLLARS = Math.min(50, Number(process.env.TRADE_MAX_ORDER || 50));
 function armBuy(symbol, title, price) {
   const sym = trade.normSymbol(symbol); if (!sym) return;
@@ -501,7 +501,7 @@ function armBuy(symbol, title, price) {
   armedBuys.push({ symbol: sym, title, price, dollars: ARM_DOLLARS, at: Date.now() }); armedBuys = armedBuys.slice(-5);
 }
 const isCrypto_ = s => /\/USD$/.test(s);
-const tradeFail = e => `Trading problem: ${e.message} Tell the Owner plainly.`;
+const tradeFail = e => `Trading problem: ${e.message} Tell the user plainly.`;
 const spentToday = () => { const d = new Date().toDateString(); return state.tradeLog.filter(t => new Date(t.at).toDateString() === d && t.side === 'buy').reduce((a, t) => a + t.dollars, 0); };
 Object.assign(handlers, {
   trade_status: async () => {
@@ -510,7 +510,7 @@ Object.assign(handlers, {
   },
   trade_quote: async ({ symbol }) => { try { return JSON.stringify(await trade.quote(symbol)); } catch (e) { return tradeFail(e); } },
   trade_propose: async ({ symbol, side, dollars, shares, wholeShares }) => {
-    if (!turn || turn.origin !== 'user') return 'Refused: trades can only be proposed when the Owner asks, never from a scheduled or system task.';
+    if (!turn || turn.origin !== 'user') return 'Refused: trades can only be proposed when the user asks, never from a scheduled or system task.';
     const s = trade.normSymbol(symbol); if (!s) return 'Unrecognised symbol.';
     const byShares = shares != null || wholeShares;
     if (!byShares && dollars == null) return 'Give either dollars, a share count (shares), or wholeShares=true.';
@@ -528,11 +528,11 @@ Object.assign(handlers, {
           if (!(qty > 0)) return 'Share orders must be at least one whole share.';
         } else {
           qty = Math.floor(cap / q.price + 1e-9);
-          if (qty < 1) return `Refused: one share of ${s} is about $${q.price}, over the $${cap} I can use on this order, so not even one whole share fits. Tell the Owner.`;
+          if (qty < 1) return `Refused: one share of ${s} is about $${q.price}, over the $${cap} I can use on this order, so not even one whole share fits. Tell the user.`;
         }
         dollars = Math.round(qty * q.price * 100) / 100;
       } else dollars = Math.round(dollars * 100) / 100;
-      if (dollars > trade.MAX_ORDER) return `Refused: about $${dollars} is over the $${trade.MAX_ORDER} per-order limit. Tell the Owner; the limit is TRADE_MAX_ORDER.`;
+      if (dollars > trade.MAX_ORDER) return `Refused: about $${dollars} is over the $${trade.MAX_ORDER} per-order limit. Tell the user; the limit is TRADE_MAX_ORDER.`;
       if (side === 'buy' && spentToday() + dollars > trade.MAX_DAY) return `Refused: would pass the $${trade.MAX_DAY} daily buy limit ($${spentToday()} used).`;
       pendingTrade = { symbol: s, side, dollars, qty, price: q.price, turnId: turn.id, at: Date.now() };
       const what = qty ? `${side} ${qty} whole share${qty === 1 ? '' : 's'} of ${s}` : `${side} $${dollars} of ${s}`;
@@ -565,18 +565,18 @@ Object.assign(handlers, {
 let pendingStop = null;
 const stopDesc = o => o.type === 'trailing_stop' ? `trailing stop ${o.trailPercent ? o.trailPercent + '%' : '$' + o.trailPrice} trail${o.stopPrice ? ', now at ' + fmtP(o.stopPrice) : ''}` : `${o.type === 'stop_limit' ? 'stop-limit' : 'fixed stop'} at ${fmtP(o.stopPrice)}`;
 const spellSym = s => s.replace('/USD', '').split('').join('-');
-const stopFail = (cmd, e) => { const why = trade.stopError(e); recordFailure(cmd, 'broker rejected: ' + why.slice(0, 200)); return `The broker rejected it: ${why} Tell the Owner this reason plainly. It is logged as a failed command.`; };
-const stopCannot = (cmd, why) => { recordFailure(cmd, why.slice(0, 200)); return `CANNOT: ${why} Tell the Owner this plainly. It is logged as a failed command.`; };
+const stopFail = (cmd, e) => { const why = trade.stopError(e); recordFailure(cmd, 'broker rejected: ' + why.slice(0, 200)); return `The broker rejected it: ${why} Tell the user this reason plainly. It is logged as a failed command.`; };
+const stopCannot = (cmd, why) => { recordFailure(cmd, why.slice(0, 200)); return `CANNOT: ${why} Tell the user this plainly. It is logged as a failed command.`; };
 Object.assign(handlers, {
   stop_list: async () => {
     try {
       const [st, pos] = await Promise.all([trade.stopOrders(), trade.positions()]);
       const covered = new Set(st.map(o => o.symbol));
       return JSON.stringify({ restingStops: st.map(o => ({ symbol: o.symbol, spelled: spellSym(o.symbol), shares: o.qty, type: o.type, stopPrice: o.stopPrice ?? null, trailPercent: o.trailPercent ?? null, trailPrice: o.trailPrice ?? null, highWaterMark: o.hwm ?? null, summary: stopDesc(o) })), heldWithoutBrokerStop: pos.filter(p => !covered.has(p.symbol) && !isDustVal(p.value)).map(p => p.symbol), guide: 'These are real orders resting at the broker, separate from the alert levels. If none, say there are no resting stops.' });
-    } catch (e) { return `Could not read the stop orders: ${trade.stopError(e)} Tell the Owner plainly.`; }
+    } catch (e) { return `Could not read the stop orders: ${trade.stopError(e)} Tell the user plainly.`; }
   },
   stop_propose: async ({ action, symbol, kind, stopPrice, trailPercent, trailPrice }) => {
-    if (!turn || turn.origin !== 'user') return 'Refused: stop orders can only be changed when the Owner asks, never from a scheduled or system task.';
+    if (!turn || turn.origin !== 'user') return 'Refused: stop orders can only be changed when the user asks, never from a scheduled or system task.';
     const s = trade.normSymbol(symbol); if (!s) return 'Unrecognised symbol. Ask him to spell it.';
     const cmd = `${action} stop on ${s}${stopPrice ? ' at ' + stopPrice : ''}${trailPercent ? ' trail ' + trailPercent + '%' : ''}${trailPrice ? ' trail $' + trailPrice : ''}`;
     try {
@@ -651,7 +651,7 @@ async function coinFallback(symbol) {
   }
   return null;
 }
-const mdFail = e => `Market data problem: ${e.message}. Tell the Owner plainly; if a key is missing say which one.`;
+const mdFail = e => `Market data problem: ${e.message}. Tell the user plainly; if a key is missing say which one.`;
 Object.assign(handlers, {
   stock_quote: async ({ symbol }) => { const cid = crypto_.coinIdFor(symbol); if (cid) { try { const c = (await crypto_.byIds([cid]))[0]; return c ? JSON.stringify({ ...c, kind: 'crypto', source: 'CoinGecko' }) : 'CoinGecko has no quote for ' + symbol + ' right now.'; } catch (e) { return `Could not get ${symbol} from CoinGecko: ${e.message}`; } } try { return JSON.stringify(await md.quote(symbol)); } catch (e) { const c = await coinFallback(symbol); return c ? JSON.stringify(c) : mdFail(e); } },
   stock_fundamentals: async ({ symbol }) => { try { return JSON.stringify(await md.fundamentals(symbol)); } catch (e) { return mdFail(e); } },
@@ -662,7 +662,7 @@ Object.assign(handlers, {
 // Calendar: what each colour means is saved in state.calendarColors ({ "6": "install job", "default": "personal" }).
 state.calendarColors ||= {};
 try { if (!Object.keys(state.calendarColors).length && process.env.CALENDAR_COLOR_MEANINGS) state.calendarColors = JSON.parse(process.env.CALENDAR_COLOR_MEANINGS); } catch {}
-const calFail = e => `Calendar problem: ${e.message} Tell the Owner plainly and call note_failure.`;
+const calFail = e => `Calendar problem: ${e.message} Tell the user plainly and call note_failure.`;
 Object.assign(handlers, {
   calendar_events: async a => {
     try {
@@ -816,7 +816,7 @@ function placeOk(r, pl) {
   const L = state.location, known = state.places.some(p => placeKey(p.name) === placeKey(r.place));
   return known && !here && L && Date.now() - Date.parse(L.at) < 30 * 60e3;
 }
-// Pop-up panels never appear on their own. They are held until Jarvis asks "want to see it?" and the Owner says yes (anything else = no).
+// Pop-up panels never appear on their own. They are held until Jarvis asks "want to see it?" and the user says yes (anything else = no).
 const heldPanels = {};
 function holdPanel(id, panel) { heldPanels[id] = { id, ...panel, heldAt: Date.now() }; }
 const PANEL_YES = /^(yes|yeah|yea|yep|yup|ya|sure|ok|okay|please|go ahead|show( it| me| them)?|do it|put it up|pull it up|let s see|let me see|why not|absolutely|of course|definitely|sounds good|affirmative)\b/;
@@ -882,7 +882,7 @@ function placeNote() {
 }
 function contextNote() { const arrive = placeNote(); const q = shopQuestion(); if (q) return arrive + ' ' + q; const r = pickReminder(); return arrive + (r ? ' ' + r.text : ''); }
 handlers.place_save = async ({ name, radius_m, home }) => {
-  const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 15 * 60e3) return 'I do not have a fresh location from the phone. Tell the Owner to allow location for the app, then try again.';
+  const L = state.location; if (!L || Date.now() - Date.parse(L.at) > 15 * 60e3) return 'I do not have a fresh location from the phone. Tell the user to allow location for the app, then try again.';
   const key = placeKey(name);
   state.places = state.places.filter(p => placeKey(p.name) !== key);
   const radius = radius_m || (key === 'shop' ? SHOP_RADIUS : 150);
@@ -911,7 +911,7 @@ function cleanItem(a) {
 }
 handlers.reminder_list = async () => state.reminders.length ? state.reminders.map(r => `${r.id} [${r.kind || 'reminder'}]: "${r.text}"${r.place ? (r.trigger === 'away' ? ' away from ' : ' @') + r.place : ''}${r.time ? ' ' + r.time : ''}${r.days ? ' ' + r.days : ''} ${r.chance}%`).join('\n') : 'The reminder bucket is empty.';
 handlers.reminder_remove = async ({ id }) => { const n = state.reminders.length; state.reminders = state.reminders.filter(r => r.id !== id); saveState(); return n === state.reminders.length ? 'No reminder with that id.' : 'Removed.'; };
-if (!state.seededReminders) { // starter bucket; the Owner can edit by voice
+if (!state.seededReminders) { // starter bucket; the user can edit by voice
   state.reminders.push({ id: 'dogs', text: "Do you have the dogs with you? Don't forget to check that they have food.", place: 'home', time: 'morning', chance: 45, cooldownHours: 22 });
   state.seededReminders = true;
 }
@@ -991,7 +991,7 @@ function silentAnswer(text) {
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
-// Quiet ("not now") mode: no unprompted output (phone pushes, spoken remarks, nudges, co-pilot, briefs) while on. Direct replies to the Owner still work.
+// Quiet ("not now") mode: no unprompted output (phone pushes, spoken remarks, nudges, co-pilot, briefs) while on. Direct replies to the user still work.
 // Critical alerts (stop hit, kill switch) still go through unless he asked for absolute silence. Optional duration; auto-resumes; capped at QUIET_MAX_HOURS (24) so it can never stick.
 const QUIET_ON = /^(?:(?:ok|okay|please|jarvis|hey) )*(not (?:right )?now|quiet|quiet mode|go quiet|be quiet|hold off|hold off for now|do not disturb|dont disturb|don t disturb|don t disturb me|dnd|mute|mute (?:yourself|alerts|notifications|the alerts)|silence|not now please)(?: (.+))?$/;
 const QUIET_OFF = /\b(carry on|resume|you can (?:talk|speak) to me again|you can talk again|(?:not now|quiet|quiet mode|dnd|do not disturb|don t disturb) (?:is |mode )?off|end quiet|stop being quiet|back to normal|notify me again|alerts? back on)\b/;
@@ -1010,7 +1010,7 @@ function quietActive() {
   if (Date.now() >= end) { state.quiet = { on: false }; saveState(); broadcast({ type: 'quiet', on: false }); const r = 'Quiet mode over. Back to normal, sir.'; remember('jarvis', r); if (clients.size) broadcast({ type: 'say', text: r, speak: true }); return false; }
   return true;
 }
-// Critical = the Owner's money or safety: always passes quiet mode unless absolute.
+// Critical = the user's money or safety: always passes quiet mode unless absolute.
 const CRITICAL_ALERT = /^(BROKER STOP TRIGGERED|ALERT LEVEL TOUCHED)|kill.?switch|Investment Watch is blind/i;
 const quietBlocks = (critical = false) => quietActive() && (!critical || !!state.quiet.absolute);
 function quietAnswer(text) {
@@ -1168,9 +1168,9 @@ async function varyLine(kind, base) {
     const dest = state.nav?.on && state.nav.dest ? state.nav.dest : state.pendingQ?.dest || '';
     const must = [...state.places.map(p => p.name), ...state.reminders.filter(r => r.kind === 'bring').map(r => r.text)].filter(n => n && low.includes(n.toLowerCase()));
     const recent = (VARY_RECENT[kind] ||= []);
-    const hist = (state.history || []).slice(-4).map(h => `${h.role === 'user' ? 'Owner' : 'Jarvis'}: ${h.text}`).join('\n');
+    const hist = (state.history || []).slice(-4).map(h => `${h.role === 'user' ? 'User' : 'Jarvis'}: ${h.text}`).join('\n');
     const mem = (state.memory || []).slice(-25).map(m => m.fact).join(' | ');
-    const system = `You are Jarvis, the Owner's personal assistant, speaking aloud to him (call him "${title}" at most once, or not at all). Re-say the TEXT in fresh, natural, conversational words, as someone who knows him and remembers the context, not a form being read. ${VARY_KINDS[kind] || ''}\n` +
+    const system = `You are Jarvis, the user's personal assistant, speaking aloud to him (call him "${title}" at most once, or not at all). Re-say the TEXT in fresh, natural, conversational words, as someone who knows him and remembers the context, not a form being read. ${VARY_KINDS[kind] || ''}\n` +
       `Rules: keep EVERY fact in the TEXT (place names, bring items worded as given, reminders, numbers, offers). If the TEXT asks a question, you must still ask it (end with a question mark). Add nothing that is not in the TEXT or the context; no new promises, no invented facts. ` +
       `Use the context only to colour the phrasing (time of day, where he is and is headed, his habits and preferences), lightly, never reciting it. Plain speech, no lists, no emoji, no quotes, at most ${Math.max(2, Math.ceil(base.split(/[.?!]\s/).length) + 1)} sentences. Reply with ONLY the spoken line.\n` +
       `Do not reuse the wording of these recent versions:\n${recent.map(r => '- ' + r).join('\n') || '(none)'}`;
@@ -1220,12 +1220,12 @@ async function sendVoiceClip(title, text) {
   f.append('audio', new Blob([fs.readFileSync(file)], { type: 'audio/mpeg' }), 'jarvis.mp3');
   await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendAudio`, { method: 'POST', body: f, signal: AbortSignal.timeout(20000) });
 }
-// A question alert (departure checklist, "leaving?") must be answerable: send it through Telegram, where the Owner can reply
+// A question alert (departure checklist, "leaving?") must be answerable: send it through Telegram, where the user can reply
 // straight from the notification (see tgPoll), falling back to the normal push with a link that opens Jarvis.
 async function alertOut(title, text) {
   const q = state.pendingQ;
   if (q && Date.now() - q.at < 15000) {
-    // Pushover is the Owner's alert app (custom Jarvis sound): question alerts always go there. Telegram, when set, only adds a copy he can reply to.
+    // Pushover is the user's alert app (custom Jarvis sound): question alerts always go there. Telegram, when set, only adds a copy he can reply to.
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.PUSHOVER_APP_TOKEN) pushTelegram(title, text).then(e => e && console.warn('telegram copy failed:', e)).catch(() => {});
     const err = await push(title, text, (publicBase() ? publicBase().replace(/\/+$/, '') + '/open' : undefined));
     console.log(`alert-out "${title}": ${err || 'sent'}`); return err;
@@ -1527,7 +1527,7 @@ handlers.maps_nav_status = async () => {
   return `Navigating: yes. Destination: ${n.dest || 'unknown'}${n.place ? ` (saved place ${n.place})` : ''}. ETA: ${n.eta || 'unknown'}${n.minutes != null ? `, about ${n.minutes} min left` : ''}. Last updated ${age} min ago.`;
 };
 if (!process.env.JARVIS_SMOKE) setInterval(() => { if (state.nav?.on && !navLive()) { state.nav = { ...state.nav, on: false, lastDest: state.nav.dest, dest: '', place: '' }; saveState(); } }, 60_000);
-// ---------- Co-pilot: unprompted, rare suggestions while the Owner is driving ----------
+// ---------- Co-pilot: unprompted, rare suggestions while the user is driving ----------
 // Driving = Google Maps trip live, or the truck engine seen running (OBD) recently. Today only a meal nudge: not eaten in this meal slot +
 // a food fact in long-term memory (+ a nearby spot if GOOGLE_PLACES_KEY is set). Max COPILOT_MAX_DAY per day, once per topic per trip,
 // a decline silences that meal for the day, never over a pending question or in quiet hours. Offer, not nag.
@@ -1567,7 +1567,7 @@ function driveStart(src, mph) { // movement just began: stage 2 of the travel pr
 }
 if (!process.env.JARVIS_SMOKE) setInterval(() => { const dr = state.drive; if (dr?.moving && Date.now() - (dr.lastMoveAt || 0) > MOVE_HOLD) { dr.moving = false; dr.endedAt = Date.now(); dlog('drive-end', { minutes: Math.round((dr.endedAt - dr.since) / 60e3) }); saveState(); } }, 30_000);
 function isDriving() { return navLive() || !!state.drive?.moving; }
-const MEAL_DEFAULTS = { breakfast: { food: 'breakfast burritos', chain: 'Wawa' }, lunch: { food: 'chicken sandwiches', chain: 'Chick-fil-A' } };   // Owner's stated preferences; a memory fact naming that meal wins
+const MEAL_DEFAULTS = { breakfast: { food: 'breakfast burritos', chain: 'Wawa' }, lunch: { food: 'chicken sandwiches', chain: 'Chick-fil-A' } };   // the user's stated preferences; a memory fact naming that meal wins
 function foodPref(slot) { // slot-specific memory fact, else the built-in default for that slot, else any liked-food fact; chain = a capitalised "at/from X"
   const SLOTS = ['breakfast', 'lunch', 'dinner'];
   const find = ok => {
@@ -1684,7 +1684,7 @@ handlers.weather = async ({ days } = {}) => {
     const u = j.__f ? 'F' : 'C', w = j.__f ? 'mph' : 'km/h';
     const c = j.current, d = j.daily;
     const lines = d.time.map((t, i) => `${t}: ${WX_KINDS(d.weather_code[i])}, high ${Math.round(d.temperature_2m_max[i])}${u}, low ${Math.round(d.temperature_2m_min[i])}${u}, rain chance ${d.precipitation_probability_max[i]}%`);
-    return `Weather at the Owner's ${wxPlace().live ? 'current phone location' : 'default location (phone location not shared yet)'} (${j.timezone}). Now: ${WX_KINDS(c.weather_code)}, ${Math.round(c.temperature_2m)}${u} (feels ${Math.round(c.apparent_temperature)}${u}), wind ${Math.round(c.wind_speed_10m)} ${w}. Forecast: ${lines.join(' | ')}`;
+    return `Weather at the user's ${wxPlace().live ? 'current phone location' : 'default location (phone location not shared yet)'} (${j.timezone}). Now: ${WX_KINDS(c.weather_code)}, ${Math.round(c.temperature_2m)}${u} (feels ${Math.round(c.apparent_temperature)}${u}), wind ${Math.round(c.wind_speed_10m)} ${w}. Forecast: ${lines.join(' | ')}`;
   } catch (e) { return 'Could not get the weather: ' + String(e.message || e); }
 };
 // Weather is mentioned only on the first open of the day, or when it has changed since the last time it was mentioned/checked.
@@ -1726,7 +1726,7 @@ async function localGreeting(memo) {
   return `${wx || open || ctx ? '' : 'At your service, sir.'}${wx}${open}${ctx}`.trim() || 'At your service, sir.';
 }
 async function briefing(reason = 'scheduled', memo) {
-  if (reason === 'wake') {   // silent mode stays on (text only) until the Owner ends it explicitly
+  if (reason === 'wake') {   // silent mode stays on (text only) until the user ends it explicitly
   const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
@@ -1751,7 +1751,7 @@ const BRIEF_PROMPTS = {
   evening: () => `[crypto evening brief] Scan crypto. Recap how today went, which news landed, and what to watch overnight and tomorrow. ${TAIL}`
 };
 // Phone alerts: Telegram first (its own chat, so it can have its own sound), ntfy as the backup.
-// Telegram needs TELEGRAM_BOT_TOKEN. The chat id is found automatically after the Owner sends the bot any message once
+// Telegram needs TELEGRAM_BOT_TOKEN. The chat id is found automatically after the user sends the bot any message once
 // (or set TELEGRAM_CHAT_ID). ntfy needs NTFY_TOPIC.
 const TG_FILE = path.join(DATA_DIR, 'telegram-chat.txt');
 async function tgChatId() {
@@ -1768,7 +1768,7 @@ async function tgChatId() {
 async function pushTelegram(title, body, link, watch, buy) {
   try {
     const chat = await tgChatId();
-    if (!chat) return 'Telegram is connected but has no chat yet. The Owner must open the bot in Telegram and send it any message once.';
+    if (!chat) return 'Telegram is connected but has no chat yet. The user must open the bot in Telegram and send it any message once.';
     const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chat, text: `${title}\n${body}`.slice(0, 3500 - (link ? link.length + 1 : 0)) + (link ? `\n${link}` : ''), ...(watch ? { reply_markup: { inline_keyboard: [[{ text: 'Buy', url: buy }, { text: 'Add to watch list', url: watch }]] } } : {}) }), signal: AbortSignal.timeout(10000)
@@ -1790,7 +1790,7 @@ async function tgPoll() {
     const j = await r.json(); const chat = await tgChatId();
     for (const u of j.result || []) {
       tgOffset = u.update_id + 1;
-      const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the Owner's own chat
+      const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the user's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
       if (!silentAnswer(t) && !(await panelAnswer(t)) && !quietAnswer(t) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
@@ -1807,7 +1807,7 @@ async function pushNtfy(title, body, link, watch, buy) {
     return r.ok ? null : `ntfy answered ${r.status}`;
   } catch (e) { console.warn('phone notification failed:', String(e.message || e)); return String(e.message || e).slice(0, 120); }
 }
-// Pushover: a notification-only app that lets the Owner upload his own sound (website: Custom Sounds).
+// Pushover: a notification-only app that lets the user upload his own sound (website: Custom Sounds).
 // Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
 async function pushPushover(title, body, link, watch, buy) {
   try {
@@ -1837,7 +1837,7 @@ const watchSig = sym => crypto.createHmac('sha256', SECRET).update('watch:' + sy
 function watchLink(link) {
   try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/watch-add?s=${encodeURIComponent(sym)}&k=${watchSig(sym)}`; } catch { return ''; }
 }
-// Buy button: opens the HUD, which asks Jarvis to start the buy flow; nothing is bought until the Owner confirms by voice in a later turn.
+// Buy button: opens the HUD, which asks Jarvis to start the buy flow; nothing is bought until the user confirms by voice in a later turn.
 function buyLink(link) {
   try { const u = new URL(link), sym = String(u.searchParams.get('s') || '').toUpperCase().replace(/[^A-Z.\-]/g, ''); if (!sym || u.pathname !== '/chart') return ''; return `${u.origin}/open?buy=${encodeURIComponent(sym)}`; } catch { return ''; }
 }
@@ -1885,11 +1885,11 @@ async function push(title, body, link, force = false) {
 }
 handlers.phone_alert = async ({ title, message }) => {
   const err = await push(title || 'Jarvis', message || '', undefined, true);
-  return err ? `Could not send: ${err} Tell the Owner plainly.` : 'Sent. Tell the Owner to check his phone.';
+  return err ? `Could not send: ${err} Tell the user plainly.` : 'Sent. Tell the user to check his phone.';
 };
 // ---------- Signals (A24): rule-based scan of trending tickers, stop-loss levels, sell-warning alerts ----------
 state.sigWatch ||= [];
-// Symbols the Owner removed from the watch list. Hides auto (position) rows and stops their alerts; positions themselves are untouched.
+// Symbols the user removed from the watch list. Hides auto (position) rows and stops their alerts; positions themselves are untouched.
 state.wlHide ||= [];
 state.trail ||= {};
 if (!state.wlHideSeeded) { state.wlHide = [...new Set([...state.wlHide, 'NEAR', 'TXT', 'XRP'])]; state.wlHideSeeded = true; }
@@ -1902,7 +1902,7 @@ const dustKeys = () => new Set((watch.holdings?.positions || []).filter(p => isD
 // or just under its latest swing low if that is higher. It only ever ratchets up. Without ATR data it falls back to trailPct.
 // Scale-out ladder: R = atrMult x ATR at first sight (entry-based risk). Tier 1 at entry+1R and tier 2 at entry+2R: "I would sell a third";
 // from tier 1 the stop floor is entry + costPct (breakeven plus costs). The rest rides the trail. Informational only: nothing is ever sold here.
-// floor = an explicit stop (resting broker stop or one the Owner named); it can raise the stop, never lower it.
+// floor = an explicit stop (resting broker stop or one the user named); it can raise the stop, never lower it.
 const vol = new Map(); // symbol key -> { at, atr, swing, busy }
 function volFor(sym) {
   const k = wlKey(sym), c = vol.get(k);
@@ -1980,7 +1980,7 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     }
     const r = await sig.scan(list, Math.min(8, Math.max(1, top || 5)));
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
-  } catch (e) { return `Signal scan failed: ${e.message} Tell the Owner plainly.`; }
+  } catch (e) { return `Signal scan failed: ${e.message} Tell the user plainly.`; }
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 // Written call for a watch row: action word (BUY/HOLD/SELL/WATCH/AVOID), trend/bias, confidence and the reasoning in plain English.
@@ -2201,7 +2201,7 @@ async function watchTick() {
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
-  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, restingBrokerStops: (watch.items || []).filter(i => i.brokerStop).map(i => ({ symbol: i.sym, shares: i.brokerStop.qty, type: i.brokerStop.type, stopPrice: i.brokerStop.stopPrice ?? null, trailPercent: i.brokerStop.trailPercent ?? null, trailPrice: i.brokerStop.trailPrice ?? null })), heldWithoutBrokerStop: (watch.items || []).filter(i => i.held && !i.brokerStop && !isDustVal(i.value)).map(i => i.sym), alertLevels: (watch.items || []).filter(i => i.stop).map(i => ({ symbol: i.sym, alertLevel: i.stop })), guide: 'Answer the interval as a real number (every N seconds). Report the resting broker stops (real orders at the broker, they execute on their own) separately from the alert levels (Jarvis only alerts the phone and the Owner must act). Positions in heldWithoutBrokerStop have no broker protection. To add one use stop_propose.' });
+  return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, restingBrokerStops: (watch.items || []).filter(i => i.brokerStop).map(i => ({ symbol: i.sym, shares: i.brokerStop.qty, type: i.brokerStop.type, stopPrice: i.brokerStop.stopPrice ?? null, trailPercent: i.brokerStop.trailPercent ?? null, trailPrice: i.brokerStop.trailPrice ?? null })), heldWithoutBrokerStop: (watch.items || []).filter(i => i.held && !i.brokerStop && !isDustVal(i.value)).map(i => i.sym), alertLevels: (watch.items || []).filter(i => i.stop).map(i => ({ symbol: i.sym, alertLevel: i.stop })), guide: 'Answer the interval as a real number (every N seconds). Report the resting broker stops (real orders at the broker, they execute on their own) separately from the alert levels (Jarvis only alerts the phone and the user must act). Positions in heldWithoutBrokerStop have no broker protection. To add one use stop_propose.' });
 };
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 // ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
@@ -2257,7 +2257,7 @@ async function sweepTick() {
 }
 // Biggest-mover sweep (stocks + crypto), every moverEveryMin (30). Takes the SINGLE biggest absolute mover across Alpaca stocks
 // (gainers, losers, active, universe; market hours only) and the top-100 coins (24h, 24/7). It is presented only if it passes the
-// Owner's alert thresholds (spikePct with spikeVolRatio volume, or dropDayPct down, or unusualVolRatio volume with a spikePct move).
+// the user's alert thresholds (spikePct with spikeVolRatio volume, or dropDayPct down, or unusualVolRatio volume with a spikePct move).
 // Otherwise nothing at all: no message, no push, no voice. One short line when it qualifies.
 let lastMover = 0;
 async function moverTick() {
@@ -2354,7 +2354,7 @@ if (!process.env.JARVIS_SMOKE) setInterval(briefTick, 60_000);
 
 // ---------- W2 client follow-ups (texts go out from the shop iPhone through an Apple Shortcut) ----------
 // Every morning Jarvis drafts a follow-up for each job that ended FOLLOWUP_DAYS ago (calendar events whose colour meaning
-// contains "job"; all timed events if no meanings are set). Nothing is sent without the Owner's yes: he approves, edits or
+// contains "job"; all timed events if no meanings are set). Nothing is sent without the user's yes: he approves, edits or
 // skips each one (voice or /followups). The shop iPhone runs a Shortcut a few times a day: it fetches the approved texts
 // from /api/outbox (secret token, not the PIN), finds each customer in its Contacts by name, sends from the shop number,
 // then reports back. iPhones don't let apps text on their own; Shortcuts is the one allowed way.
@@ -2456,7 +2456,7 @@ app.get('/open', (req, res) => {
   res.set('Cache-Control', 'no-store').type('html').send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Jarvis</title><body style="background:#04121c;color:#7fe3ff;font:18px sans-serif;text-align:center;padding:60px 20px"><p>Opening Jarvis${sym ? ' to buy ' + sym : ''}...</p><p><a id=a href="${intent}" style="display:inline-block;padding:16px 28px;border:1px solid #7fe3ff;color:#7fe3ff;text-decoration:none;border-radius:6px">Open Jarvis</a></p><p style="font-size:14px;opacity:.7"><a href="${web}" style="color:#7fe3ff">No app? Open the web version</a></p><script>setTimeout(function(){location.href=${JSON.stringify(intent)}},150)</script>`);
 });
 
-// ---------- Social posting (Buffer): Jarvis drafts, the Owner approves, then it is sent. ----------
+// ---------- Social posting (Buffer): Jarvis drafts, the user approves, then it is sent. ----------
 const socSig = id => crypto.createHmac('sha256', SECRET).update('social:' + id).digest('hex').slice(0, 24);
 const socFind = id => { const l = state.social || []; return id ? l.find(d => d.id === id) : [...l].reverse().find(d => d.status === 'pending'); };
 async function socSend(d) {
@@ -2500,14 +2500,14 @@ Object.assign(handlers, {
 });
 
 Object.assign(handlers, {
-  media_list: async () => { const mu = media.listMusic().length, l = media.listRaw(10); return `Music library: ${mu ? mu + ' track' + (mu > 1 ? 's' : '') : 'empty (he can add audio files at /media)'}. ` + (l.length ? 'Uploaded, newest first: ' + l.map(x => `${x.file} (${x.kind}, ${new Date(x.at).toLocaleString('en-US', { timeZone: process.env.TZ || 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})`).join('; ') + '.' : 'Nothing uploaded yet. The Owner adds photos and videos at /media on the Jarvis site or with the SOCIAL button.'); },
+  media_list: async () => { const mu = media.listMusic().length, l = media.listRaw(10); return `Music library: ${mu ? mu + ' track' + (mu > 1 ? 's' : '') : 'empty (he can add audio files at /media)'}. ` + (l.length ? 'Uploaded, newest first: ' + l.map(x => `${x.file} (${x.kind}, ${new Date(x.at).toLocaleString('en-US', { timeZone: process.env.TZ || 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})`).join('; ') + '.' : 'Nothing uploaded yet. The user adds photos and videos at /media on the Jarvis site or with the SOCIAL button.'); },
   media_describe: async ({ file, focus }) => {
     const f = media.findRaw(file); if (!f) return `No uploaded file matches "${file || 'latest'}". Use media_list.`;
     try {
       let image, extra = '';
       if (f.kind === 'video') { image = 'data:image/jpeg;base64,' + (await media.frameOf(f.file)).toString('base64'); const d = await media.durationOf(path.join(media.RAW, f.file)); extra = ` It is a video${d ? ` about ${Math.round(d)} seconds long` : ''}${await media.hasAudio(path.join(media.RAW, f.file)) ? ' with sound' : ' with no sound'}; this is a frame from it.`; }
       else image = await media.photoSmall(f.file);
-      const r = await analyzePhoto({ image, question: `This is raw material for a social media post for a car audio, tint and customization shop and related brands. Say what the vehicle is (make, model, colour if visible), what work or product is shown, how good it looks, and what the best angle for a short punchy post would be. Mention if any face, licence plate or customer paperwork is visible.${focus ? ' Owner note: ' + focus : ''}` });
+      const r = await analyzePhoto({ image, question: `This is raw material for a social media post for a car audio, tint and customization shop and related brands. Say what the vehicle is (make, model, colour if visible), what work or product is shown, how good it looks, and what the best angle for a short punchy post would be. Mention if any face, licence plate or customer paperwork is visible.${focus ? ' Note from sir: ' + focus : ''}` });
       return `${r.spoken} ${r.details}${extra}`.slice(0, 1500);
     } catch (e) { return `Could not look at ${f.file}: ${e.message}`; }
   },
@@ -2945,12 +2945,12 @@ async function fishTts(text, res, prefetch) {
 
 // Jarvis's own voice check: a real 1-word Fish request, so he can say exactly why the voice is off.
 handlers.voice_check = async () => {
-  if (!process.env.FISH_API_KEY) return 'FISH_API_KEY is missing from Railway Variables, so the phone voice is used. Only the Owner can add it (fish.audio/app/api-keys, then Railway Variables).';
+  if (!process.env.FISH_API_KEY) return 'FISH_API_KEY is missing from Railway Variables, so the phone voice is used. Only the user can add it (fish.audio/app/api-keys, then Railway Variables).';
   const out = await fishFetch('Check.');
-  if (out.r) { await out.r.arrayBuffer().catch(() => {}); voiceStatus = { ok: true, reason: '', model: out.model, at: new Date().toISOString() }; return `Fish Audio JARVIS voice works (model ${out.model}). If the Owner still hears the phone voice, tell him to fully close and reopen the app.`; }
+  if (out.r) { await out.r.arrayBuffer().catch(() => {}); voiceStatus = { ok: true, reason: '', model: out.model, at: new Date().toISOString() }; return `Fish Audio JARVIS voice works (model ${out.model}). If the user still hears the phone voice, tell him to fully close and reopen the app.`; }
   const why = out.status ? explainFishError(out.status, out.body) : out.body;
   voiceStatus = { ok: false, reason: why, at: new Date().toISOString() };
-  return `The JARVIS voice is failing: ${why} This is an account problem you cannot fix in code; tell the Owner exactly this.`;
+  return `The JARVIS voice is failing: ${why} This is an account problem you cannot fix in code; tell the user exactly this.`;
 };
 
 // Jarvis notification clip for the phone (ntfy custom sound). Made once with the Fish JARVIS voice, then cached.
@@ -3039,7 +3039,7 @@ app.post('/api/ack', async (req, res) => {
     const t = process.env.USER_TITLE || 'sir';
     const r = await talk({
       cfg: { ...TALK, model: process.env.ACK_MODEL || talkModel(), reasoning: 'none' },
-      system: `You are JARVIS. The Owner has just made a request and you are about to start on it. Say ONE short spoken acknowledgement, 6 to 14 words, that repeats the gist of what he asked in your own words, in a calm British butler tone, ending with "${t}" where it fits. Examples: "Connecting the speaker and getting your tunes going, ${t}." / "Checking tomorrow's forecast for Harrington now." / "Looking up Kicker twelve inch subs for you, ${t}." Rules: do not answer the request, do not state results, do not promise an outcome, do not ask a question, no links, plain words only. If the message is only chit-chat or a thank-you, reply with exactly: NONE`,
+      system: `You are JARVIS. The user has just made a request and you are about to start on it. Say ONE short spoken acknowledgement, 6 to 14 words, that repeats the gist of what he asked in your own words, in a calm British butler tone, ending with "${t}" where it fits. Examples: "Connecting the speaker and getting your tunes going, ${t}." / "Checking tomorrow's forecast for Harrington now." / "Looking up Kicker twelve inch subs for you, ${t}." Rules: do not answer the request, do not state results, do not promise an outcome, do not ask a question, no links, plain words only. If the message is only chit-chat or a thank-you, reply with exactly: NONE`,
       prompt: text, tools: [], webSearch: false, maxTokens: 60, budgetUsd: 0.01, maxRounds: 1,
       run: async () => 'Done.'
     });
@@ -3211,7 +3211,7 @@ async function obdScan(v, why = 'auto') {
   if (lines.length && why === 'auto') { const dq = lines.some(l => /headed somewhere|Where are you headed/.test(l)); deliver(lines.join(' '), v.name, dq, dq ? 'depart' : ''); }
   return { ok: true, data: d, news: lines };
 }
-// The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the Owner's.
+// The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the user's.
 // Not connected yet (or last try failed) -> retry every OBD_RETRY_MIN so it connects as soon as it is in range; once connected, read
 // every OBD_EVERY_MIN. Alerts only for something new or concerning (see obdScan).
 const OBD_RETRY = Number(process.env.OBD_RETRY_MIN || 0.75) * 60e3; // always-on: hunt for the dongle about every 45 s whenever the phone app is connected, any place, any hour
@@ -3352,7 +3352,7 @@ handlers.bluetooth_disconnect = async ({ device, leave_bluetooth_on } = {}) => {
   }
   broadcast({ type: 'activity', text: `Music after disconnect: ${still}` });
   broadcast({ type: 'activity', text: `Bluetooth ${c.ok ? 'ok' : 'FAILED'}: ${c.detail}`.slice(0, 600) });
-  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. ${still === 'playing' ? 'BUT music is STILL playing on the phone after 3 tries: say so plainly.' : 'The music is stopped and Spotify closed. Tell the Owner.'}` : `Could not finish: ${c.detail}`;
+  return c.ok ? `SUCCESS: ${sp.alias || sp.name} disconnected${off ? ' and Bluetooth turned off' : ''}. ${still === 'playing' ? 'BUT music is STILL playing on the phone after 3 tries: say so plainly.' : 'The music is stopped and Spotify closed. Tell the user.'}` : `Could not finish: ${c.detail}`;
 };
 // ---------- LED strip (A20): BanlanX/SPLED SP63xE over BLE, packets built here, phone writes them ----------
 const LED_COLORS = { red: '255,0,0', green: '0,255,0', blue: '0,0,255', white: '255,255,255', 'warm white': '255,170,70', yellow: '255,200,0', orange: '255,90,0', purple: '150,0,255', violet: '150,0,255', pink: '255,40,140', magenta: '255,0,255', cyan: '0,255,255', teal: '0,200,160', aqua: '0,255,200', lime: '120,255,0', gold: '255,160,0', 'ice blue': '120,180,255', indigo: '60,0,255' };
@@ -3411,7 +3411,7 @@ handlers.led_color = async ({ color, brightness, power, effect, speed, music }) 
       const e = ledFindEffect(effect, T.dyn, T.pwm);
       if (!e) return `No effect called "${effect}". Try rainbow, party, fire, comet, stars, breath, gradient or an effect number; there are ${Object.keys(T.dyn).length}.`;
       pk.push(ledPkt(0x53, 3, e[0])); label = `effect "${e[1]}"`; want = { m: 3, e: e[0] };
-      if (/^(strobe|flash|party)$/.test(norm(effect)) && !T.pwm) note = ' Note for the Owner: this strip type has no true strobe; I used the closest party effect.';
+      if (/^(strobe|flash|party)$/.test(norm(effect)) && !T.pwm) note = ' Note for the User: this strip type has no true strobe; I used the closest party effect.';
     }
     if (speed != null) pk.push(ledPkt(0x54, clamp(speed, 1, 10)));
   } else if (color) {
@@ -3430,9 +3430,9 @@ handlers.led_color = async ({ color, brightness, power, effect, speed, music }) 
   for (let i = 0; i < 2 && r.ok && r.st && !ok(r.st); i++) r = await ledSend(pk);
   broadcast({ type: 'activity', text: `LED ${label || 'update'}: ${r.ok ? ledDescribe(r.st) : r.detail}`.slice(0, 300) });
   if (!r.ok) return `LED failed: ${r.detail}`;
-  if (!r.st) return `SUCCESS (unconfirmed): sent ${label || 'the change'} to the controller; this app version cannot read back. Tell the Owner to reinstall the latest app for confirmed control.${note}`;
+  if (!r.st) return `SUCCESS (unconfirmed): sent ${label || 'the change'} to the controller; this app version cannot read back. Tell the user to reinstall the latest app for confirmed control.${note}`;
   if (!ok(r.st)) return `FAILED: after 3 tries the controller reports: ${ledDescribe(r.st)}. It did not accept the change. Say that plainly. Possible causes: a nearby RF remote overriding, the SP63XE phone app still connected, or wrong light type. Offer to run the LED test.`;
-  return `SUCCESS (controller confirmed): ${label || 'updated'}; ${ledDescribe(r.st)}. If the Owner sees a different color than that, the chip order is wrong: offer the LED test.${note}`;
+  return `SUCCESS (controller confirmed): ${label || 'updated'}; ${ledDescribe(r.st)}. If the user sees a different color than that, the chip order is wrong: offer the LED test.${note}`;
 };
 handlers.led_status = async () => {
   const r = await ledSend([]);
@@ -3448,7 +3448,7 @@ handlers.led_test = async () => {
     out.push(`${n}: controller says ${x.st ? x.st.rgb : 'unconfirmed'}`);
     await new Promise(res => setTimeout(res, 3500));
   }
-  return `Test done (sent pure red, green, blue, 3 s each; ${out.join('; ')}). Now ask the Owner what colors he actually SAW in order. If they differ from red, green, blue, call led_setup with seen_red, seen_green, seen_blue. If they match, the order is fine and any earlier red was likely a remote or other app overriding.`;
+  return `Test done (sent pure red, green, blue, 3 s each; ${out.join('; ')}). Now ask the user what colors he actually SAW in order. If they differ from red, green, blue, call led_setup with seen_red, seen_green, seen_blue. If they match, the order is fine and any earlier red was likely a remote or other app overriding.`;
 };
 handlers.led_setup = async ({ seen_red, seen_green, seen_blue, chip_order, light_type }) => {
   const cur = await ledSend([]);
@@ -3458,7 +3458,7 @@ handlers.led_setup = async ({ seen_red, seen_green, seen_blue, chip_order, light
   else if (seen_red && seen_green && seen_blue) {
     const L = s => ({ red: 'R', green: 'G', blue: 'B' }[norm(s)] || String(s).toUpperCase()[0]);
     const seen = { R: L(seen_red), G: L(seen_green), B: L(seen_blue) }; const c = LED_ORDERS[cur.st.o];
-    if (!c || ![seen.R, seen.G, seen.B].every(x => 'RGB'.includes(x)) || new Set(Object.values(seen)).size !== 3) return 'Those colors do not make a valid set. Ask the Owner again.';
+    if (!c || ![seen.R, seen.G, seen.B].every(x => 'RGB'.includes(x)) || new Set(Object.values(seen)).size !== 3) return 'Those colors do not make a valid set. Ask the user again.';
     const n = [...c].map(ch => seen[ch]).join(''); order = LED_ORDERS.indexOf(n);
   }
   const pk = [];
@@ -3468,7 +3468,7 @@ handlers.led_setup = async ({ seen_red, seen_green, seen_blue, chip_order, light
   pk.push(ledPkt(0x50, 1), ledPkt(0x53, 1, 1), ledPkt(0x52, 255, 0, 0, 255));
   const r = await ledSend(pk);
   broadcast({ type: 'activity', text: `LED setup: ${r.ok ? ledDescribe(r.st) : r.detail}`.slice(0, 300) });
-  return r.ok ? `Setup written; now showing red. ${r.st ? 'Controller: ' + ledDescribe(r.st) + '. ' : ''}Ask the Owner if it is truly red; if not, run led_test again.` : `LED setup failed: ${r.detail}`;
+  return r.ok ? `Setup written; now showing red. ${r.st ? 'Controller: ' + ledDescribe(r.st) + '. ' : ''}Ask the user if it is truly red; if not, run led_test again.` : `LED setup failed: ${r.detail}`;
 };
 // ---------- Awake: "I'm awake" dismisses every pending alarm on the phone ----------
 handlers.alarms_off = async () => {
@@ -3520,7 +3520,7 @@ async function stayAnswer(q, text) {
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 12) { state.pendingQ = null; saveState(); return false; }
   const NO = /^(no|nope|nah|not now|no thanks|leave it)\b/, YES = /^(yes|yeah|yep|yup|sure|please|do it|go ahead|ok|okay)\b/;
-  // The Owner just said yes to the music offer, so the "did he ask for music" guard is satisfied.
+  // The user just said yes to the music offer, so the "did he ask for music" guard is satisfied.
   const startMusic = async () => { turn = { id: turn.id, text: 'turn the shop music back on', origin: 'user' }; const r = await handlers.music_control({ action: 'start' }); return /FAILED|Could not|Refused/i.test(String(r)) ? `I could not start the music, sir. ${String(r).slice(0, 160)}` : 'Music is back on, sir.'; };
   if (q.type === 'stay_music') {
     state.pendingQ = null; saveState();
@@ -3565,13 +3565,13 @@ handlers.shut_shop_down = async ({ cancel } = {}) => {
       }
     }
     // STEP 3 + 4: hunt every saved vehicle on a real timer
-    if (!state.vehicles.length) return `${notes.join(' ')} No vehicle is saved, so there is nothing to hunt. Tell the Owner plainly.`;
+    if (!state.vehicles.length) return `${notes.join(' ')} No vehicle is saved, so there is nothing to hunt. Tell the user plainly.`;
     for (const v of state.vehicles) { v.sawOff = true; v.lastDepart = 0; v.lastTry = 0; } // the next running engine counts as a fresh start
     state.shutdown = { active: true, startedAt: Date.now(), deadline: Date.now() + SHUTDOWN_MIN * 60e3, round: 1, dongleSeen: false }; saveState(); shutdownArm();
     dlog('shutdown-start', { vehicles: state.vehicles.map(v => v.name), deadline: new Date(state.shutdown.deadline).toISOString() });
     shutdownHunt();
     notes.push(`Step 3: watching for ${listJoin(state.vehicles.map(v => v.name))}. Step 4: a ${SHUTDOWN_MIN}-minute timer is running; Jarvis will ask by himself if there is no engine start.`);
-    return `${notes.join(' ')} Tell the Owner in one or two short lines what was done, anything that FAILED, and that you are watching for the truck.`;
+    return `${notes.join(' ')} Tell the user in one or two short lines what was done, anything that FAILED, and that you are watching for the truck.`;
   } finally { shutdownBusy = false; }
 };
 // ---------- "We're gonna work out" protocol: gym speaker connects at ~30%, then Spotify's latest playlist ----------
@@ -3580,13 +3580,13 @@ handlers.workout_mode = async ({ speaker_name } = {}) => {
   if (workoutBusy) return 'Workout mode is already running. Say nothing more.';
   workoutBusy = true;
   try {
-    if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the gym speaker and Spotify could not be touched. Tell the Owner plainly.';
+    if (!deviceClients.size) return 'The Jarvis app is not open on the phone, so the gym speaker and Spotify could not be touched. Tell the user plainly.';
     const isGym = x => /gym/i.test(`${x.area} ${x.alias}`);
     let sp = state.speakers.find(isGym);
     if (!sp) {
       if (!speaker_name) {
         const r = await deviceAction('bt_paired', {}, 10000);
-        return r.ok ? `No gym speaker is taught yet. Paired Bluetooth devices on the phone: ${r.detail}. Read them to the Owner and ask which one is the gym speaker; then call workout_mode again with speaker_name set to that exact name.` : `No gym speaker is taught yet and the paired list failed: ${r.detail}. Tell him plainly.`;
+        return r.ok ? `No gym speaker is taught yet. Paired Bluetooth devices on the phone: ${r.detail}. Read them to the user and ask which one is the gym speaker; then call workout_mode again with speaker_name set to that exact name.` : `No gym speaker is taught yet and the paired list failed: ${r.detail}. Tell him plainly.`;
       }
       await handlers.speaker_save({ name: speaker_name, alias: 'gym speaker', area: 'gym', volume: 30 });
       sp = state.speakers.find(isGym);
@@ -3594,7 +3594,7 @@ handlers.workout_mode = async ({ speaker_name } = {}) => {
     if (sp.volume == null) { sp.volume = 30; saveState(); }
     turn = { id: turn.id, text: 'start the gym music on spotify', origin: 'user' };   // the music gate wants an explicit music request
     const r = String(await handlers.music_control({ action: 'start', speaker: 'gym' }).catch(e => `Could not finish: ${e.message || e}`));
-    return `${r} Tell the Owner in one short line what happened (gym speaker connected at ${sp.volume}%, Spotify playing his latest playlist) and anything that FAILED. Only claim music if it says SUCCESS.`;
+    return `${r} Tell the user in one short line what happened (gym speaker connected at ${sp.volume}%, Spotify playing his latest playlist) and anything that FAILED. Only claim music if it says SUCCESS.`;
   } finally { workoutBusy = false; }
 };
 if (state.shutdown?.active) { if (Date.now() - state.shutdown.startedAt > 30 * 60e3) state.shutdown.active = false; else { shutdownArm(); shutdownHunt(); } } // survive a restart
@@ -3620,7 +3620,7 @@ function gmPanel(room, game, rows, running) {
   saveState(); broadcast({ type: 'panels', panels: state.panels });
 }
 // No GAMING_BRIDGE_URL: the PHONE is the bridge (ps5.js). It wakes the PS5 over the home Wi-Fi; the TV and its game mode follow the
-// console over HDMI-CEC (One-Touch Play, already working at the Owner's house), so the TV steps are reported as "follows the PS5", not confirmed.
+// console over HDMI-CEC (One-Touch Play, already working at the user's house), so the TV steps are reported as "follows the PS5", not confirmed.
 const PS = ps5.make(deviceAction);
 const phoneMode = () => !process.env.GAMING_BRIDGE_URL;
 async function gmPhone(step, payload) {
@@ -3724,24 +3724,24 @@ handlers.gaming_mode = async ({ game, room } = {}) => {
     return `${rows.map(r => `${r.label}: ${r.ok ? 'CONFIRMED, ' : ''}${r.detail}`).join(' | ')}. ${bad.length ? `Not everything worked: ${bad.length} step(s) not done.` : 'All steps confirmed.'} Read it out step by step in a few short lines: what actually turned on (${done.join(', ') || 'nothing'}), and plainly what is missing and what hardware or connection is still needed. Never claim a step worked unless it says CONFIRMED.`;
   } finally { gamingBusy = false; }
 };
-// ---------- Maintenance mode (A22): voice request -> Claude Code routine on the Owner's plan -> pushes to GitHub -> Railway redeploys ----------
+// ---------- Maintenance mode (A22): voice request -> Claude Code routine on the user's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';
 handlers.maintenance_request = async ({ request }) => {
   const tok = process.env.MAINT_ROUTINE_TOKEN;
-  if (!tok) return 'Maintenance mode is not connected yet: MAINT_ROUTINE_TOKEN is missing in Railway. Tell the Owner plainly. (use_workshop is the old path and needs Anthropic credit.)';
-  if (!String(request || '').trim()) return 'No request given. Ask the Owner what to change.';
+  if (!tok) return 'Maintenance mode is not connected yet: MAINT_ROUTINE_TOKEN is missing in Railway. Tell the user plainly. (use_workshop is the old path and needs Anthropic credit.)';
+  if (!String(request || '').trim()) return 'No request given. Ask the user what to change.';
   try {
     const r = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${MAINT_ID}/fire`, {
       method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${tok}`, 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: `Owner's maintenance request (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
+      body: JSON.stringify({ text: `Maintenance request (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return `The maintenance engineer could not be started (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the Owner.`;
+    if (!r.ok) return `The maintenance engineer could not be started (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the user.`;
     state.maintLast = { at: Date.now(), request: String(request).slice(0, 300), session: j.claude_code_session_url || '' }; saveState();
     broadcast({ type: 'activity', text: `Maintenance request sent: ${String(request).slice(0, 120)}${j.claude_code_session_url ? ' · ' + j.claude_code_session_url : ''}` });
-    return 'SENT: a Claude Code engineer session has started on it. It usually takes a few minutes. Tell the Owner it is sent and to ask "maintenance status" in a few minutes.';
+    return 'SENT: a Claude Code engineer session has started on it. It usually takes a few minutes. Tell the user it is sent and to ask "maintenance status" in a few minutes.';
   } catch (e) { return `Could not reach the maintenance engineer: ${e.message}`; }
 };
 handlers.maintenance_status = async () => {
@@ -3759,14 +3759,14 @@ handlers.maintenance_status = async () => {
   } catch (e) { return `Could not read the report: ${e.message}`; }
 };
 // Auto "build deployed" notice: the engineer's last push carries a fresh maintenance/last.md. When a boot finds one newer than the
-// pending request, tell the Owner once (spoken if the app is open, plus a phone push). Held while quiet mode is on, never dropped.
+// pending request, tell the user once (spoken if the app is open, plus a phone push). Held while quiet mode is on, never dropped.
 function deployNoteText(txt) {
   const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1], st = (txt.match(/^STATUS:\s*(\S+)/m) || [])[1] || 'done';
   const req = (txt.match(/^REQUEST:\s*(.+)$/m) || [])[1] || '';
   const res = (txt.split(/^RESULT:\s*/m)[1] || '').replace(/\s+/g, ' ').trim();
   const what = (res.match(/[^.!?]+[.!?]+/g) || [res]).slice(0, 2).join(' ').trim() || req;
   const when = t && !isNaN(Date.parse(t)) ? new Date(t).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: state.location?.tz || process.env.TZ || 'America/New_York' }) : '';
-  const head = st === 'done' ? 'Owner, I have been updated and I am now current' : st === 'needs-owner' ? 'Owner, maintenance finished but it needs you' : 'Owner, maintenance did not complete';
+  const head = st === 'done' ? 'Sir, I have been updated and I am now current' : st === 'needs-owner' ? 'Sir, maintenance finished but it needs you' : 'Sir, maintenance did not complete';
   return `${head}${when ? `, pushed ${when}` : ''}. ${what}`.slice(0, 600);
 }
 function deployNoteTick() {
@@ -3796,7 +3796,7 @@ handlers.god_mode = async ({ speaker_name, area, song } = {}) => {
   const pick = (h ? named.filter(d => norm(d.name).includes(h) || h.includes(norm(d.name))) : named.filter(looksAV)).sort((a, b) => b.rssi - a.rssi);
   const seen = list.slice(0, 20).map(d => `${d.name || d.mac}${d.speaker ? '' : ' (not a speaker, class ' + d.cod + ')'} ${d.rssi}dBm`).join('; ') || 'nothing';
   say('saw: ' + seen);
-  if (!pick.length) return `No ${speaker_name || 'speaker'} found in range. Bluetooth reaches about 30 feet, and a speaker only shows up while in pairing mode. Saw: ${seen}. Do not start music; tell the Owner exactly this.`;
+  if (!pick.length) return `No ${speaker_name || 'speaker'} found in range. Bluetooth reaches about 30 feet, and a speaker only shows up while in pairing mode. Saw: ${seen}. Do not start music; tell the user exactly this.`;
   if (!state.speakers.length) state.speakers.push({ name: process.env.BT_SPEAKER_NAME || 'Rockville', alias: 'Rockville', area: '' });
   const ok = [], skipped = [];
   for (const d of pick) {
@@ -3856,7 +3856,7 @@ async function startAndVerify() {
   }
   return { ok: false, text: log.join(' | '), log };
 }
-const failed = (why) => `FAILED: music is NOT confirmed playing. ${why} Tell the Owner it failed and give this reason; do NOT claim success.`;
+const failed = (why) => `FAILED: music is NOT confirmed playing. ${why} Tell the user it failed and give this reason; do NOT claim success.`;
 async function musicViaPhone({ action, query, kind, volume, speaker }) {
   const say = r => (r.ok ? r.detail : 'Phone problem: ' + r.detail);
   const notes = [];
@@ -3918,7 +3918,7 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
     return 'Unknown music action.';
   } catch (e) { return spoFail(e); }
 };
-// Music only starts when the Owner actually asked for it in this turn. Pause/next/volume/status are always allowed.
+// Music only starts when the user actually asked for it in this turn. Pause/next/volume/status are always allowed.
 {
   const _music = handlers.music_control;
   const WANTS_MUSIC = /\b(music|tunes?|songs?|spotify|playlist|play|put on|turn on|start|resume|speaker|bluetooth|god ?mode|take over|queue|album|artist|radio)\b/i;
@@ -3929,7 +3929,7 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
       if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said)) {
         broadcast({ type: 'activity', text: `Blocked music ${a.action}: you did not ask for music (heard: "${said.slice(0, 60)}")` });
         console.log(`music ${a.action} BLOCKED, origin=${turn?.origin}, text="${said.slice(0, 80)}"`);
-        return 'Refused: the Owner did not ask for music in this request. Do NOT start music. Just answer what he said.';
+        return 'Refused: the user did not ask for music in this request. Do NOT start music. Just answer what he said.';
       }
       broadcast({ type: 'activity', text: `Music ${a.action} because you said: "${said.slice(0, 60)}"` });
     }

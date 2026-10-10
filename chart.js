@@ -149,6 +149,6 @@ export async function read({ symbol, timeframe = '1d' } = {}) {
     lastCandles: b.slice(-5).map(x => ({ o: r2(x.o), h: r2(x.h), l: r2(x.l), c: r2(x.c), v: x.v })),
     candlePatterns: candles(b), patterns: patterns(b, lv, price),
     scoreboard: { bullish: bull, bearish: bear },
-    guide: 'Explain like a floor trader to a friend: lead with trend + where price sits vs support/resistance, then momentum and volume, then what would change the picture (a close above resistance or below support). Spoken reply short but must include the key numbers (price, support, resistance, trend); the HUD may carry extra detail, but never say "on screen" or "on the HUD". Chart patterns are probabilities, not predictions. You are not a financial advisor: no promises, no pushing trades. If the Owner wants to trade, use trade_propose separately. Mention the timeframe, since daily and 5-minute charts can disagree.'
+    guide: 'Explain like a floor trader to a friend: lead with trend + where price sits vs support/resistance, then momentum and volume, then what would change the picture (a close above resistance or below support). Spoken reply short but must include the key numbers (price, support, resistance, trend); the HUD may carry extra detail, but never say "on screen" or "on the HUD". Chart patterns are probabilities, not predictions. You are not a financial advisor: no promises, no pushing trades. If the user wants to trade, use trade_propose separately. Mention the timeframe, since daily and 5-minute charts can disagree.'
   };
 }

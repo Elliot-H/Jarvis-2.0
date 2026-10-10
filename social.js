@@ -1,6 +1,6 @@
 // Social posting through Buffer's API (https://developers.buffer.com): one Buffer account (one API key) per brand.
 // Keys live in Railway variables named BUFFER_KEY_<BRAND> (BUFFER_KEY_DEFIANT, BUFFER_KEY_MYONLINECARGUY, BUFFER_KEY_NEXUS, BUFFER_KEY_MYGURU...).
-// Jarvis only DRAFTS; a post goes to Buffer after the Owner approves it (voice or signed link). Never posts on its own.
+// Jarvis only DRAFTS; a post goes to Buffer after the user approves it (voice or signed link). Never posts on its own.
 const API = process.env.BUFFER_API_URL || 'https://api.buffer.com';
 const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 export const brands = () => Object.entries(process.env).filter(([k, v]) => /^BUFFER_KEY_[A-Z0-9_]+$/.test(k) && v && v.trim()).map(([k, v]) => ({ id: k.slice(11).toLowerCase(), key: v.trim() }));

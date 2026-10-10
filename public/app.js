@@ -863,7 +863,7 @@
     uttTimer = setTimeout(flush, pending?.wakeOnly ? 1100 : silenceFor(pending?.text));
   }
 
-  // Alert "Buy" button lands here as /?buy=SYM: hand it to Jarvis once connected; he proposes and waits for the Owner's spoken confirm.
+  // Alert "Buy" button lands here as /?buy=SYM: hand it to Jarvis once connected; he proposes and waits for the user's spoken confirm.
   const BUY_SYM = (params.get('buy') || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
   if (BUY_SYM) { try { history.replaceState(null, '', location.pathname); } catch {} const t = setInterval(() => { if (ws && ws.readyState === 1) { clearInterval(t); addLog('user', 'Buy ' + BUY_SYM); send({ type: 'ask', text: `I want to buy ${BUY_SYM}. Start the buy flow and wait for my confirmation.` }); } }, 1000); setTimeout(() => clearInterval(t), 60000); }
   function submit(text, raw) {
@@ -940,7 +940,7 @@
       if (x.status === 401) return location.reload();
       if (x.status !== 200) { setState('idle'); const m = 'The upload failed: ' + (() => { try { return JSON.parse(x.responseText).error; } catch { return x.status; } })(); addLog('system', m); return caption(m); }
       let file = ''; try { file = JSON.parse(x.responseText).file; } catch {}
-      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}${topic ? `. Topic of the post (from the Owner, build the headline and caption around it): ${topic}` : ''}. Do the whole thing now without asking me anything: check what it shows, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`, true);
+      submit(`Social post: new upload ${file}${brand ? `, brand ${brand}` : ', choose the brand from what it shows'}${topic ? `. Topic of the post (from the user, build the headline and caption around it): ${topic}` : ''}. Do the whole thing now without asking me anything: check what it shows, write the headline, caption and hashtags, edit it${/\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(file) ? ', add music if the library has tracks' : ''}, and draft the post.`, true);
     };
     x.onerror = () => { setState('idle'); const m = 'The upload failed (connection). Try again on a better signal.'; addLog('system', m); caption(m); };
     x.send(f);

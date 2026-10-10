@@ -1,4 +1,4 @@
-// Daily time slots in the Owner's timezone. Pure functions so they can be tested without waiting for the clock.
+// Daily time slots in the user's timezone. Pure functions so they can be tested without waiting for the clock.
 
 export function localClock(date = new Date(), tz = 'America/New_York') {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })

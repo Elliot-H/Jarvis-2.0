@@ -70,7 +70,7 @@ export async function orders() {
 }
 
 // ---- Resting stop orders at the broker (share-quantity based; never dollar based) ----
-// Callers (server.js stop_* tools) must have the Owner's explicit "confirm" in a LATER turn before any of these writes run.
+// Callers (server.js stop_* tools) must have the user's explicit "confirm" in a LATER turn before any of these writes run.
 export const stopError = e => String(e?.message || e).replace(/\s*\[mode[^\]]*\]/i, '').replace(/\b(paper|live)\b[^.;,]*/gi, '').replace(/\s+/g, ' ').trim();
 export async function stopOrders() {
   const o = await orders();

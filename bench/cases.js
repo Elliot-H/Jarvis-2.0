@@ -46,7 +46,7 @@ export const CASES = [
     search: [[/ravens|baltimore/i, 'Sep 27, 2026: Baltimore Ravens 27, Cleveland Browns 17. Lamar Jackson 2 TD passes.']],
     check: all(({ searches }) => searches > 0 || 'did not search', ({ text }) => /27|twenty[- ]seven/i.test(text) && /ravens|baltimore/i.test(text) || 'did not give the result') },
   { id: 'followup', area: 'lookups', prompt: 'And the 20 percent?',
-    recent: 'Owner: price on a 50 foot roll of 3M FX-ST 35 percent tint?\nYou: About one hundred forty-two dollars at Tint Wiz, sir.',
+    recent: 'User: price on a 50 foot roll of 3M FX-ST 35 percent tint?\nYou: About one hundred forty-two dollars at Tint Wiz, sir.',
     search: [[/20/, 'Tint Wiz: 3M FX-ST 20% 20in x 50ft roll, $139.00.'], [/3m|fx|tint/i, 'Tint Wiz: 3M FX-ST 35% 20in x 50ft $142.00; 3M FX-ST 20% 20in x 50ft $139.00.']],
     check: all(({ searches }) => searches > 0 || 'did not search', ({ text }) => /139|thirty[- ]nine/i.test(text) || 'lost the thread of the earlier question') },
 

@@ -1,4 +1,4 @@
-// Media for social posts: raw photos/videos the Owner uploads (private), and finished posts Jarvis makes from them (public, unguessable names, so Buffer can fetch them).
+// Media for social posts: raw photos/videos the user uploads (private), and finished posts Jarvis makes from them (public, unguessable names, so Buffer can fetch them).
 // Photos: sharp (crop to the platform shape, light colour/contrast lift, dark banner with a headline). Video: ffmpeg (crop to 9:16, trim, same lift, headline for the first seconds).
 import fs from 'node:fs';
 import os from 'node:os';

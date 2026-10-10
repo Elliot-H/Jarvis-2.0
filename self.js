@@ -32,7 +32,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
   // ---------- GitHub ----------
   async function gh(p, opts = {}) {
     const token = process.env.GITHUB_TOKEN;
-    if (!token) throw new Error('GITHUB_TOKEN is not set. The Owner needs to add a GitHub token in Railway → Variables before I can change my own code.');
+    if (!token) throw new Error('GITHUB_TOKEN is not set. The user needs to add a GitHub token in Railway → Variables before I can change my own code.');
     const r = await fetch(`${process.env.GITHUB_API || 'https://api.github.com'}/repos/${REPO}${p}`, {
       ...opts,
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'jarvis-self-repair', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) }
@@ -181,7 +181,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
 
   const tools = [
     tool('self_checkout',
-      'Download my own current source code from GitHub into ./self so I can read and edit it. Call this first whenever the Owner asks me to change, fix, improve or add something to myself. If I already have unsaved edits it keeps them unless force=true.',
+      'Download my own current source code from GitHub into ./self so I can read and edit it. Call this first whenever the user asks me to change, fix, improve or add something to myself. If I already have unsaved edits it keeps them unless force=true.',
       { force: z.boolean().optional().describe('discard my local edits and download fresh') },
       async ({ force }) => {
         try {
@@ -193,8 +193,8 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
       }),
 
     tool('self_check',
-      'Test my edits in ./self: syntax check, secret scan, and a real startup test of the edited server. On success it records the change as ready and shows it on the HUD. After a successful check, briefly tell the Owner what changed and ask "Shall I deploy, sir?" — then STOP and wait for his answer. Never call self_deploy in the same turn.',
-      { summary: z.string().describe('one or two sentences, plain English: what this change does for the Owner') },
+      'Test my edits in ./self: syntax check, secret scan, and a real startup test of the edited server. On success it records the change as ready and shows it on the HUD. After a successful check, briefly tell the user what changed and ask "Shall I deploy, sir?" — then STOP and wait for his answer. Never call self_deploy in the same turn.',
+      { summary: z.string().describe('one or two sentences, plain English: what this change does for the user') },
       async ({ summary }) => {
         try {
           if (!base) return fail('Nothing checked out. Call self_checkout first.');
@@ -214,19 +214,19 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
           pending = { turnId, changes: ch, summary, fingerprint: fp };
           const files = diffSummary(ch);
           setPanel('self_change', { title: 'Proposed change — awaiting your OK', body: `${summary}\n\n${files.split('\n').map(l => '- ' + l).join('\n')}\n\nSay "yes, deploy" to ship it, or "no" to cancel.` });
-          return text(`All checks passed (${boot.why}). Change is READY but NOT deployed.\nFiles:\n${files}\n\nNow ask the Owner: "Shall I deploy, sir?" and end your turn.`);
+          return text(`All checks passed (${boot.why}). Change is READY but NOT deployed.\nFiles:\n${files}\n\nNow ask the User: "Shall I deploy, sir?" and end your turn.`);
         } catch (e) { return fail(e.message); }
       }),
 
     tool('self_deploy',
-      'Deploy the change that passed self_check: commit it to GitHub so Railway rebuilds me (about 2 minutes, then I restart). Only works if the Owner said yes in his latest message, after I asked. Never call this unless he just confirmed.',
+      'Deploy the change that passed self_check: commit it to GitHub so Railway rebuilds me (about 2 minutes, then I restart). Only works if the user said yes in his latest message, after I asked. Never call this unless he just confirmed.',
       { commit_message: z.string().describe('short description of the change') },
       async ({ commit_message }) => {
         try {
           const t = getTurn();
           if (!pending) return fail('Nothing is waiting to deploy. Run self_check first.');
-          if (pending.turnId === t.id) return fail('I must ask the Owner first and wait for his answer in a new message.');
-          if (t.origin !== 'user' || !CONFIRM.test(t.text) || (DENY.test(t.text) && !/\bdo it\b/i.test(t.text))) return fail(`The Owner has not clearly said yes (he said: "${t.text}"). Ask again.`);
+          if (pending.turnId === t.id) return fail('I must ask the user first and wait for his answer in a new message.');
+          if (t.origin !== 'user' || !CONFIRM.test(t.text) || (DENY.test(t.text) && !/\bdo it\b/i.test(t.text))) return fail(`The user has not clearly said yes (he said: "${t.text}"). Ask again.`);
           const ch = changes();
           if (fingerprint(ch) !== pending.fingerprint) return fail('Files changed after the check. Run self_check again.');
           const ref = await gh(`/git/ref/heads/${BRANCH}`);
@@ -237,7 +237,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
             entries.push({ path: p, mode: '100644', type: 'blob', sha: blob.sha });
           }
           for (const p of ch.deleted) entries.push({ path: p, mode: '100644', type: 'blob', sha: null });
-          const sha = await commitTree(entries, base.tree, base.sha, `Jarvis: ${commit_message}\n\n${pending.summary}\n\nApproved by Owner: "${t.text.slice(0, 120)}"`);
+          const sha = await commitTree(entries, base.tree, base.sha, `Jarvis: ${commit_message}\n\n${pending.summary}\n\nApproved by user: "${t.text.slice(0, 120)}"`);
           history({ action: 'deploy', sha, message: commit_message, files: ch.all });
           pending = null; base = null;
           setPanel('self_change', null);
@@ -247,17 +247,17 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
       }),
 
     tool('self_cancel',
-      'Throw away my proposed change (when the Owner says no).',
+      'Throw away my proposed change (when the user says no).',
       {},
       async () => { pending = null; base = null; fs.rmSync(SELF_DIR, { recursive: true, force: true }); setPanel('self_change', null); return text('Proposed change cancelled and my working copy discarded.'); }),
 
     tool('self_rollback',
-      'Undo the most recent change to my code on GitHub (creates a new commit restoring the previous version), so Railway redeploys the older version. Only when the Owner asks to roll back / revert / undo.',
+      'Undo the most recent change to my code on GitHub (creates a new commit restoring the previous version), so Railway redeploys the older version. Only when the user asks to roll back / revert / undo.',
       { reason: z.string() },
       async ({ reason }) => {
         try {
           const t = getTurn();
-          if (t.origin !== 'user' || !ROLLBACK.test(t.text)) return fail('Only roll back when the Owner explicitly asks to roll back, revert or undo.');
+          if (t.origin !== 'user' || !ROLLBACK.test(t.text)) return fail('Only roll back when the user explicitly asks to roll back, revert or undo.');
           const ref = await gh(`/git/ref/heads/${BRANCH}`);
           const head = await gh(`/git/commits/${ref.object.sha}`);
           if (!head.parents?.length) return fail('Nothing to roll back to.');
@@ -290,7 +290,7 @@ export function createSelfRepair({ tool, z, appDir, workspace, getTurn, broadcas
       }),
 
     tool('self_logs',
-      'Read my recent server log and errors reported by the Owner\'s screen (browser). Use this to diagnose problems before fixing them.',
+      'Read my recent server log and errors reported by the user\'s screen (browser). Use this to diagnose problems before fixing them.',
       { lines: z.number().optional() },
       async ({ lines }) => text(logs.tail(Math.min(Number(lines) || 120, 400)) || '(log is empty)'))
   ];

@@ -2,7 +2,7 @@
 // Key and model come from Railway variables (OPENROUTER_API_KEY, VISION_MODEL); nothing is stored in code.
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
-const SYSTEM = `You are Jarvis looking at a photo the Owner just took with his phone. Reply as JSON only: {"spoken": string, "title": string, "details": string}.
+const SYSTEM = `You are Jarvis looking at a photo the user just took with his phone. Reply as JSON only: {"spoken": string, "title": string, "details": string}.
 "spoken": two to four short sentences in your normal dry, direct style, no markdown, headline first. If it contains text, labels, readings or codes, read out the important ones.
 "title": 2 to 5 words naming what the photo is.
 "details": the key facts as lines starting with "- " (exact text read, part names and numbers, gauge or dashboard readings and warning lights, OBD codes with their meaning, receipt totals, anything he may want to act on). Say plainly if something is unreadable or you are unsure. Never invent text you cannot see.`;
@@ -48,7 +48,7 @@ export async function analyzePhoto({ image, question = '', cfg = visionConfig(),
         messages: [
           { role: 'system', content: SYSTEM },
           { role: 'user', content: [
-            { type: 'text', text: question ? `The Owner says: "${String(question).slice(0, 500)}". Analyze the photo for that.` : 'Describe and analyze this photo. Read any text, labels, gauges or codes.' },
+            { type: 'text', text: question ? `The user says: "${String(question).slice(0, 500)}". Analyze the photo for that.` : 'Describe and analyze this photo. Read any text, labels, gauges or codes.' },
             { type: 'image_url', image_url: { url: image } }
           ] }
         ]

@@ -25,13 +25,13 @@ export async function exchange(code, redirect) {
 
 async function token(refresh) {
   if (cache.token && Date.now() < cache.exp) return cache.token;
-  if (!refresh) throw new Error('Spotify is not connected yet. The Owner must approve it once at /api/spotify/login.');
+  if (!refresh) throw new Error('Spotify is not connected yet. The user must approve it once at /api/spotify/login.');
   const r = await fetch(`${AUTH}/api/token`, {
     method: 'POST', headers: { Authorization: basic(), 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh }), signal: AbortSignal.timeout(15000)
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`Spotify login failed (${r.status}): ${j.error_description || j.error || ''}. The Owner may need to approve again at /api/spotify/login.`);
+  if (!r.ok) throw new Error(`Spotify login failed (${r.status}): ${j.error_description || j.error || ''}. The user may need to approve again at /api/spotify/login.`);
   cache = { token: j.access_token, exp: Date.now() + (j.expires_in - 60) * 1000 };
   return cache.token;
 }
