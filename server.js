@@ -2540,6 +2540,7 @@ Object.assign(handlers, {
 app.get('/api/media/diag', async (req, res) => {   // ffmpeg build + HEVC check; ?file=<upload> also tries a real frame grab
   const out = { ...media.ffDiag() }, f = req.query.file ? media.findRaw(req.query.file) : null;
   if (f && f.kind === 'video') { try { out.frameBytes = (await media.frameOf(f.file)).length; out.frame = 'ok'; } catch (e) { out.frame = 'failed: ' + e.message; } }
+  if (f && f.kind === 'video' && req.query.prepare) { try { out.prepare = await media.prepareVideo(f.file, { shape: 'story', headline: 'DEFIANT TEST', music: true }); } catch (e) { out.prepare = 'failed: ' + e.message; } }
   res.json(out);
 });
 app.get('/m/:file', (req, res) => { const p = media.outPath(req.params.file); if (!p) return res.status(404).end(); res.set('Cache-Control', 'public, max-age=86400'); res.sendFile(p); });

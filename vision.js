@@ -10,7 +10,8 @@ const SYSTEM = `You are Jarvis looking at a photo the user just took with his ph
 export const visionConfig = (env = process.env) => ({
   baseUrl: (env.BRAIN_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   apiKey: env.BRAIN_API_KEY || env.OPENROUTER_API_KEY || '',
-  model: env.VISION_MODEL || env.TALK_MODEL || 'google/gemini-3.8-flash'
+  model: env.VISION_MODEL || env.TALK_MODEL || 'google/gemini-3.8-flash',
+  fallbackModel: env.VISION_FALLBACK_MODEL || 'google/gemini-2.5-flash'
 });
 
 export function parseDataUrl(s) {
@@ -35,25 +36,29 @@ export async function analyzePhoto({ image, question = '', cfg = visionConfig(),
   if (!img) throw new Error('That was not a usable photo. It must be a JPEG, PNG or WebP.');
   if (img.bytes > MAX_IMAGE_BYTES) throw new Error('That photo is too large to send.');
   const t0 = Date.now();
+  const ask = (model, ms) => fetchImpl(cfg.baseUrl + '/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' },
+    signal: signal || AbortSignal.timeout(ms),
+    body: JSON.stringify({
+      model, max_tokens: 1200, usage: { include: true },
+      reasoning: { effort: 'low', exclude: true },
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM },
+        { role: 'user', content: [
+          { type: 'text', text: question ? `The user says: "${String(question).slice(0, 500)}". Analyze the photo for that.` : 'Describe and analyze this photo. Read any text, labels, gauges or codes.' },
+          { type: 'image_url', image_url: { url: image } }
+        ] }
+      ]
+    })
+  });
+  // A slow or failing model gets one retry on the fallback model instead of hanging for a minute.
   let res;
+  const fb = cfg.fallbackModel && cfg.fallbackModel !== cfg.model;
   try {
-    res = await fetchImpl(cfg.baseUrl + '/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' },
-      signal: signal || AbortSignal.timeout(60000),
-      body: JSON.stringify({
-        model: cfg.model, max_tokens: 2500, usage: { include: true },
-        reasoning: { effort: 'low', exclude: true },
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: SYSTEM },
-          { role: 'user', content: [
-            { type: 'text', text: question ? `The user says: "${String(question).slice(0, 500)}". Analyze the photo for that.` : 'Describe and analyze this photo. Read any text, labels, gauges or codes.' },
-            { type: 'image_url', image_url: { url: image } }
-          ] }
-        ]
-      })
-    });
+    try { res = await ask(cfg.model, 40000); if (res.status >= 500 && fb) res = await ask(cfg.fallbackModel, 40000); }
+    catch (e) { if (signal?.aborted || !fb) throw e; res = await ask(cfg.fallbackModel, 40000); }
   } catch (e) { throw new Error(`I could not reach the vision model: ${e.message}`); }
   const raw = await res.text();
   if (!res.ok) throw new Error(explain(res.status, raw));
