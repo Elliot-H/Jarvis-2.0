@@ -1241,7 +1241,7 @@ function onMove() {
       if (other) parts.push(bringLine(other.name));
     }
     if (!pl && dest) { const b = bringLine(dest.name); if (b) parts.push(b); }
-    if (!pl && !dep && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure
+    if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure, even when the engine-start question already handled this trip (Oct 2: the line never fired)
   }
   if (pl && rearmed) { // arrived somewhere
     state.trip = null;   // trip over: the next start asks again
@@ -1346,7 +1346,7 @@ function vehicleDeparture(v) {
   state.pendingQ = { type: 'depart', from: here ? here.name : '', vehicle: v.name, at: Date.now() };
   state.departed = { place: here ? here.name : '', at: Date.now(), answered: false };
   saveState();
-  const lead = here ? `Are you leaving ${placeKey(here.name) === 'shop' ? 'the shop' : here.kind === 'home' ? 'home' : here.name}, or headed somewhere?` : 'Where are you headed, sir?';
+  const lead = here ? `Leaving ${placeKey(here.name) === 'shop' ? 'the shop' : here.kind === 'home' ? 'home' : here.name}, sir? Where are you headed?` : 'Where are you headed, sir?';
   return opts.length ? `${lead} ${listJoin(opts)}?` : lead;
 }
 // Third departure prompt: a one-line OFFER of the full vehicle check, chained after the "where to / bring list" answer. Yes = read vehicle_scan aloud; no = dropped for the trip.
@@ -1354,8 +1354,8 @@ const fuelWords = p => p == null ? '' : p >= 90 ? 'full' : p >= 68 ? 'about thre
 function vscanOfferText(v) {
   const d = v.last; if (!d) return '';
   const bits = [];
-  if (d.fuelPct != null) bits.push(`fuel ${d.fuelPct >= 90 ? 'is full' : 'at ' + fuelWords(d.fuelPct)}`);
-  if (d.volts) bits.push(`battery at ${d.volts.toFixed(1)} volts`);
+  if (d.fuelPct != null) bits.push(d.fuelPct >= 90 ? 'fuel is full' : d.fuelPct < 20 ? `fuel ${fuelWords(d.fuelPct)}` : `fuel at ${fuelWords(d.fuelPct)}`);
+  if (d.volts) bits.push(`battery at ${Number(d.volts).toFixed(1)} volts`);
   const n = (d.dtcs || []).length; bits.push(n ? `${n} fault code${n > 1 ? 's' : ''}${d.mil ? ' and the check engine light on' : ''}` : d.mil ? 'check engine light on' : 'no fault codes');
   if (d.readiness?.ready) bits.push((d.readiness.notReady || []).length ? 'emissions not ready' : 'emissions ready');
   const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
@@ -1513,7 +1513,10 @@ function driveStart(src, mph) { // movement just began: stage 2 of the travel pr
   if (state.pendingQ && !qFresh) state.pendingQ = null;
   dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: qFresh, nav: navLive(), at: state.at || null });
   if (!asked && !qFresh && !navLive()) { // engine-start question was missed (app asleep, dongle out of range): ask it now
-    state.departed = null; deliver(vehicleDeparture({ name: 'phone' }), 'Jarvis', true);
+    state.departed = null;
+    const rv = (state.vehicles || []).find(x => x.last?.rpm && now - Date.parse(x.last.at || 0) < 10 * 60e3); // truck seen running just now: the vehicle-check offer can follow the answer
+    if (rv) state.vscan = { vehicle: rv.name, at: now, offered: false };
+    deliver(vehicleDeparture({ name: rv ? rv.name : 'phone' }), 'Jarvis', true);
   }
   saveState();
 }
@@ -3145,6 +3148,7 @@ async function obdScan(v, why = 'auto') {
     const restarted = d.runSec != null && prev.runSec != null && prev.rpm && v.lastRun && d.runSec + 20 < (now - v.lastRun) / 1000 + prev.runSec;
     const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < ((v.sawOff || restarted) ? 45e3 : 3 * 60e3); // no double ask from one start, but a real key-off/restart (Oct 2) counts after 45 s
     dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, runSec: d.runSec ?? null, restarted: !!restarted, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
+    if (newStart && !recent && (v.sawOff || restarted) && state.at && state.trip) { dlog('trip-reset', { vehicle: v.name, at: state.at }); state.trip = null; state.departed = null; if (['depart', 'checklist', 'vscan'].includes(state.pendingQ?.type)) state.pendingQ = null; } // key cycled while still parked at a saved place: he has not left, so the whole departure sequence starts over
     if (newStart && !recent) { v.lastDepart = now; state.vscan = { vehicle: v.name, at: now, offered: false }; lines.unshift(vehicleDeparture(v)); }
   }
   if (off) { if (v.lastRun) v.sawOff = true; } else { v.lastRun = now; v.sawOff = false; }
