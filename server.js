@@ -30,7 +30,7 @@ import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
-import { analyzePhoto, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
+import { analyzePhoto, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -706,7 +706,7 @@ async function runTalk({ text, promptWithContext, chatPrompt, spoken, origin, la
       prompt: promptWithContext,
       tools: TALK_TOOLS,
       budgetUsd: CHAT_BUDGET,
-      maxRounds: /^Social post:/i.test(text) ? 14 : 6, // the social flow is describe, edit, draft: more steps than a normal question
+      maxRounds: /^Social (post|revise):/i.test(text) ? 14 : 6, // the social flow is describe, edit, draft: more steps than a normal question
       signal: ac.signal,
       onTool: (name, args) => { console.log(`  tool: ${name}`); if (!name.startsWith('openrouter')) broadcast({ type: 'activity', text: prettyTool(name, args) }); },
       run: async (name, args) => {
@@ -2512,7 +2512,18 @@ Object.assign(handlers, {
   },
   social_list: async () => { const l = (state.social || []).filter(d => d.status === 'pending'); return l.length ? l.map(d => `${d.id} (${d.brand}): ${d.text.slice(0, 120)}`).join(' | ') : 'No drafts waiting.'; },
   social_approve: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting for approval.'; if (!d.seen && publicBase()) { broadcast({ type: 'social_preview', url: `${publicBase()}/social-approve?id=${d.id}&k=${socSig(d.id)}` }); return 'He has not opened the preview yet, so nothing was posted. I put it on his screen again. Tell him to look it over and say post it, or tap Post it.'; } return socSend(d); },
-  social_edit: async ({ id, text }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.text = String(text).trim(); saveState(); return `Draft ${d.id} now reads: "${d.text}". Ask whether to post it.`; },
+  social_edit: async ({ id, text, mediaFile }) => {
+    const d = socFind(id) || (state.social || []).filter(x => x.status === 'pending').pop(); if (!d || d.status !== 'pending') return 'No draft waiting.';
+    if (text) d.text = String(text).trim();
+    if (mediaFile) {
+      const f = media.outPath(mediaFile); if (!f) return `No finished media called ${mediaFile}. Make one with media_prepare first.`; const base = publicBase(); if (!base) return 'No public address for Jarvis (PUBLIC_URL).';
+      const u = `${base}/m/${path.basename(f)}`; d.mediaInfo = media.infoOf(f); if (/\.mp4$/i.test(f)) { d.videoUrl = u; d.imageUrl = ''; } else { d.imageUrl = u; d.videoUrl = ''; }
+      d.seen = false; saveState();
+      const link = `${base}/social-approve?id=${d.id}&k=${socSig(d.id)}`; broadcast({ type: 'social_preview', url: link });
+      return `Draft ${d.id} updated with the new picture and the preview is open on his screen again. Say ONE short line on what you changed and ask him to look and say post it, or tap Post it.`;
+    }
+    saveState(); return `Draft ${d.id} now reads: "${d.text}". Ask whether to post it.`;
+  },
   social_skip: async ({ id }) => { const d = socFind(id); if (!d || d.status !== 'pending') return 'No draft waiting.'; d.status = 'skipped'; saveState(); return 'Discarded.'; },
 });
 
@@ -2528,12 +2539,19 @@ Object.assign(handlers, {
       return `${r.spoken} ${r.details}${extra}`.slice(0, 1500);
     } catch (e) { return `Could not look at ${f.file}: ${e.message}`; }
   },
-  media_prepare: async ({ file, shape, headline, sub, brand, start, seconds, music }) => {
+  media_prepare: async ({ file, shape, headline, sub, brand, start, seconds, music, focus, focusX, focusY, zoom, banner }) => {
     const f = media.findRaw(file); if (!f) return `No uploaded file matches "${file || 'latest'}". Use media_list.`;
     try {
-      const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline, start, seconds, brand, music }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline, sub, brand });
+      let fc = null, fnote = '';
+      if (f.kind === 'photo' && (focus || (focusX != null && focusY != null))) {
+        if (focusX != null && focusY != null) fc = { x: Math.min(1, Math.max(0, +focusX)), y: Math.min(1, Math.max(0, +focusY)) };
+        else try { fc = await locateSubject({ image: await media.photoSmall(f.file), target: focus }); fnote = ` Centered on ${focus}.`; } catch (e) { return `Could not re-center: ${e.message}. Nothing changed. Tell him and ask him to describe it differently.`; }
+      }
+      const hd = banner === false ? '' : headline;
+      const r = f.kind === 'video' ? await media.prepareVideo(f.file, { shape: shape === 'story' || !shape ? 'story' : shape, headline: hd, start, seconds, brand, music }) : await media.preparePhoto(f.file, { shape: shape || 'portrait', headline: hd, sub: banner === false ? '' : sub, brand, focus: fc, zoom });
+      if (fnote) r.fnote = fnote;
       const base = publicBase();
-      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}${r.music ? ' with a music bed' : ''}.${r.low ? ` WARNING: the original is only ${r.srcW}x${r.srcH} pixels, so it will look soft or pixelated. Tell him in one line and ask for the original from the gallery (he can upload it with the SOCIAL button, picking from the gallery, not the camera shortcut).` : ''}${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
+      return `Made ${r.kind} ${r.name} (${r.shape}) from ${f.file}${r.music ? ' with a music bed' : ''}.${r.fnote || ''}${r.low ? ` WARNING: the original is only ${r.srcW}x${r.srcH} pixels, so it will look soft or pixelated. Tell him in one line and ask for the original from the gallery (he can upload it with the SOCIAL button, picking from the gallery, not the camera shortcut).` : ''}${base ? ` Preview: ${base}/m/${r.name} (needs no login).` : ''} Use social_draft with mediaFile "${r.name}". Say what you did (crop, colour lift, headline) in one line.`;
     } catch (e) { return `Could not edit ${f.file}: ${e.message}`; }
   }
 });
@@ -2578,7 +2596,7 @@ const socView = (d, k, note = '') => {
   const warn = resLine + socWarn(d).map(x => `<div class="warn">${esc(x)}</div>`).join('');
   return `<style>.card{background:#fff;color:#111;border-radius:12px;overflow:hidden;margin:14px 0;max-width:460px}.warn{background:#4a1d1d;border:1px solid #ff6b6b;color:#ffd0d0;padding:10px;border-radius:6px;margin:8px 0;max-width:460px}textarea{width:100%;max-width:460px;min-height:130px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px;padding:10px;font:inherit}button{padding:14px 24px;font-size:17px;border-radius:6px;margin:6px 6px 0 0;border:1px solid #7fe3ff;background:#0b3b52;color:#cfefff}.sec{background:none;border-color:#567;color:#9bb}</style>
 <h3 style="margin:0">PREVIEW: ${esc(d.brand)}</h3><div style="opacity:.7;margin-bottom:6px">Posts to: ${esc((d.channelNames || []).join(', '))}${note ? `<br><b style="color:#7fe3ff">${esc(note)}</b>` : ''}</div>${warn}${chans}
-<form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="k" value="${esc(k)}"><div style="opacity:.7;margin:10px 0 4px">Caption (edit it, then Save)</div><textarea name="text">${esc(d.text)}</textarea><div><button name="act" value="save" class="sec">Save changes</button> <button name="act" value="post">Post it</button> <button name="act" value="skip" class="sec">Delete</button> <button name="act" value="retry" class="sec">Try again</button></div></form>`;
+<form method="post" action="/social-approve"><input type="hidden" name="id" value="${esc(d.id)}"><input type="hidden" name="k" value="${esc(k)}"><div style="opacity:.7;margin:10px 0 4px">Caption (edit it, then Save)</div><textarea name="text">${esc(d.text)}</textarea><div><button name="act" value="save" class="sec">Save changes</button> <button name="act" value="post">Post it</button> <button name="act" value="skip" class="sec">Delete</button> <button name="act" value="retry" class="sec">Try again</button></div>${d.mediaInfo && d.mediaInfo.source ? `<div style="opacity:.7;margin:14px 0 4px">Want it different? Tell Jarvis (e.g. \"center on Mike, less of the dog bed\", \"zoom in\", \"no banner\")</div><textarea name="note" style="min-height:70px" placeholder="What to change"></textarea><div><button name="act" value="revise">Change it</button></div>` : ''}</form>`;
 };
 const socDone = (res, msg, ok = true) => socPage(res, ok ? 'Social' : 'Not posted', ok ? `${esc(msg)}<script>try{parent.postMessage({social:'done'},'*')}catch(e){}</script>` : `<h3 style="color:#ff8b8b">It did not post</h3><p style="white-space:pre-wrap">${esc(msg)}</p><p style="opacity:.7">Nothing was sent. Screenshot this and send it to Claude, or go back and try again.</p><p><a style="color:#7fe3ff" href="javascript:history.back()">Back to the preview</a></p>`);
 const socGate = (req, res) => {
@@ -2598,6 +2616,14 @@ app.post('/social-approve', express.urlencoded({ extended: false }), async (req,
   const act = String(req.body?.act || (req.body?.skip ? 'skip' : 'post'));
   if (act === 'save' || (act === 'post' && req.body?.text && String(req.body.text).trim() !== d.text)) { const t = String(req.body?.text || '').trim(); if (t) { d.text = t.slice(0, 4000); saveState(); } if (act === 'save') return socPage(res, 'Preview', socView(d, k, 'Saved.')); }
   if (act === 'skip') { d.status = 'skipped'; saveState(); return socDone(res, 'Deleted. Nothing was posted.'); }
+  if (act === 'revise') {
+    const note = String(req.body?.note || '').trim().slice(0, 500);
+    if (!note) return socPage(res, 'Preview', socView(d, k, 'Type what to change first.'));
+    const mi = d.mediaInfo || {};
+    const q = `Social revise: draft ${d.id} (${d.brand}) is waiting for approval and the Owner looked at the preview and wants this changed: "${note}". Edit the SAME draft, do not make a new one. ` + (mi.source ? `Its picture was made from the original upload ${mi.source} with shape ${mi.shape || 'portrait'}, headline "${mi.headline || ''}", sub "${mi.sub || ''}", brand ${mi.brand || d.brand}. For a framing/crop/zoom/banner/headline request call media_prepare on that original with the same settings except the change (use focus for "center on <who/what>", zoom for tighter, banner:false for no banner), then social_edit with id ${d.id} and mediaFile set to the new file. ` : 'It has no editable picture. ') + `For a wording request call social_edit with id ${d.id} and the new text. Then say one short line on what you changed. Never post.`;
+    run(q, { spoken: false, origin: 'user', label: 'Social: changing the post' }).catch(e => console.warn('social revise failed: ' + e.message));
+    return socDone(res, 'On it. The preview reopens in a moment with the change.');
+  }
   if (act === 'retry') {
     if (!d.req) return socPage(res, 'Preview', socView(d, k, 'I no longer have the original request for this draft, so I cannot rebuild it. Delete it and use the SOCIAL button again.'));
     d.status = 'skipped'; saveState(); run(d.req, { spoken: false, origin: 'user', label: 'Social post: trying again' }).catch(e => console.warn('social retry failed: ' + e.message));

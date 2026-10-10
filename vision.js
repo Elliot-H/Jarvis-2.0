@@ -72,3 +72,21 @@ export async function analyzePhoto({ image, question = '', cfg = visionConfig(),
   if (!spoken) throw new Error(`The vision model answered but with nothing readable (${content.slice(0, 100).replace(/\s+/g, ' ')}).`);
   return { spoken, title: String(out.title || 'Image analysis').slice(0, 60), details: String(out.details || '').trim(), cost: Number(j.usage?.cost) || 0, ms: Date.now() - t0 };
 }
+
+// Where is a described subject in the photo? → {x,y} as 0..1 fractions of width/height (centre of the subject), or throws.
+export async function locateSubject({ image, target, cfg = visionConfig(), fetchImpl = fetch }) {
+  if (!cfg.apiKey) throw new Error('The vision brain has no key yet.');
+  const ask = model => fetchImpl(cfg.baseUrl + '/chat/completions', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(40000),
+    body: JSON.stringify({ model, max_tokens: 600, reasoning: { effort: 'low', exclude: true }, response_format: { type: 'json_object' }, messages: [
+      { role: 'system', content: 'You locate things in photos. Reply as JSON only: {"found": boolean, "x": number, "y": number, "note": string}. x and y are the centre of the requested subject as fractions of the image width and height (0 = left/top, 1 = right/bottom). If a person is asked for, aim at the middle of their torso and face, not their feet.' },
+      { role: 'user', content: [{ type: 'text', text: `Find: ${String(target).slice(0, 300)}` }, { type: 'image_url', image_url: { url: image } }] }] })
+  });
+  const fb = cfg.fallbackModel && cfg.fallbackModel !== cfg.model; let res;
+  try { res = await ask(cfg.model); if (res.status >= 500 && fb) res = await ask(cfg.fallbackModel); } catch (e) { if (!fb) throw new Error('vision model unreachable: ' + e.message); res = await ask(cfg.fallbackModel); }
+  const raw = await res.text(); if (!res.ok) throw new Error(explain(res.status, raw));
+  let o; try { o = JSON.parse(String(JSON.parse(raw).choices?.[0]?.message?.content || '').replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { throw new Error('could not read where that is in the photo'); }
+  const x = Number(o.x), y = Number(o.y);
+  if (o.found === false || !isFinite(x) || !isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) throw new Error(`could not find "${target}" in the photo${o.note ? ' (' + String(o.note).slice(0, 80) + ')' : ''}`);
+  return { x, y };
+}

@@ -486,3 +486,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Media hardening (2026-10-10, maintenance)
 - Owner reported Railway crashes during social posts. Suspected memory (small Railway plan): uploads were buffered whole in memory (express.raw 300 MB), edits could overlap, sharp cache on, x264 default threads. Now: uploads stream to disk (media.saveRawStream, 400 MB cap), one edit at a time (oneAtATime in media.js), sharp cache off + concurrency 1, ffmpeg -threads 2 and low lookahead, memory logged per job ('media job ...: memory A -> B MB' in /api/logs). Real cause unconfirmed: needs Railway deploy logs / Metrics at the crash time.
+
+## Preview revise (2026-10-10)
+- Preview page has a note box + "Change it" (act=revise on /social-approve). It runs "Social revise: draft <id> ... <note>" through the brain (14 rounds), which calls media_prepare on the ORIGINAL upload (sidecar json now stores source/shape/headline/sub/brand) with focus/zoom/banner, then social_edit {id, mediaFile} (updates image/video url + mediaInfo, resets `seen`, re-broadcasts social_preview). Wording changes use social_edit text. Persona section "Revising a preview".
+- focus = words ("Mike, the man in the black shirt"): vision.js locateSubject returns centre x,y (0..1); media.js extracts an aspect-correct crop around it (rotate() before extract(), clamped, zoom 1-4). Tested on an EXIF-rotated image.
+- Unverified live: vision model accuracy at locating people; video revise is not supported (photos only).

@@ -94,12 +94,21 @@ let chain = Promise.resolve();
 const oneAtATime = (label, fn) => { const job = chain.then(async () => { const mb = () => Math.round(process.memoryUsage().rss / 1048576); const t0 = Date.now(), m0 = mb(); try { return await fn(); } finally { console.log(`  media job ${label}: ${Date.now() - t0} ms, memory ${m0} -> ${mb()} MB`); } }); chain = job.catch(() => {}); return job; };
 export const preparePhoto = (file, o) => oneAtATime('photo', () => preparePhotoNow(file, o));
 export const prepareVideo = (file, o) => oneAtATime('video', () => prepareVideoNow(file, o));
-async function preparePhotoNow(file, { shape = 'portrait', headline = '', sub = '', brand = '' } = {}) {
+async function preparePhotoNow(file, { shape = 'portrait', headline = '', sub = '', brand = '', focus = null, zoom = 1 } = {}) {
   const S = await sharp(), [W, H] = SHAPES[shape] || SHAPES.portrait, br = brandOf(brand);
   const src = path.join(RAW, path.basename(file));
   const meta = await S(src).metadata(), sw = meta.orientation >= 5 ? meta.height : meta.width, sh = meta.orientation >= 5 ? meta.width : meta.height;
   // rotate() applies the phone's orientation; normalise + modulate gives a light "pro" lift without crushing it.
-  let img = S(src).rotate().resize(W, H, { fit: 'cover', position: 'attention' }).normalise({ lower: 2, upper: 99 }).modulate({ saturation: 1.12, brightness: 1.03 }).sharpen({ sigma: 0.8 });
+  let img = S(src).rotate();
+  if (focus && isFinite(focus.x) && isFinite(focus.y) && sw && sh) {
+    // Crop around the chosen centre at the post's aspect ratio; zoom > 1 crops tighter. rotate() runs before extract() in sharp.
+    const z = Math.min(4, Math.max(1, Number(zoom) || 1)), ar = W / H;
+    let cw = sw, ch = Math.round(sw / ar); if (ch > sh) { ch = sh; cw = Math.round(sh * ar); }
+    cw = Math.max(16, Math.round(cw / z)); ch = Math.max(16, Math.round(ch / z));
+    const left = Math.round(Math.min(Math.max(focus.x * sw - cw / 2, 0), sw - cw)), top = Math.round(Math.min(Math.max(focus.y * sh - ch / 2, 0), sh - ch));
+    img = img.extract({ left, top, width: cw, height: ch }).resize(W, H);
+  } else img = img.resize(W, H, { fit: 'cover', position: 'attention' });
+  img = img.normalise({ lower: 2, upper: 99 }).modulate({ saturation: 1.12, brightness: 1.03 }).sharpen({ sigma: 0.8 });
   const layers = [];
   const hl = String(headline || '').trim().toUpperCase().slice(0, 80);
   if (hl) {
@@ -115,7 +124,7 @@ async function preparePhotoNow(file, { shape = 'portrait', headline = '', sub = 
   const id = crypto.randomBytes(8).toString('hex'), name = `${id}.jpg`;
   await (layers.length ? img.composite(layers) : img).jpeg({ quality: 93, mozjpeg: true, chromaSubsampling: '4:4:4' }).toFile(path.join(OUT, name));
   const low = Math.max(sw || 0, sh || 0) < 1000;
-  try { fs.writeFileSync(path.join(OUT, name + '.json'), JSON.stringify({ srcW: sw, srcH: sh, outW: W, outH: H, bytes: fs.statSync(src).size, low })); } catch {}
+  try { fs.writeFileSync(path.join(OUT, name + '.json'), JSON.stringify({ srcW: sw, srcH: sh, outW: W, outH: H, bytes: fs.statSync(src).size, low, source: path.basename(src), shape, headline: hl, sub: String(sub || '').trim(), brand })); } catch {}
   return { name, kind: 'photo', shape, srcW: sw, srcH: sh, low };
 }
 
