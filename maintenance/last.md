@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-10T15:54:59Z
-REQUEST: Stop saying "Owner"; use "sir" everywhere.
+TIME: 2026-10-10T16:05:00Z
+REQUEST: Remove every remaining "Owner" from spoken output, including app-side strings.
 RESULT:
-Done, sir. I removed the word Owner from my persona, wake briefing, maintenance reports, tool prompts and canned lines. Where I address you it now says sir, and where I refer to you in prompts it says the user. Internal code comments and the maintenance status token were left alone since you never hear them. It goes live once Railway finishes redeploying in about two minutes. No APK reinstall is needed.
+Done, sir. I searched the server, persona, prompts, web app and Android source. The only literal Owner left was in internal comments and a Tasker menu label, which you never hear. The earlier replies were most likely the old build announcing before Railway finished redeploying, or an old report being read back. I added a safety net so any spoken line or deploy notice containing Owner now says sir. Only server.js changed, so it is live after the Railway redeploy and no APK reinstall is needed.

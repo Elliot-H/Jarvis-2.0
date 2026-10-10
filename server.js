@@ -99,6 +99,7 @@ function pushBackup() {
 const clients = new Set();
 function broadcast(msg) {
   if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
+  if (msg.type === 'say' && typeof msg.text === 'string' && /\bowner\b/i.test(msg.text)) msg = { ...msg, text: msg.text.replace(/\bowner\b/gi, 'sir') };   // backstop: he is always "sir" out loud
   const s = JSON.stringify(msg);
   if (msg.type === 'say' && msg.text && Date.now() < tgReplyUntil) tgSend(msg.text).catch(() => {}); // answering a Telegram reply: echo Jarvis's answer back there
   for (const c of clients) if (c.readyState === 1) c.send(s);
@@ -3767,7 +3768,7 @@ function deployNoteText(txt) {
   const what = (res.match(/[^.!?]+[.!?]+/g) || [res]).slice(0, 2).join(' ').trim() || req;
   const when = t && !isNaN(Date.parse(t)) ? new Date(t).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: state.location?.tz || process.env.TZ || 'America/New_York' }) : '';
   const head = st === 'done' ? 'Sir, I have been updated and I am now current' : st === 'needs-owner' ? 'Sir, maintenance finished but it needs you' : 'Sir, maintenance did not complete';
-  return `${head}${when ? `, pushed ${when}` : ''}. ${what}`.slice(0, 600);
+  return `${head}${when ? `, pushed ${when}` : ''}. ${what}`.replace(/\bowner\b/gi, 'sir').slice(0, 600);
 }
 function deployNoteTick() {
   const m = state.maintLast; if (!m || m.announced || quietBlocks(false)) return;
