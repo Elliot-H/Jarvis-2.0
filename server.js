@@ -2537,6 +2537,11 @@ Object.assign(handlers, {
     } catch (e) { return `Could not edit ${f.file}: ${e.message}`; }
   }
 });
+app.get('/api/media/diag', async (req, res) => {   // ffmpeg build + HEVC check; ?file=<upload> also tries a real frame grab
+  const out = { ...media.ffDiag() }, f = req.query.file ? media.findRaw(req.query.file) : null;
+  if (f && f.kind === 'video') { try { out.frameBytes = (await media.frameOf(f.file)).length; out.frame = 'ok'; } catch (e) { out.frame = 'failed: ' + e.message; } }
+  res.json(out);
+});
 app.get('/m/:file', (req, res) => { const p = media.outPath(req.params.file); if (!p) return res.status(404).end(); res.set('Cache-Control', 'public, max-age=86400'); res.sendFile(p); });
 app.post('/api/media', express.raw({ type: () => true, limit: '300mb' }), (req, res) => {
   const ext = media.extFor(req.headers['content-type'], req.query.name);

@@ -13,9 +13,15 @@ const base = process.env.MEDIA_DIR || process.env.DATA_DIR || process.env.RAILWA
 export const RAW = path.join(base, 'media', 'raw'), OUT = path.join(base, 'media', 'out'), MUSIC = path.join(base, 'media', 'music');
 for (const d of [RAW, OUT, MUSIC]) fs.mkdirSync(d, { recursive: true });
 // Use the system ffmpeg/ffprobe when present, else the bundled static builds (Railway's builder may ignore nixpacks.toml).
-const bin = (name, pkg, pick) => { if (!spawnSync(name, ['-version'], { stdio: 'ignore' }).error) return name; try { const m = createRequire(import.meta.url)(pkg); return pick(m) || name; } catch { return name; } };
-const FFMPEG = bin('ffmpeg', 'ffmpeg-static', m => m), FFPROBE = bin('ffprobe', 'ffprobe-static', m => m.path);
-const HAS_DRAWTEXT = (() => { try { return /drawtext/.test(spawnSync(FFMPEG, ['-hide_banner', '-filters'], { encoding: 'utf8' }).stdout || ''); } catch { return false; } })();
+// Every ffmpeg that can start is kept as a candidate; ones with an HEVC (H.265) decoder come first, and a failed run falls through to the next.
+const pkgBin = (pkg, pick) => { try { return pick(createRequire(import.meta.url)(pkg)) || ''; } catch { return ''; } };
+const works = bin => !!bin && !spawnSync(bin, ['-version'], { stdio: 'ignore' }).error;
+const hevcOf = bin => { try { return /\bhevc\b/.test(spawnSync(bin, ['-hide_banner', '-decoders'], { encoding: 'utf8' }).stdout || ''); } catch { return false; } };
+const CANDS = [...new Set(['ffmpeg', pkgBin('ffmpeg-static', m => m)])].filter(works).sort((a, b) => hevcOf(b) - hevcOf(a));
+const FFMPEG = CANDS[0] || 'ffmpeg';
+const FFPROBE = works('ffprobe') ? 'ffprobe' : (pkgBin('ffprobe-static', m => m.path) || 'ffprobe');
+// What the server actually has, for checking HEVC support instead of guessing.
+export const ffDiag = () => ({ ffmpegOnPath: works('ffmpeg'), candidates: CANDS.map(b => ({ bin: b, version: (spawnSync(b, ['-version'], { encoding: 'utf8' }).stdout || '').split('\n')[0], hevcDecode: hevcOf(b) })), ffprobe: FFPROBE });
 const FONT = path.join(here, 'config', 'fonts', 'DejaVuSans-Bold.ttf');
 
 const IMG = /\.(jpe?g|png|webp|heic|heif|gif)$/i, VID = /\.(mp4|mov|m4v|webm|mkv|3gp)$/i, AUD = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
@@ -44,7 +50,7 @@ export const cleanup = () => { for (const f of fs.readdirSync(OUT)) { try { cons
 // A still frame (JPEG) from an uploaded video, for the vision model; and whether the video has sound.
 export async function frameOf(file, at = 1.2) {
   const out = path.join(os.tmpdir(), `fr-${crypto.randomBytes(4).toString('hex')}.jpg`);
-  await run(FFMPEG, ['-y', '-ss', String(at), '-i', path.join(RAW, path.basename(file)), '-frames:v', '1', '-vf', 'scale=1024:-2', out], 60e3);
+  await run(FFMPEG, ['-y', '-ss', String(at), '-i', path.join(RAW, path.basename(file)), '-map', '0:v:0', '-an', '-sn', '-frames:v', '1', '-vf', 'scale=1024:-2', out], 60e3);
   const b = fs.readFileSync(out); try { fs.unlinkSync(out); } catch {} return b;
 }
 const probe = (file, args) => new Promise(res => { const p = spawn(FFPROBE, ['-v', 'error', ...args, file], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; p.stdout.on('data', d => { o += d; }); p.on('error', () => res('')); p.on('close', () => res(o.trim())); });
@@ -96,14 +102,22 @@ export async function preparePhoto(file, { shape = 'portrait', headline = '', su
   return { name, kind: 'photo', shape, srcW: sw, srcH: sh, low };
 }
 
-const run = (cmd, args, ms) => new Promise((res, rej) => {
+const run1 = (cmd, args, ms) => new Promise((res, rej) => {
   const p = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] }); let err = '';
   p.stderr.on('data', d => { err = (err + d).slice(-600); });
   const t = setTimeout(() => { p.kill('SIGKILL'); rej(new Error('video edit took too long')); }, ms);
   p.on('error', e => { clearTimeout(t); rej(new Error(e.code === 'ENOENT' ? 'ffmpeg is not installed on the server' : e.message)); });
   p.on('close', c => { clearTimeout(t); c === 0 ? res() : rej(new Error('ffmpeg failed: ' + err.split('\n').slice(-3).join(' ').slice(0, 240))); });
 });
-// Headline strip as a transparent PNG, for ffmpeg builds without drawtext (the bundled static one).
+// Try each ffmpeg build (HEVC-capable first), each normally and then tolerant of corrupt or odd packets; the first success wins.
+async function run(_cmd, args, ms) {
+  const tol = ['-err_detect', 'ignore_err', '-fflags', '+genpts+discardcorrupt'], i = args.indexOf('-i'); let last;
+  for (const bin of CANDS.length ? CANDS : ['ffmpeg']) for (const a of [args, ...(i > 0 ? [[...args.slice(0, i), ...tol, ...args.slice(i)]] : [])]) {
+    try { return await run1(bin, a, ms); } catch (e) { last = e; if (/not installed|too long/.test(e.message)) break; }
+  }
+  throw last || new Error('ffmpeg is not installed on the server');
+}
+// Headline strip as a transparent PNG, drawn with sharp so it works on every ffmpeg build.
 async function headlineOverlay(W, H, hl, size, color) {
   const S = await sharp(), lines = wrap(hl, W * 0.9, size), lh = Math.round(size * 1.2), bh = Math.round(H * 0.2), y0 = Math.round(H * 0.72);
   const ty0 = y0 + Math.round((bh - lines.length * lh) / 2) + size;
@@ -113,14 +127,26 @@ async function headlineOverlay(W, H, hl, size, color) {
   await S(Buffer.from(svg)).png().toFile(f); return f;
 }
 const ffText = s => String(s).replace(/[\\':%]/g, ' ').replace(/[\r\n]+/g, ' ').trim();
+// Source size after rotation, so the crop can keep native resolution.
+async function videoSize(file) {
+  try {
+    const j = JSON.parse(await probe(file, ['-select_streams', 'v:0', '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation', '-of', 'json']) || '{}'), st = (j.streams || [])[0] || {};
+    const rot = Math.abs(Number(st.tags && st.tags.rotate) || Number((st.side_data_list || []).map(d => d.rotation).find(r => r != null)) || 0) % 180;
+    return rot === 90 ? [st.height, st.width] : [st.width, st.height];
+  } catch { return []; }
+}
 export async function prepareVideo(file, { shape = 'story', headline = '', start = 0, seconds = 45, brand = '', music = '' } = {}) {
-  const [W, H] = SHAPES[shape] || SHAPES.story, br = brandOf(brand), src = path.join(RAW, path.basename(file));
+  const [SW, SH] = SHAPES[shape] || SHAPES.story, br = brandOf(brand), src = path.join(RAW, path.basename(file));
   const id = crypto.randomBytes(8).toString('hex'), name = `${id}.mp4`, hl = ffText(String(headline).toUpperCase().slice(0, 60));
   const dur = Math.max(3, Math.min(58, Number(seconds) || 45)), ss = Math.max(0, Number(start) || 0);
+  // Crop to the shape's aspect ratio at the source's own resolution: no scaling, so 4K stays 4K. Sizes kept even for H.264.
+  const [iw, ih] = await videoSize(src), ar = SW / SH, even = n => Math.max(2, Math.floor(n / 2) * 2);
+  const W = iw && ih ? even(Math.min(iw, ih * ar)) : SW, H = iw && ih ? even(Math.min(ih, iw / ar)) : SH;
   const size = Math.round(W * (hl.length > 26 ? 0.06 : 0.075));
-  const base = [`scale=${W}:${H}:force_original_aspect_ratio=increase`, `crop=${W}:${H}`, 'eq=contrast=1.06:saturation=1.15:brightness=0.02', 'unsharp=5:5:0.6'];
-  const useOverlay = !!hl && !HAS_DRAWTEXT, ovPng = useOverlay ? await headlineOverlay(W, H, hl, size, br.color) : '';
-  const vf = base.concat(hl && !useOverlay ? [`drawbox=x=0:y=ih*0.72:w=iw:h=ih*0.2:color=black@0.55:t=fill:enable='lt(t,4)'`, `drawtext=fontfile=${FONT}:text='${hl}':fontcolor=white:fontsize=${size}:x=(w-text_w)/2:y=h*0.78:enable='lt(t,4)'`, `drawbox=x=iw*0.35:y=ih*0.72:w=iw*0.3:h=8:color=0x${br.color.slice(1)}:t=fill:enable='lt(t,4)'`] : []).join(',');
+  const base = iw && ih ? [`crop=${W}:${H}`] : [`scale=${SW}:${SH}:force_original_aspect_ratio=increase`, `crop=${SW}:${SH}`];
+  base.push('eq=contrast=1.06:saturation=1.15:brightness=0.02', 'unsharp=5:5:0.6');
+  const useOverlay = !!hl, ovPng = useOverlay ? await headlineOverlay(W, H, hl, size, br.color) : '';
+  const vf = base.join(',');
   const track = pickMusic(music), sound = await hasAudio(src);
   // Music sits under the original sound (quieter, fades out at the end); a silent clip gets the music alone.
   const fade = `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, dur - 1.5)}:d=1.5`;
@@ -133,7 +159,7 @@ export async function prepareVideo(file, { shape = 'story', headline = '', start
   if (track) args.push('-filter_complex', sound ? `[0:a]volume=1.0[a0];[1:a]volume=0.22,${fade}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,loudnorm=I=-16:TP=-1.5:LRA=11[a]` : `[1:a]volume=0.6,${fade},loudnorm=I=-16:TP=-1.5:LRA=11[a]`, '-map', useOverlay ? '[v]' : '0:v:0', '-map', '[a]');
   else if (sound) args.push('-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', ...(useOverlay ? ['-map', '[v]', '-map', '0:a'] : []));
   else if (useOverlay) args.push('-map', '[v]');
-  args.push('-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', ...(track || sound ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']), '-t', String(dur), '-movflags', '+faststart', path.join(OUT, name));
-  try { await run(FFMPEG, args, 5 * 60e3); } finally { if (ovPng) try { fs.unlinkSync(ovPng); } catch {} }
+  args.push('-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', ...(track || sound ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']), '-t', String(dur), '-movflags', '+faststart', path.join(OUT, name));
+  try { await run(FFMPEG, args, 15 * 60e3); } finally { if (ovPng) try { fs.unlinkSync(ovPng); } catch {} }
   return { name, kind: 'video', shape, music: track };
 }
