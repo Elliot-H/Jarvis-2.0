@@ -33,6 +33,18 @@ export const saveRaw = (buf, ext, label) => {
   const slug = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
   const file = `${id}${slug ? '-' + slug : ''}${ext}`; fs.writeFileSync(path.join(AUD.test(ext) ? MUSIC : RAW, file), buf); return file;
 };
+// Upload straight to disk (never held in memory), capped in size; a partial file is removed.
+export const saveRawStream = (req, ext, label, maxBytes = 400 * 1024 * 1024) => new Promise((res, rej) => {
+  const id = Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
+  const slug = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+  const file = `${id}${slug ? '-' + slug : ''}${ext}`, full = path.join(AUD.test(ext) ? MUSIC : RAW, file), out = fs.createWriteStream(full);
+  let n = 0, dead = false;
+  const fail = e => { if (dead) return; dead = true; try { out.destroy(); fs.unlinkSync(full); } catch {} rej(e); };
+  req.on('data', c => { n += c.length; if (n > maxBytes) { fail(new Error('File is too large (limit 400 MB).')); req.destroy(); } });
+  req.on('error', fail); req.on('aborted', () => fail(new Error('Upload was cut off.'))); out.on('error', fail);
+  out.on('finish', () => { if (dead) return; if (!n) return fail(new Error('Empty upload.')); res(file); });
+  req.pipe(out);
+});
 export const listRaw = (n = 12) => fs.readdirSync(RAW).map(f => ({ file: f, kind: kindOf(f), at: fs.statSync(path.join(RAW, f)).mtimeMs })).filter(x => x.kind).sort((a, b) => b.at - a.at).slice(0, n);
 export const listMusic = () => fs.readdirSync(MUSIC).filter(f => AUD.test(f));
 export const pickMusic = q => { const all = listMusic(); q = String(q || '').trim().toLowerCase(); if (!all.length || /^(none|no|off)$/.test(q)) return ''; if (!q || q === 'auto' || q === 'yes') return all[Math.floor(Math.random() * all.length)]; return all.find(f => f.toLowerCase().includes(q)) || ''; };
@@ -73,11 +85,16 @@ async function sharp() {
     fs.writeFileSync(conf, `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>${path.dirname(FONT)}</dir><cachedir>${dir}</cachedir></fontconfig>`);
     process.env.FONTCONFIG_FILE = conf;
   } catch {}
-  sharpP = import('sharp').then(m => m.default);
+  sharpP = import('sharp').then(m => { const S = m.default; try { S.cache(false); S.concurrency(1); } catch {} return S; });
   return sharpP;
 }
 
-export async function preparePhoto(file, { shape = 'portrait', headline = '', sub = '', brand = '' } = {}) {
+// One edit at a time, and a memory reading in the log: a small Railway plan runs out of memory when two edits overlap.
+let chain = Promise.resolve();
+const oneAtATime = (label, fn) => { const job = chain.then(async () => { const mb = () => Math.round(process.memoryUsage().rss / 1048576); const t0 = Date.now(), m0 = mb(); try { return await fn(); } finally { console.log(`  media job ${label}: ${Date.now() - t0} ms, memory ${m0} -> ${mb()} MB`); } }); chain = job.catch(() => {}); return job; };
+export const preparePhoto = (file, o) => oneAtATime('photo', () => preparePhotoNow(file, o));
+export const prepareVideo = (file, o) => oneAtATime('video', () => prepareVideoNow(file, o));
+async function preparePhotoNow(file, { shape = 'portrait', headline = '', sub = '', brand = '' } = {}) {
   const S = await sharp(), [W, H] = SHAPES[shape] || SHAPES.portrait, br = brandOf(brand);
   const src = path.join(RAW, path.basename(file));
   const meta = await S(src).metadata(), sw = meta.orientation >= 5 ? meta.height : meta.width, sh = meta.orientation >= 5 ? meta.width : meta.height;
@@ -135,7 +152,7 @@ async function videoSize(file) {
     return rot === 90 ? [st.height, st.width] : [st.width, st.height];
   } catch { return []; }
 }
-export async function prepareVideo(file, { shape = 'story', headline = '', start = 0, seconds = 45, brand = '', music = '' } = {}) {
+async function prepareVideoNow(file, { shape = 'story', headline = '', start = 0, seconds = 45, brand = '', music = '' } = {}) {
   const [SW, SH] = SHAPES[shape] || SHAPES.story, br = brandOf(brand), src = path.join(RAW, path.basename(file));
   const id = crypto.randomBytes(8).toString('hex'), name = `${id}.mp4`, hl = ffText(String(headline).toUpperCase().slice(0, 60));
   const dur = Math.max(3, Math.min(58, Number(seconds) || 45)), ss = Math.max(0, Number(start) || 0);
@@ -159,7 +176,7 @@ export async function prepareVideo(file, { shape = 'story', headline = '', start
   if (track) args.push('-filter_complex', sound ? `[0:a]volume=1.0[a0];[1:a]volume=0.22,${fade}[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,loudnorm=I=-16:TP=-1.5:LRA=11[a]` : `[1:a]volume=0.6,${fade},loudnorm=I=-16:TP=-1.5:LRA=11[a]`, '-map', useOverlay ? '[v]' : '0:v:0', '-map', '[a]');
   else if (sound) args.push('-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', ...(useOverlay ? ['-map', '[v]', '-map', '0:a'] : []));
   else if (useOverlay) args.push('-map', '[v]');
-  args.push('-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', ...(track || sound ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']), '-t', String(dur), '-movflags', '+faststart', path.join(OUT, name));
+  args.push('-threads', '2', '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-x264-params', 'rc-lookahead=10:threads=2', '-crf', '18', '-pix_fmt', 'yuv420p', ...(track || sound ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an']), '-t', String(dur), '-movflags', '+faststart', path.join(OUT, name));
   try { await run(FFMPEG, args, 15 * 60e3); } finally { if (ovPng) try { fs.unlinkSync(ovPng); } catch {} }
   return { name, kind: 'video', shape, music: track };
 }

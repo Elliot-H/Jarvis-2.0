@@ -2544,11 +2544,11 @@ app.get('/api/media/diag', async (req, res) => {   // ffmpeg build + HEVC check;
   res.json(out);
 });
 app.get('/m/:file', (req, res) => { const p = media.outPath(req.params.file); if (!p) return res.status(404).end(); res.set('Cache-Control', 'public, max-age=86400'); res.sendFile(p); });
-app.post('/api/media', express.raw({ type: () => true, limit: '300mb' }), (req, res) => {
+app.post('/api/media', async (req, res) => {
   const ext = media.extFor(req.headers['content-type'], req.query.name);
   if (!ext) return res.status(415).json({ error: 'Photos (jpg, png, webp, heic) and videos (mp4, mov) only.' });
-  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Empty upload.' });
-  const file = media.saveRaw(req.body, ext, req.query.label); res.json({ ok: true, file });
+  try { const file = await media.saveRawStream(req, ext, req.query.label); console.log(`  media upload saved: ${file}`); res.json({ ok: true, file }); }
+  catch (e) { console.warn('  media upload failed: ' + e.message); if (!res.headersSent) res.status(400).json({ error: e.message }); }
 });
 app.get('/media', (_req, res) => res.send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis media</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:24px;line-height:1.5"><h2>Send Jarvis photos and videos</h2><p>Pick the raw photos and videos. Audio files (mp3, m4a, wav) go into the music library Jarvis uses under videos. Then tell Jarvis "make a post for Defiant from the latest upload".</p><input id="f" type="file" accept="image/*,video/*,audio/*" multiple style="display:block;margin:14px 0;color:#cfefff"><input id="l" placeholder="What is it? (optional, e.g. tint job Audi Q5)" style="width:100%;padding:12px;background:#06131d;color:#cfefff;border:1px solid #2a5d78;border-radius:6px"><button id="b" style="margin-top:14px;padding:14px 26px;font-size:18px;background:#0b3b52;color:#cfefff;border:1px solid #7fe3ff;border-radius:6px">Upload</button><pre id="o" style="white-space:pre-wrap"></pre><script>
 const o=document.getElementById('o');document.getElementById('b').onclick=async()=>{const fs=[...document.getElementById('f').files];if(!fs.length){o.textContent='Pick a file first.';return}
