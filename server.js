@@ -842,7 +842,7 @@ async function arrivalStatement(q, text) {
   const m = t.match(ARRIVE_RE); if (!m) return false;
   const pl = findPlace(m[1].replace(/^(?:the )?/, '')); if (!pl) return false;
   state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
-  const line = navArrive(pl) || `Noted, sir. You are at ${pl.name}.`; saveState();
+  const line = await varyLine('arrive', navArrive(pl) || `Noted, sir. You are at ${pl.name}.`); saveState();
   broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
   return true;
 }
@@ -1147,7 +1147,52 @@ function dlog(event, detail) {
 }
 let pendingSay = null;
 // Speak it if the app is connected (joined to the greeting if one is about to happen), otherwise send it to his phone.
-function deliver(text, title = 'Jarvis', question = false) {
+// ---------- dynamic wording for departure / arrival lines ----------
+// The templates above carry the FACTS (where, bring list, reminders, vehicle readings). varyLine() has the talk model re-say them fresh each time,
+// using the time of day, the place, the trip, saved memory and the last few exchanges. Any failure, a timeout, a spent budget or a reply that drops a
+// fact (place, bring item, number, the question mark) falls back to the original text, so nothing is ever lost. VARY_LINES=off turns it off.
+const VARY_RECENT = {};
+const VARY_KINDS = {
+  depart: 'He just started the vehicle or left a saved place. Ask where he is headed / confirm the departure, and pass on any bring list, reminder or vehicle check offer in the text.',
+  checklist: 'He just left a saved place. Ask what he needs to bring (tools, food, gas, anything for the dogs, anything for Princess) so he can answer by voice.',
+  reply: 'He answered a departure question. Acknowledge naturally and pass on every bring item, reminder and offer in the text.',
+  leave: 'He is leaving a place. One or two short sentences with everything in the text.',
+  arrive: 'He just arrived somewhere. One or two short sentences with everything in the text.'
+};
+async function varyLine(kind, base) {
+  try {
+    base = String(base || '').replace(/\s+/g, ' ').trim();
+    if (!base || process.env.VARY_LINES === 'off' || !TALK.apiKey || BRAIN !== 'openrouter' || overBudget('talk')) return base;
+    const c = nowCtx(), title = process.env.USER_TITLE || 'sir', low = base.toLowerCase();
+    const here = state.places.find(p => placeKey(p.name) === state.at);
+    const dest = state.nav?.on && state.nav.dest ? state.nav.dest : state.pendingQ?.dest || '';
+    const must = [...state.places.map(p => p.name), ...state.reminders.filter(r => r.kind === 'bring').map(r => r.text)].filter(n => n && low.includes(n.toLowerCase()));
+    const recent = (VARY_RECENT[kind] ||= []);
+    const hist = (state.history || []).slice(-4).map(h => `${h.role === 'user' ? 'Owner' : 'Jarvis'}: ${h.text}`).join('\n');
+    const mem = (state.memory || []).slice(-25).map(m => m.fact).join(' | ');
+    const system = `You are Jarvis, the Owner's personal assistant, speaking aloud to him (call him "${title}" at most once, or not at all). Re-say the TEXT in fresh, natural, conversational words, as someone who knows him and remembers the context, not a form being read. ${VARY_KINDS[kind] || ''}\n` +
+      `Rules: keep EVERY fact in the TEXT (place names, bring items worded as given, reminders, numbers, offers). If the TEXT asks a question, you must still ask it (end with a question mark). Add nothing that is not in the TEXT or the context; no new promises, no invented facts. ` +
+      `Use the context only to colour the phrasing (time of day, where he is and is headed, his habits and preferences), lightly, never reciting it. Plain speech, no lists, no emoji, no quotes, at most ${Math.max(2, Math.ceil(base.split(/[.?!]\s/).length) + 1)} sentences. Reply with ONLY the spoken line.\n` +
+      `Do not reuse the wording of these recent versions:\n${recent.map(r => '- ' + r).join('\n') || '(none)'}`;
+    const prompt = `Context: ${c.wd} ${c.tod}, ${c.h}:00${here ? `; he is at ${here.name}` : ''}${dest ? `; headed to ${dest}` : ''}.${mem ? `\nWhat you remember about him: ${mem}` : ''}${hist ? `\nRecent conversation:\n${hist}` : ''}\n\nTEXT: ${base}`;
+    const r = await talk({ cfg: { ...TALK, model: talkModel(), reasoning: 'none' }, system, prompt, tools: [], webSearch: false, maxRounds: 1, maxTokens: 260, budgetUsd: 0.01, signal: AbortSignal.timeout(Number(process.env.VARY_TIMEOUT_MS || 5000)) });
+    addSpend(r.cost, 'talk');
+    let out = String(r.text || '').replace(/[*_`#]/g, '').replace(/\s+/g, ' ').trim().replace(/^["“](.*)["”]$/, '$1');
+    if (r.error || !out || out.length > base.length * 3 + 160) return base;
+    const lo = out.toLowerCase();
+    if (/[?]/.test(base) && !out.includes('?')) return base;
+    if (must.some(n => !lo.includes(n.toLowerCase()))) return base;
+    if ((base.match(/\d+(?:\.\d+)?/g) || []).some(n => !out.includes(n))) return base;
+    recent.push(out); if (recent.length > 5) recent.shift();
+    console.log(`vary ${kind}: "${base.slice(0, 70)}" -> "${out.slice(0, 90)}"`);
+    return out;
+  } catch (e) { console.warn('vary failed:', String(e.message || e).slice(0, 100)); return base; }
+}
+function deliver(text, title = 'Jarvis', question = false, vary = '') {
+  if (vary) { const base = tripDedupe(String(text).replace(/\s+/g, ' ').trim()); return varyLine(vary, base).then(t => deliverNow(t, title, question)); }
+  return deliverNow(text, title, question);
+}
+function deliverNow(text, title = 'Jarvis', question = false) {
   text = tripDedupe(text.replace(/\s+/g, ' ').trim()); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
@@ -1257,7 +1302,7 @@ function onMove() {
   const text = parts.filter(Boolean).join(' ');
   const leaving = !!prev && !pl, speak = !!text && (leaving || !quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t))); // a departure is always announced, even in quiet hours
   if (prev) dlog('leave-announce', { place: prev.name, spoken: speak, text: text.slice(0, 120) });
-  if (speak) deliver(text, leaving ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis', leaving);
+  if (speak) deliver(text, leaving ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis', leaving, leaving ? (state.pendingQ?.type === 'checklist' ? 'checklist' : 'leave') : 'arrive');
   if (speak && leaving && state.lastCheck && !state.lastCheck.answered) { state.lastCheck.pushed = true; saveState(); }   // it reached his phone: no repeat on arrival
 }
 // Departure checklist: asked aloud the moment he leaves a saved place; his answer becomes bring items for the destination.
@@ -1277,7 +1322,7 @@ const CHECK_CMD = /^(what|whats|what's|how|when|where|who|why|play|pause|stop|tu
 const CHECK_FILL = /^(?:(?:yeah|yes|yep|um|uh|okay|ok|well|and|also|so)\s+)*(?:i\s+(?:need|want|have|got)\s+(?:to\s+)?)?(?:(?:bring|take|grab|get|pick up|add)\s+)?(?:the\s+)?/;
 async function checklistAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
-  const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  const say = async reply => { reply = await varyLine('reply', reply); broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 3 * 60e3 || (CHECK_CMD.test(t) && !CHECK_NO.test(t))) return false; // stale or an unrelated request: let it through, keep nothing
   const done = () => { tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
   if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + vscanTail()); }
@@ -1393,7 +1438,7 @@ async function vscanAnswer(q, text) {
 }
 async function departAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
-  const say = reply => { reply = tripDedupe(reply) || 'Very good, sir.'; broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  const say = async reply => { reply = await varyLine('reply', tripDedupe(reply) || 'Very good, sir.'); broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   const finish = () => { tripAnswered(); state.pendingQ = null; if (state.departed) state.departed.answered = true; if (q.from) state.lastCheck = { from: q.from, at: Date.now(), answered: true }; saveState(); };
   if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 10) { state.pendingQ = null; saveState(); return false; }
   if (DEPART_NO.test(t)) { state.pendingQ = null; state.departed = null; state.trip = null; saveState(); return say('Very good, sir.'); }
@@ -1457,7 +1502,7 @@ function navUpdate(body) {
     let line = '';
     if (p.arrived && wasOn && pl) line = navArrive(pl);
     saveState();
-    if (line) deliver(line, pl.name);
+    if (line) deliver(line, pl.name, false, 'arrive');
     return { ok: true, navigating: false, arrived: !!p.arrived };
   }
   if (!p.dest && !p.eta && !p.minutes && !wasOn) return { ok: true, ignored: true }; // a Maps notification that is not turn-by-turn
@@ -1470,7 +1515,7 @@ function navUpdate(body) {
     if (here && placeKey(here.name) !== placeKey(pl.name)) { parts.push(...eventLines('leave', here.name, Math.random, true)); state.departed = { place: here.name, at: now, answered: true }; }
     parts.push(bringLine(pl.name) || '', ...eventLines('heading', pl.name, Math.random, true));
     const text = parts.filter(Boolean).slice(0, 3).join(' ') || `Heading to ${pl.name}, sir.${state.nav.eta ? ' ETA ' + state.nav.eta + '.' : ''}`;
-    saveState(); deliver(text, `Heading to ${pl.name}`, true);
+    saveState(); deliver(text, `Heading to ${pl.name}`, true, 'depart');
   } else saveState();
   return { ok: true, navigating: true, dest, place: state.nav.place || null, eta: state.nav.eta || null };
 }
@@ -1516,7 +1561,7 @@ function driveStart(src, mph) { // movement just began: stage 2 of the travel pr
     state.departed = null;
     const rv = (state.vehicles || []).find(x => x.last?.rpm && now - Date.parse(x.last.at || 0) < 10 * 60e3); // truck seen running just now: the vehicle-check offer can follow the answer
     if (rv) state.vscan = { vehicle: rv.name, at: now, offered: false };
-    deliver(vehicleDeparture({ name: rv ? rv.name : 'phone' }), 'Jarvis', true);
+    deliver(vehicleDeparture({ name: rv ? rv.name : 'phone' }), 'Jarvis', true, 'depart');
   }
   saveState();
 }
@@ -3163,7 +3208,7 @@ async function obdScan(v, why = 'auto') {
   if (off && d.volts && d.volts < Number(process.env.OBD_LOW_VOLTS || 12.2) && once('volts', 24)) lines.push(`The ${v.name}'s battery is resting at ${d.volts.toFixed(1)} volts, sir. Might be worth putting the tender on it.`);
   if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
   saveState();
-  if (lines.length && why === 'auto') deliver(lines.join(' '), v.name, lines.some(l => /headed somewhere|Where are you headed/.test(l)));
+  if (lines.length && why === 'auto') { const dq = lines.some(l => /headed somewhere|Where are you headed/.test(l)); deliver(lines.join(' '), v.name, dq, dq ? 'depart' : ''); }
   return { ok: true, data: d, news: lines };
 }
 // The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the Owner's.
