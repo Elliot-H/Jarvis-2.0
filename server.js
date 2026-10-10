@@ -1190,10 +1190,25 @@ async function varyLine(kind, base) {
   } catch (e) { console.warn('vary failed:', String(e.message || e).slice(0, 100)); return base; }
 }
 function deliver(text, title = 'Jarvis', question = false, vary = '') {
-  if (vary) { const base = tripDedupe(String(text).replace(/\s+/g, ' ').trim()); return varyLine(vary, base).then(t => deliverNow(t, title, question)); }
-  return deliverNow(text, title, question);
+  if (vary) { const base = tripDedupe(String(text).replace(/\s+/g, ' ').trim()); return varyLine(vary, base).then(t => deliverNow(t, title, question, vary)); }
+  return deliverNow(text, title, question, vary);
 }
-function deliverNow(text, title = 'Jarvis', question = false) {
+// Arrival and leaving lines are spoken aloud by the phone app's background service when the app screen is not connected: no notification.
+// The service polls /api/say-next; if it does not pick the line up within 90 s (phone off, service dead) it falls back to the notification.
+const sayQ = [];
+const SPOKEN_VARY = new Set(['arrive', 'leave']);
+async function sayClipFile(text) {
+  if (!process.env.FISH_API_KEY) return '';
+  const file = alertFile(text);
+  if (!fs.existsSync(file)) { const out = await fishFetch(text.slice(0, 400)); if (!out.r) return ''; fs.writeFileSync(file, Buffer.from(await out.r.arrayBuffer())); }
+  return file;
+}
+function queueSpoken(text, title) {
+  const it = { id: crypto.randomBytes(5).toString('hex'), text, title, at: Date.now(), taken: false };
+  sayQ.push(it); while (sayQ.length > 6) sayQ.shift();
+  setTimeout(() => { const i = sayQ.indexOf(it); if (i < 0) return; sayQ.splice(i, 1); if (it.taken) return; console.log(`  spoken line not picked up, sending notification: ${text}`); holdLine(text, false); alertOut(title, text).catch(() => {}); }, 90000);
+}
+function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
   text = tripDedupe(text.replace(/\s+/g, ' ').trim()); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
@@ -1202,6 +1217,7 @@ function deliverNow(text, title = 'Jarvis', question = false) {
     // A question (leaving / departure prompts) is spoken live and answered by voice: no notification while the app is connected.
     setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, question ? 300 : busy ? 6000 : 2500);
   } else {
+    if (!question && SPOKEN_VARY.has(vary) && !silentActive()) { queueSpoken(text, title); return; }
     // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
     // The question itself is NOT sent as a notification: the push only says to open Jarvis, who then asks it aloud.
     // Every line is also held and spoken aloud the moment the app opens, and sent as a Jarvis-voice audio clip (Telegram) so it is heard, not just read.
@@ -2785,6 +2801,14 @@ app.post('/api/loc', (req, res) => {
   saveState(); onMove();
   res.json({ ok: true, at: state.at || null });
 });
+// The phone app's background service asks for a line to speak: text plus a Jarvis-voice clip when Fish works (the app falls back to the phone's own voice).
+app.get('/api/say-next', async (_req, res) => {
+  const it = sayQ.find(x => !x.taken && Date.now() - x.at < 85000); if (!it) return res.json({});
+  it.taken = true; setTimeout(() => { const i = sayQ.indexOf(it); if (i >= 0) sayQ.splice(i, 1); }, 120000);
+  let clip = ''; try { if (await sayClipFile(it.text)) clip = `/api/say-clip/${it.id}.mp3`; } catch {}
+  console.log(`  speaking on the phone: ${it.text}`); res.json({ id: it.id, text: it.text, clip });
+});
+app.get('/api/say-clip/:id.mp3', (req, res) => { const it = sayQ.find(x => x.id === req.params.id); const f = it && alertFile(it.text); if (!f || !fs.existsSync(f)) return res.status(404).end(); res.type('audio/mpeg').sendFile(f); });
 app.get('/followups', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'followups.html')));
 app.get('/api/followups', (req, res) => res.json({ items: state.followups.slice().reverse(), reviewLink: state.reviewLink || '', template: state.followupTemplate || '',
   days: FOLLOWUP_DAYS, outboxUrl: `${req.protocol}://${req.get('host')}/api/outbox?token=${state.outboxToken}`, sentBase: `${req.protocol}://${req.get('host')}/api/outbox/`, token: state.outboxToken }));
