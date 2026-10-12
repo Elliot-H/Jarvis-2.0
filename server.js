@@ -82,7 +82,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -348,7 +348,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
     .map(h => `${h.role === 'user' ? 'User' : 'You'}: ${h.text}`).join('\n');
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
-  const live = (clock + hud + failed + memoryContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
+  const live = (clock + hud + failed + memoryContext() + headingContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
   const chatPrompt = chatSystemPrompt(persona);
 
@@ -842,7 +842,7 @@ async function arrivalStatement(q, text) {
   if (t.split(' ').length > 12 || /\b(?:leaving|headed|heading|going|on my way|about to)\b/.test(t) || /\?$/.test(String(text).trim())) return false;
   const m = t.match(ARRIVE_RE); if (!m) return false;
   const pl = findPlace(m[1].replace(/^(?:the )?/, '')); if (!pl) return false;
-  state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
+  state.pendingQ = null; state.heading = null; state.trip = null; if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
   const line = await varyLine('arrive', navArrive(pl) || `Noted, sir. You are at ${pl.name}.`); saveState();
   broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
   return true;
@@ -1166,7 +1166,7 @@ async function varyLine(kind, base) {
     if (!base || process.env.VARY_LINES === 'off' || !TALK.apiKey || BRAIN !== 'openrouter' || overBudget('talk')) return base;
     const c = nowCtx(), title = process.env.USER_TITLE || 'sir', low = base.toLowerCase();
     const here = state.places.find(p => placeKey(p.name) === state.at);
-    const dest = state.nav?.on && state.nav.dest ? state.nav.dest : state.pendingQ?.dest || '';
+    const dest = state.nav?.on && state.nav.dest ? state.nav.dest : headingFresh()?.name || state.pendingQ?.dest || '';
     const must = [...state.places.map(p => p.name), ...state.reminders.filter(r => r.kind === 'bring').map(r => r.text)].filter(n => n && low.includes(n.toLowerCase()));
     const recent = (VARY_RECENT[kind] ||= []);
     const hist = (state.history || []).slice(-4).map(h => `${h.role === 'user' ? 'User' : 'Jarvis'}: ${h.text}`).join('\n');
@@ -1306,7 +1306,7 @@ function onMove() {
     if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure, even when the engine-start question already handled this trip (Oct 2: the line never fired)
   }
   if (pl && rearmed) { // arrived somewhere
-    state.trip = null;   // trip over: the next start asks again
+    state.trip = null; state.heading = null;   // trip over: the next start asks again
     if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
     const brought = bringFor(pl.name);
     if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
@@ -1334,6 +1334,7 @@ function askChecklist(fromName, dest, arrive) {
   state.lastCheck = { from: fromName, at: Date.now(), answered: false };
   return checklistQuestion(dest, arrive ? fromName : '');
 }
+const DEST_STMT = /^(?:(?:yeah|yes|yep|well|um|uh|okay|ok|so)\s+)*(?:i\s?m |im |we\s?re |we are |i am )?(?:going|headed|heading|off|driving|running|on my way)\s+(?:over |back |out )?(?:to|for|into)\s+(?:the )?([a-z0-9' &.-]{2,40})$|^(?:i\s?m |im )?(?:going|headed|heading) (home)$/;
 const CHECK_NO = /^(no|nope|nah|nothing|none|not really|i'?m good|im good|all set|all good|got everything|got it all|i have everything|that'?s all)\b/;
 const CHECK_CMD = /^(what|whats|what's|how|when|where|who|why|play|pause|stop|turn|call|text|open|set|show|tell|check|is|are|do|does|did|can|could|will)\b|\?$/;
 const CHECK_FILL = /^(?:(?:yeah|yes|yep|um|uh|okay|ok|well|and|also|so)\s+)*(?:i\s+(?:need|want|have|got)\s+(?:to\s+)?)?(?:(?:bring|take|grab|get|pick up|add)\s+)?(?:the\s+)?/;
@@ -1344,6 +1345,14 @@ async function checklistAnswer(q, text) {
   const done = () => { tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
   if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + vscanTail()); }
   if (/^(yes|yeah|yep|yup|i do|i did)$/.test(t)) { q.at = Date.now(); saveState(); return say('What is it, sir?'); }
+  const stated = t.match(DEST_STMT);   // "headed to the shop" / "going home": a destination, never a bring item
+  if (stated) {
+    const sd = stated[1] || stated[2], p = findPlace(sd), items = q.items || [];
+    for (const it of items) await handlers.bring_add({ place: p ? p.name : sd, item: it });
+    setHeading(sd, q.from);
+    const tail = p ? await tripTail(p) : '';
+    return say([`Very good, sir. Headed ${p ? (p.kind === 'home' ? 'home' : 'to ' + p.name) : 'to ' + sd}.`, items.length ? `${listJoin(items)} noted.` : '', p ? bringLine(p.name) : '', ...(p ? eventLines('heading', p.name, Math.random, true) : []), tail].filter(Boolean).slice(0, 4).join(' ') + vscanTail());
+  }
   // Destination: the one guessed at departure, else a saved place named in the answer ("...for the camden house").
   let dest = q.dest ? findPlace(q.dest) : null, body = t;
   if (!dest) {
@@ -1352,15 +1361,16 @@ async function checklistAnswer(q, text) {
   }
   if (!dest && q.items?.length) { // items already taken down; this answer should be the destination
     const p = findPlace(t.replace(/^(?:i'?m )?(?:going |headed |heading )?(?:to |for )?(?:the )?/, ''));
-    if (p) { for (const it of q.items) await handlers.bring_add({ place: p.name, item: it }); const all = q.items; done(); return say(`Noted, sir. ${listJoin(all)} for ${p.name}.`); }
+    if (p) { for (const it of q.items) await handlers.bring_add({ place: p.name, item: it }); const all = q.items; done(); setHeading(p.name, q.from); return say(`Noted, sir. ${listJoin(all)} for ${p.name}.`); }
+    if (!CHECK_CMD.test(t) && t.split(' ').length <= 5) { for (const it of q.items) await handlers.bring_add({ place: t, item: it }); const all = q.items; done(); setHeading(t, q.from); return say(`Noted, sir. ${listJoin(all)}, and you are headed to ${t}.`); }
   }
   const items = body.split(/\s*(?:,|;|\band\b|\bplus\b|\balso\b)\s*/).map(x => x.replace(CHECK_FILL, '').replace(/[.!]+$/, '').trim()).filter(x => x.length > 1);
   if (!items.length) return false;
   if (!dest) { q.items = [...(q.items || []), ...items]; q.at = Date.now(); saveState(); return say(`Got ${listJoin(items)}. Where are you headed, sir?`); }
   const all = [...(q.items || []), ...items];
   for (const it of all) await handlers.bring_add({ place: dest.name, item: it });
-  tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState();
-  return say(`Noted, sir. ${listJoin(all)} for ${dest.name}.` + vscanTail());
+  tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; setHeading(dest.name, q.from);
+  return say([`Noted, sir. ${listJoin(all)} for ${dest.name}.`, await tripTail(dest)].filter(Boolean).join(' ') + vscanTail());
 }
 // Yes / no to "Headed home, sir?"
 async function destAnswer(q, text) {
@@ -1373,7 +1383,8 @@ async function destAnswer(q, text) {
   let reply;
   if (placeKey(q.place) === 'shop') reply = await shopDay(yes);
   else if (!yes) reply = 'Very good, sir.';
-  else reply = ['Very good, sir.', bringLine(q.place), ...eventLines('heading', q.place)].filter(Boolean).join(' ');
+  else { setHeading(q.place); reply = ['Very good, sir.', bringLine(q.place), ...eventLines('heading', q.place), await tripTail({ name: q.place })].filter(Boolean).join(' '); }
+  if (yes && placeKey(q.place) === 'shop') setHeading(q.place);
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
   return true;
 }
@@ -1389,6 +1400,25 @@ function hereNow() {
 const TRIP_MS = 45 * 60e3;
 const tripOn = () => { const t = state.trip; return !!t && !!t.answeredAt && Date.now() - t.answeredAt < TRIP_MS; };
 function tripAnswered() { const t = state.trip && Date.now() - state.trip.at < TRIP_MS ? state.trip : (state.trip = { at: Date.now(), said: [] }); t.answeredAt = Date.now(); }
+// The answer to "where are you headed?" is remembered for the whole trip (departure -> drive -> arrival): state.heading {name, place, at}.
+// It closes the open departure questions (never re-asked), feeds the brain context and the spoken-line wording, and clears on arrival.
+const headingFresh = () => { const h = state.heading; return h && Date.now() - h.at < TRIP_MS ? h : null; };
+function setHeading(name, from) {
+  const p = findPlace(name), label = p ? p.name : String(name || '').trim().slice(0, 60); if (!label) return null;
+  state.heading = { name: label, place: p ? p.name : '', from: from || '', at: Date.now() };
+  tripAnswered(); if (['depart', 'checklist', 'dest'].includes(state.pendingQ?.type)) state.pendingQ = null;
+  if (state.departed) state.departed.answered = true; if (state.lastCheck) state.lastCheck.answered = true;
+  saveState(); return state.heading;
+}
+const headingContext = () => { const h = headingFresh(); return h ? `\nHeading: he told you he is headed to ${h.name}${h.from ? ` from ${h.from}` : ''}. That question is ANSWERED; never ask where he is headed again this trip, and tailor what you say to ${h.name}.` : ''; };
+// A destination-aware tail: ETA if Maps is live, the shop's day, else a short note per kind of place. Used by every departure reply.
+async function tripTail(dest) {
+  const p = dest && findPlace(dest.name || dest), key = p ? placeKey(p.name) : '', bits = [];
+  if (navLive() && state.nav.eta) bits.push(`Maps has you there at ${state.nav.eta}.`);
+  if (key === 'shop') { state.workDay = { day: nowCtx().day, on: true }; const l = await shopDay(true).catch(() => ''); if (l && l !== 'Very good, sir.') bits.push(l.replace(/^Very good, sir\.\s*/, '')); }
+  else if (p?.kind === 'home') bits.push('I will have the house in order.');
+  return bits.join(' ');
+}
 function tripDedupe(text) {
   const t = state.trip; if (!t || Date.now() - t.at > TRIP_MS) return text;
   const said = new Set(t.said || []);
@@ -1400,7 +1430,7 @@ function tripDedupe(text) {
   t.said = [...said].slice(-40); return keep.join(' ');
 }
 function vehicleDeparture(v) {
-  if (tripOn()) return '';   // already answered for this trip: never ask again
+  if (tripOn() || headingFresh()) return '';   // already answered for this trip: never ask again
   state.trip = { at: Date.now(), said: [], answeredAt: 0 };
   const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
@@ -1463,21 +1493,27 @@ async function departAnswer(q, text) {
   if (dest && q.from && dest.name === q.from) dest = null;
   if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
   const named = !dest && !DEPART_YES.test(t) && t.match(/^(?:i'?m |im |we'?re )?(?:going|headed|heading|off|driving|running) (?:over )?(?:to|for|into) (?:the )?([a-z0-9' &.-]{2,40})$/); // an unsaved destination ("headed to Lowe's"): answer it here so the vehicle-check offer still follows
-  if (named) { finish(); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + vscanTail()); }
+  if (named) { finish(); setHeading(named[1], q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + vscanTail()); }
+  if (!dest && !DEPART_YES.test(t) && !CHECK_CMD.test(t) && t.split(' ').length <= 4 && t.length > 2) { // a bare unsaved place ("Lowe's", "Brenda's"): that IS the answer, remember it
+    finish(); setHeading(t, q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
+    return say([`Very good, sir. Headed to ${t}.`, ...lv].slice(0, 2).join(' ') + vscanTail());
+  }
   if (!dest) { // leaving, destination unknown: still give the leave reminders for here
     if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
     finish();
     const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
     return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' ') + vscanTail());
   }
-  finish();
+  finish(); setHeading(dest.name, q.from);
   const parts = [...(q.from ? eventLines('leave', q.from, Math.random, true) : []), bringLine(dest.name), ...eventLines('heading', dest.name, Math.random, true)].filter(Boolean);
-  return say((parts.length ? parts.slice(0, 3) : ['Very good, sir.']).join(' ') + vscanTail());
+  const tail = await tripTail(dest);
+  return say((parts.length ? parts.slice(0, 3) : [`Very good, sir. Headed ${dest.kind === 'home' ? 'home' : 'to ' + dest.name}.`]).concat(tail ? [tail] : []).join(' ') + vscanTail());
 }
 handlers.heading_to = async ({ place }) => {
   const p = findPlace(place);
-  if (!p) return `No saved place called ${place}. Saved: ${state.places.map(x => x.name).join(', ') || 'none'}.`;
-  return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name, Math.random, true)].join(' ');
+  if (!p) { setHeading(place, hereNow()?.name); return `Say this: Very good, sir. Headed to ${place}.`; }
+  setHeading(p.name, hereNow()?.name);
+  return ['Say this:', bringLine(p.name) || `Nothing on the list for ${p.name}.`, ...eventLines('heading', p.name, Math.random, true), await tripTail(p)].filter(Boolean).join(' ');
 };
 // ---------- Google Maps navigation awareness (read-only) ----------
 // Tasker on the phone watches the Google Maps notification and POSTs its text to /api/nav?token=. We parse destination + ETA,
@@ -1502,7 +1538,7 @@ function navLive() { const n = state.nav; return !!(n?.on && Date.now() - n.upda
 function navArrive(pl) { // same effects as a GPS arrival, so bring items clear and arrive triggers fire; GPS will find state.at already set
   const key = placeKey(pl.name); if (state.at === key) return '';
   const c = nowCtx(), parts = [], now = Date.now();
-  state.at = key; state.atSince = now; state.lastPlace = key; state.cand = null;
+  state.at = key; state.atSince = now; state.lastPlace = key; state.cand = null; state.heading = null; state.trip = null;
   if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
   const brought = bringFor(pl.name);
   if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
@@ -1527,7 +1563,7 @@ function navUpdate(body) {
   const isNew = !wasOn || (dest && prev?.dest && placeKey(dest) !== placeKey(prev.dest));
   state.nav = { on: true, dest, place: pl ? pl.name : '', eta: p.eta || (wasOn ? prev.eta : ''), minutes: p.minutes ?? (wasOn ? prev.minutes : null), startedAt: isNew ? now : prev.startedAt, updatedAt: now };
   if (isNew && pl && !(state.navHeaded?.place === pl.name && now - state.navHeaded.at < 30 * 60e3)) {
-    state.navHeaded = { place: pl.name, at: now };
+    state.navHeaded = { place: pl.name, at: now }; setHeading(pl.name, currentPlace()?.name);
     const here = currentPlace(), parts = [];
     if (here && placeKey(here.name) !== placeKey(pl.name)) { parts.push(...eventLines('leave', here.name, Math.random, true)); state.departed = { place: here.name, at: now, answered: true }; }
     parts.push(bringLine(pl.name) || '', ...eventLines('heading', pl.name, Math.random, true));
@@ -1570,7 +1606,7 @@ function driveFix(lat, lon, speedMs) { // every phone position (background /api/
 }
 function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
   const now = Date.now(), d = state.departed;
-  const asked = tripOn() || (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
+  const asked = tripOn() || !!headingFresh() || (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
   const qFresh = !!state.pendingQ && now - (state.pendingQ.at || 0) < 3 * 60e3;   // answers are only accepted for 3 min; an older question must not block this one (Oct 4: a stale one silenced the 12:18 departure)
   if (state.pendingQ && !qFresh) state.pendingQ = null;
   dlog('drive-start', { src, mph: Math.round(mph), askedAtStart: !!asked, pendingQ: qFresh, nav: navLive(), at: state.at || null });
@@ -3224,7 +3260,7 @@ function deviceAction(action, args = {}, timeout = 20000) {
 // After each good scan: new trouble codes, a low resting battery (R8 sitting) and low fuel become one short remark.
 state.vehicles ||= [];
 const OBD_EVERY = Number(process.env.OBD_EVERY_MIN || 20) * 60e3;
-const OBD_WATCH = Number(process.env.OBD_WATCH_MIN || 2) * 60e3, DEPART_GAP = Number(process.env.DEPART_GAP_MIN || 30) * 60e3; // parked + in range: look every 2 min so engine start is caught fast
+const OBD_WATCH = Number(process.env.OBD_WATCH_MIN || 1) * 60e3, DEPART_GAP = Number(process.env.DEPART_GAP_MIN || 30) * 60e3; // parked + in range: look every 2 min so engine start is caught fast
 const vFind = name => state.vehicles.find(v => norm(v.name) === norm(name)) || (state.vehicles.length === 1 && !name ? state.vehicles[0] : null)
   || state.vehicles.find(v => norm(v.name).includes(norm(name || '#')) || norm(name || '#').includes(norm(v.name)));
 async function obdScan(v, why = 'auto') {
