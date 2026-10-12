@@ -497,3 +497,9 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## Black screen on open (2026-10-12)
 - Owner: tapping the icon shows a black screen. Cause unconfirmed (server was unreachable from the sandbox). MainActivity now: WebView background is Jarvis dark blue, a visible 'Jarvis is restarting / Can't reach Jarvis' screen with auto retry on main-frame 5xx or load error, and a blank-page reload (3 tries) 6 s after page finish. Needs new APK. If it persists, check Railway Deployments for crash/OOM.
+
+## Lights plan (2026-10-12, planned, nothing built)
+- Owner chose Wi-Fi: Kasa KP125M plugs + KS205 (dimmer where wanted) ceiling switches (not yet bought). Railway cannot reach a LAN, so one Raspberry Pi relay per site (home, shop) with outbound-only link to Jarvis (poll/websocket with a token, no port forwarding).
+- Phase 1: Pi agent (Node or python-kasa; newer Kasa firmware uses KLAP and may need Kasa account creds - verify on real devices). Jarvis side: light registry (name, site, group, ip/mac), tools light_list / light_set(name|group|site, on|off|dim) / scenes; node auth; offline-site reporting. Lights only; compressor/heater stay behind confirm (A18 Shelly).
+- Phase 2 (local remotes): Zigbee USB dongle on each Pi + zigbee2mqtt + stick-on Zigbee buttons; press toggles the plug locally with no internet, and Jarvis sees the state. Alternative if no Pi: Tapo H100 hub + S200B buttons with Tapo plugs (unverified that it switches Wi-Fi plugs directly).
+- Phase 3: scenes tied to A-functions (arrive home, close-out checklist W8, away check).
