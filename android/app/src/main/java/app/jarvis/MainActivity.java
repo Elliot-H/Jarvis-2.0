@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     s.setMediaPlaybackRequiresUserGesture(false);
     s.setGeolocationEnabled(true);
     s.setUserAgentString(s.getUserAgentString() + " JarvisApp/1");
+    web.setBackgroundColor(0xFF02060C);   // Jarvis dark blue while loading, never plain black
     CookieManager.getInstance().setAcceptCookie(true);
     CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
@@ -127,7 +128,18 @@ public class MainActivity extends Activity {
         if (!shim.isEmpty()) v.evaluateJavascript(shim, null);
       }
       @Override public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
-        if (req.isForMainFrame()) ui.postDelayed(() -> web.loadUrl(origin + "/?app=1"), 4000);
+        if (req.isForMainFrame()) { showWait(v, "Can't reach Jarvis. Retrying..."); ui.postDelayed(() -> web.loadUrl(origin + "/?app=1"), 4000); }
+      }
+      // Server restarting or crashed (Railway 5xx): say so and keep retrying, instead of a dead screen.
+      @Override public void onReceivedHttpError(WebView v, WebResourceRequest req, android.webkit.WebResourceResponse r) {
+        if (req.isForMainFrame() && r.getStatusCode() >= 500) { showWait(v, "Jarvis is restarting. Retrying..."); ui.postDelayed(() -> web.loadUrl(origin + "/?app=1"), 5000); }
+      }
+      // A page that "finished" but drew nothing (black): reload it, a few times at most.
+      @Override public void onPageFinished(WebView v, String url) {
+        if (url == null || !url.startsWith(origin)) return;
+        ui.postDelayed(() -> v.evaluateJavascript("(document.body&&document.body.children.length)||0", r -> {
+          if (r == null || r.equals("null") || r.equals("0")) { if (blankTries++ < 3) web.loadUrl(origin + "/?app=1"); } else blankTries = 0;
+        }), 6000);
       }
       /** Android killed the page's renderer while the app sat in the background (the service kept the app alive): the screen goes black. Rebuild it. */
       @Override public boolean onRenderProcessGone(WebView v, android.webkit.RenderProcessGoneDetail d) {
@@ -217,6 +229,10 @@ public class MainActivity extends Activity {
     if (web != null) web.evaluateJavascript("window.__jarvisWake&&window.__jarvisWake()", null);
   }
 
+  private int blankTries = 0;
+  private void showWait(WebView v, String msg) {
+    v.loadDataWithBaseURL(null, "<body style='margin:0;background:#02060c;color:#3fe0ff;font-family:system-ui;display:grid;place-items:center;height:100vh;text-align:center'><div><h2>JARVIS</h2><p>" + msg + "</p></div>", "text/html", "utf-8", null);
+  }
   private boolean resumedOnce = false;
   @Override protected void onResume() {
     super.onResume();
