@@ -1,5 +1,8 @@
-STATUS: needs-owner
-TIME: 2026-10-10T19:30:00Z
-REQUEST: Make HEVC video processing work live at full resolution, prove it on mv2rzvela196-defiant.mp4, fix vision timeouts.
+STATUS: done
+TIME: 2026-10-12T13:58:22Z
+REQUEST: Fix travel questions: capture the answered destination, stop re-asking, tailor lines, trigger departure promptly
 RESULT:
-Owner, I could not prove it live, because this maintenance runner cannot reach your Railway server or the uploaded clip. The HEVC fix is already on main: the server tries every ffmpeg build, HEVC-capable first, retries tolerantly, and crops 9:16 at source resolution with no downscaling. I fixed the photo timeouts: the vision call now gives up after 40 seconds and retries once on a fallback model. To see the proof yourself after the redeploy, open /api/media/diag?file=mv2rzvela196-defiant.mp4&prepare=1 on the server. It shows the ffmpeg builds, HEVC decode, a real frame grab, and a full 9:16 crop with headline and music. If it still says HEVC fails, tell me and I will switch the build to a different ffmpeg package. No APK reinstall is needed.
+Fixed, Owner. When you answer where you are headed, Jarvis now saves it for the whole trip, whether it is home, the shop, the Camden house or any other place.
+He stops asking again, and his lines follow that destination: bring list, reminders, Maps ETA, and today's jobs for the shop.
+The saved destination clears when you arrive. The engine-start check now runs every minute instead of two, so the question comes sooner.
+This is a server change and goes live with the Railway deploy; no APK reinstall. I only syntax-checked it and could not run it end to end here, so please test it on the next drive.
