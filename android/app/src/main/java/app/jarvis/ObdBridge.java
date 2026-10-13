@@ -51,21 +51,38 @@ public class ObdBridge {
           for (BluetoothDevice d : byName) sb.append(d.getName()).append(" = ").append(d.getAddress()).append("; ");
           reply(id, err("ambiguous", "Two or more paired devices are named like \"" + dongle + "\": " + sb + "Set each vehicle up with its own Bluetooth address instead of the name.")); return;
         }
-        if (dev == null) { reply(id, err("not_paired", "No paired Bluetooth device matches \"" + dongle + "\". Pair the OBD dongle in the phone's Bluetooth settings first.")); return; }
+        if (dev == null) {
+          // Name mismatch: if exactly one paired device looks like an OBD dongle, use it.
+          java.util.ArrayList<BluetoothDevice> like = new java.util.ArrayList<>();
+          StringBuilder all = new StringBuilder();
+          for (BluetoothDevice d : ad.getBondedDevices()) {
+            String n = d.getName() == null ? "" : d.getName(); all.append(n).append(" = ").append(d.getAddress()).append("; ");
+            if (n.toLowerCase().matches(".*(obd|elm|v-?link|vgate|viecar|konnwei|carista|icar|scan|can ?bus).*")) like.add(d);
+          }
+          if (like.size() == 1) dev = like.get(0);
+          else { reply(id, err("not_paired", "No paired Bluetooth device matches \"" + dongle + "\". Paired devices: " + all + "Pair the OBD dongle in the phone's Bluetooth settings first, or set the vehicle's dongle to its exact name or address.")); return; }
+        }
         try { ad.cancelDiscovery(); } catch (Exception ignored) {}
         // Cheap clone dongles often refuse the first try: secure socket, insecure socket, channel 1, then the whole round once more after a pause.
+        // Modes: 0 secure SPP, 1 insecure SPP, 2-4 raw RFCOMM channels 1-3 (some clones ignore the UUID), 5 the dongle's own advertised UUID.
         String lastErr = "";
-        for (int round = 0; round < 2 && s == null; round++) {
-          for (int mode = 0; mode < 3 && s == null; mode++) {
+        for (int round = 0; round < 3 && s == null; round++) {
+          for (int mode = 0; mode < 6 && s == null; mode++) {
             BluetoothSocket t = null;
             try {
-              t = mode == 0 ? dev.createRfcommSocketToServiceRecord(SPP)
-                : mode == 1 ? dev.createInsecureRfcommSocketToServiceRecord(SPP)
-                : (BluetoothSocket) dev.getClass().getMethod("createRfcommSocket", int.class).invoke(dev, 1);
+              if (mode == 5) {
+                android.os.ParcelUuid[] us = dev.getUuids();
+                if (us == null || us.length == 0) continue;
+                t = dev.createInsecureRfcommSocketToServiceRecord(us[0].getUuid());
+              } else {
+                t = mode == 0 ? dev.createRfcommSocketToServiceRecord(SPP)
+                  : mode == 1 ? dev.createInsecureRfcommSocketToServiceRecord(SPP)
+                  : (BluetoothSocket) dev.getClass().getMethod("createRfcommSocket", int.class).invoke(dev, mode - 1);
+              }
               t.connect(); s = t;
-            } catch (Exception e) { lastErr = String.valueOf(e.getMessage()); try { if (t != null) t.close(); } catch (Exception ignored) {} }
+            } catch (Exception e) { lastErr = "mode " + mode + ": " + e.getMessage(); try { if (t != null) t.close(); } catch (Exception ignored) {} Thread.sleep(300); }
           }
-          if (s == null && round == 0) Thread.sleep(1500);
+          if (s == null && round < 2) Thread.sleep(1500);
         }
         if (s == null) { reply(id, err("out_of_range", "Could not open a connection to " + dev.getName() + " (" + dev.getAddress() + "): " + lastErr + ". Check the car's ignition is on, the dongle's light is lit, and the dongle is not connected to another phone. Some dongles are Bluetooth LE type, which this app cannot use.")); return; }
         InputStream in = s.getInputStream(); OutputStream out = s.getOutputStream();
