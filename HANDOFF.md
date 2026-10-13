@@ -520,3 +520,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 
 ## OBD dongle connect hardening (2026-10-13)
 - Owner: dongle paired by hand but Jarvis could not open the connection. No live logs reachable from the maintenance sandbox, so ObdBridge.java was hardened blind: 3 rounds of 6 socket modes (secure SPP, insecure SPP, raw RFCOMM channels 1-3, the dongle's own advertised UUID), each failure's mode + message returned in the error; if the saved dongle name matches nothing, a single paired device that looks like an OBD dongle (OBD/ELM/V-LINK/VGATE/Viecar/etc.) is used, else the error lists all paired devices; legacy BLUETOOTH permissions added for Android 11-. Needs APK reinstall. Not compiled here. If it still fails, read the "Could not open a connection" detail in Activity/vehicle_scan: a BLE-only dongle cannot work with this bridge.
+
+## Mic -> assistant delivery fix (2026-10-13)
+- `send()` in public/app.js used to drop an `ask` silently when the WebSocket was reconnecting (speech heard, nothing reached Jarvis). Now `ask` is held in an outbox (90s) and delivered on reconnect.
+- `goActive()` no longer wipes words already heard (follow-up window or mic tap used to discard a command in progress). Tapping the mic while words are pending sends them now (push-to-talk). Web-only change, live on deploy; no APK reinstall.

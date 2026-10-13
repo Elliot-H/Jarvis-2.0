@@ -84,11 +84,23 @@
   let lostMidRequest = false; // a redeploy killed the socket while a request was in flight: its answer will never come
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-    ws.onopen = () => { try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
+    ws.onopen = () => { try { drainOutbox(); } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
     ws.onclose = () => { if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); setTimeout(connect, 2000); };
     ws.onmessage = e => handle(JSON.parse(e.data));
   }
-  function send(o) { if (ws?.readyState === 1) ws.send(JSON.stringify(o)); }
+  // Spoken commands must never be lost to a dropped link: hold them (up to 90s) and deliver the moment the socket is back.
+  const outbox = [];
+  function send(o) {
+    if (ws?.readyState === 1) { ws.send(JSON.stringify(o)); return; }
+    if (o && o.type === 'ask') {
+      outbox.push({ o, t: Date.now() });
+      try { addActivity('Link was down; holding your message and sending it as soon as it is back.'); } catch {}
+      if (!ws || ws.readyState > 1) { try { connect(); } catch {} }
+    }
+  }
+  function drainOutbox() {
+    while (outbox.length && ws?.readyState === 1) { const m = outbox.shift(); if (Date.now() - m.t < 90000) ws.send(JSON.stringify(m.o)); }
+  }
   // Report screen errors to the server so Jarvis can read and fix them
   const reportErr = t => { try { send({ type: 'client_error', text: `${t} | ${navigator.userAgent.slice(0, 80)}` }); } catch {} };
   window.addEventListener('error', e => reportErr(`${e.message} @ ${e.filename}:${e.lineno}`));
@@ -777,10 +789,12 @@
     blipN = 0; mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
     confirmPending = !!o.confirm;
     caption('', {});
-    clearTimeout(uttTimer); pending = null; carry = ''; lastHeard = ''; uttStart = lastLen;
+    // Words already heard for a command in progress are kept (a mic tap or a follow-up window must not wipe them).
+    const keep = (pending && !pending.wakeOnly) || carry;
+    if (!keep) { clearTimeout(uttTimer); pending = null; carry = ''; lastHeard = ''; uttStart = lastLen; }
     recWanted = true; ensureMic();
     clearTimeout(activeTimer);
-    activeTimer = setTimeout(() => { if (mode === 'active' && !pending) { mode = 'passive'; setState('idle'); if (!o.quiet) chime(false); } }, o.ms || 20000);
+    activeTimer = setTimeout(() => { if (mode === 'active' && !pending && !carry) { mode = 'passive'; setState('idle'); if (!o.quiet) chime(false); } }, o.ms || 20000);
   }
 
   // ---- utterance assembly ----
@@ -1019,6 +1033,11 @@
     if (!booted) return boot();
     if (muted) return unmuteMic();
     // Only a mic that is really open counts as "on"; a stale listening state must not turn the tap into a stop.
+    if ((pending && !pending.wakeOnly) || carry) {   // push-to-talk: tapping again sends what was heard right now
+      if (!pending) pending = { text: carry };
+      try { rec && rec.stop(); } catch {}
+      return flush();
+    }
     if (state === 'listening' && recOn) { mode = 'passive'; manualMicUntil = 0; clearTimeout(activeTimer); try { rec && rec.abort(); } catch {} setState('idle'); }
     else { micNotBefore = 0; recBackoff = 0; manualMicUntil = Date.now() + 15000; goActive(); }
   };
