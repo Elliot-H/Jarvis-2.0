@@ -6,6 +6,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
@@ -64,8 +65,47 @@ public class KeepAliveService extends Service {
       catch (Exception e2) { stopSelf(); return START_NOT_STICKY; }
     }
     if (loc) startLocation();
+    registerBtClues();
     if (!sayLoop) { sayLoop = true; hnd.postDelayed(sayPoll, 5_000); }
     return START_STICKY;
+  }
+
+  // Bluetooth connects/disconnects are clues to where he is (gym speaker, car, desk headset). Jarvis decides what they mean.
+  private boolean btReg = false;
+  private final android.content.BroadcastReceiver btRx = new android.content.BroadcastReceiver() {
+    @Override public void onReceive(Context ctx, Intent i) {
+      try {
+        android.bluetooth.BluetoothDevice d = i.getParcelableExtra(android.bluetooth.BluetoothDevice.EXTRA_DEVICE);
+        if (d == null) return;
+        String name = null;
+        try { name = d.getName(); } catch (SecurityException e) { return; }
+        if (name == null || name.isEmpty()) return;
+        final String st = android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(i.getAction()) ? "disconnected" : "connected";
+        final String body = "{\"kind\":\"bt\",\"state\":\"" + st + "\",\"name\":" + org.json.JSONObject.quote(name) + "}";
+        new Thread(() -> {
+          try {
+            String base = BuildConfig.BASE_URL;
+            HttpURLConnection c = (HttpURLConnection) new URL(base + "/api/signal").openConnection();
+            c.setRequestMethod("POST"); c.setDoOutput(true); c.setConnectTimeout(10_000); c.setReadTimeout(10_000);
+            c.setRequestProperty("Content-Type", "application/json");
+            String ck = CookieManager.getInstance().getCookie(base); if (ck != null) c.setRequestProperty("Cookie", ck);
+            try (OutputStream o = c.getOutputStream()) { o.write(body.getBytes(StandardCharsets.UTF_8)); }
+            c.getResponseCode(); c.disconnect();
+          } catch (Exception ignored) {}
+          hnd.postDelayed(KeepAliveService.this::pollOnce, 2_000); hnd.postDelayed(KeepAliveService.this::pollOnce, 6_000);
+        }).start();
+      } catch (Exception ignored) {}
+    }
+  };
+  private void registerBtClues() {
+    if (btReg) return;
+    try {
+      android.content.IntentFilter f = new android.content.IntentFilter();
+      f.addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED);
+      f.addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED);
+      if (Build.VERSION.SDK_INT >= 33) registerReceiver(btRx, f, Context.RECEIVER_EXPORTED); else registerReceiver(btRx, f);
+      btReg = true;
+    } catch (Exception ignored) {}
   }
 
   private void startLocation() {
@@ -160,6 +200,6 @@ public class KeepAliveService extends Service {
     });
   }
 
-  @Override public void onDestroy() { hnd.removeCallbacksAndMessages(null); try { if (lm != null) lm.removeUpdates(listener); } catch (Exception ignored) {} super.onDestroy(); }
+  @Override public void onDestroy() { hnd.removeCallbacksAndMessages(null); try { if (btReg) unregisterReceiver(btRx); } catch (Exception ignored) {} try { if (lm != null) lm.removeUpdates(listener); } catch (Exception ignored) {} super.onDestroy(); }
   @Override public IBinder onBind(Intent i) { return null; }
 }

@@ -82,7 +82,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -348,7 +348,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   const recent = state.history.filter(h => Date.now() - h.at < 6 * 3600_000).slice(-8)
     .map(h => `${h.role === 'user' ? 'User' : 'You'}: ${h.text}`).join('\n');
   // Fixed part (identical every request → the API bills repeats at a 90% discount) vs. changing part (sent with the question)
-  const live = (clock + hud + failed + memoryContext() + headingContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
+  const live = (clock + hud + failed + memoryContext() + headingContext() + presContext() + (recent && mode === 'chat' ? `\n\n# Recent conversation (for context)\n${recent}` : '')).trim();
   const promptWithContext = `<context>\n${live}\n</context>\n\n${text}`;
   const chatPrompt = chatSystemPrompt(persona);
 
@@ -851,6 +851,7 @@ async function arrivalStatement(q, text) {
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
   if (['dest', 'checklist', 'depart'].includes(q.type) && await arrivalStatement(q, text)) return true; // "no, I'm at the Camden house now" is an ARRIVAL, never a departure answer
+  if (q.type === 'where') return whereAnswer(q, text);
   if (q.type === 'dest') return destAnswer(q, text);
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
@@ -890,6 +891,97 @@ handlers.place_save = async ({ name, radius_m, home }) => {
   state.places.push({ name, lat: L.lat, lon: L.lon, radius, kind: home || /^home$/i.test(name) ? 'home' : key === 'shop' ? 'work' : 'place' });
   state.lastPlace = key; saveState();
   return `Saved "${name}" at his current position (within ${radius} m).`;
+};
+// ---------- whereabouts: where he is, since when, where he came from ----------
+// state.pres = { place ('' = on the move / somewhere unsaved), since, from (last place), via: gps | bt | said, lat, lon }.
+// GPS saved places drive it (onMove); a Bluetooth connect to a device he has taught (or that is a speaker with an area) sets it too;
+// an unknown device while GPS has no saved place triggers ONE question, and the answer is remembered (state.sigPlaces) so it is never asked again.
+state.sigPlaces ||= {}; state.sigIgnore ||= [];
+const fmtClock = t => new Date(t).toLocaleTimeString('en-US', { timeZone: nowCtx().tz, hour: 'numeric', minute: '2-digit' });
+const spanText = ms => { const m = Math.round(ms / 60e3); return m < 2 ? 'just now' : m < 90 ? `${m} min` : `${Math.round(m / 6) / 10} h`; };
+function setPres(place, via) {
+  const p = state.pres, name = String(place || '').trim(), now = Date.now(), L = state.location && Date.now() - Date.parse(state.location.at) < 15 * 60e3 ? state.location : null;
+  if (p && placeKey(p.place) === placeKey(name)) { if (name && via !== 'gps' && p.via !== via) { p.via = via; saveState(); } return false; }
+  if (p && p.place) { (state.presLog ||= []).push({ place: p.place, from: p.from || '', since: p.since, until: now, via: p.via }); state.presLog = state.presLog.slice(-40); }
+  state.pres = { place: name, since: now, from: (p && (p.place || p.from)) || '', via, lat: L?.lat, lon: L?.lon };
+  saveState(); return true;
+}
+// An inferred or told place that is not a saved place ends once he has moved away from where it was set.
+function presDrift() {
+  const p = state.pres, L = state.location; if (!p || !p.place || !L || p.lat == null) return;
+  if (state.places.some(x => placeKey(x.name) === placeKey(p.place))) return;
+  if (km(L, p) * 1000 > 350) setPres('', 'gps');
+}
+function presLine() {
+  if (!state.pres && state.at) { const pl = state.places.find(x => placeKey(x.name) === state.at); if (pl) state.pres = { place: pl.name, since: state.atSince || Date.now(), from: '', via: 'gps' }; }
+  const p = state.pres; if (!p) return '';
+  const how = { gps: 'GPS', bt: 'a Bluetooth clue', said: 'what he told me' }[p.via] || p.via;
+  if (!p.place) return `He is not at a saved place${p.from ? `; he left ${p.from} at ${fmtClock(p.since)} (${spanText(Date.now() - p.since)} ago)` : ''}.`;
+  return `He is at ${p.place} since ${fmtClock(p.since)} (${spanText(Date.now() - p.since)}), known from ${how}${p.from ? `, came from ${p.from}` : ''}.`;
+}
+const presContext = () => { const l = presLine(); return l ? `\n\n# Where he is\n${l} If this is unknown or looks wrong, ask once; when he tells you, call presence_set.` : ''; };
+const SIG_DAY_MS = 6 * 3600e3;
+const guessPlaceFromDevice = dev => {
+  const n = norm(dev), kk = placeKey(dev);
+  const sp = state.speakers.find(x => [x.name, x.alias].some(v => norm(v) && (norm(v) === n || n.includes(norm(v)))));
+  if (sp?.area) return sp.area;
+  const hit = state.places.find(p => placeKey(p.name).length > 2 && kk.includes(placeKey(p.name)));
+  if (hit) return hit.name;
+  return /\bgym\b/i.test(dev) ? 'the gym' : '';
+};
+async function onSignal(b) {
+  const name = String(b.name || '').trim().slice(0, 60), st = b.state === 'disconnected' ? 'disconnected' : 'connected', k = norm(name);
+  if (!name) return { ok: false, why: 'no name' };
+  (state.sigLog ||= []).push({ t: Date.now(), kind: 'bt', name, st }); state.sigLog = state.sigLog.slice(-40);
+  if (st === 'disconnected') { saveState(); return { ok: true }; }
+  if ((state.vehicles || []).some(v => norm(v.dongle) === k)) { saveState(); return { ok: true, ignored: 'obd' }; }
+  const known = state.sigPlaces[k];
+  if (known) { const changed = setPres(known.place, 'bt'); return { ok: true, place: known.place, changed }; }
+  const area = state.speakers.find(x => norm(x.name) === k && x.area)?.area;
+  if (area) { const changed = setPres(area, 'bt'); return { ok: true, place: area, changed }; }
+  saveState();
+  if (state.sigIgnore.includes(k)) return { ok: true, ignored: 'user' };
+  // GPS already says he is at a saved place, he is travelling, it is quiet hours, or another question is open: no question.
+  if (currentPlace() || tripOn() || navLive() || quietNow() || (state.pendingQ && Date.now() - state.pendingQ.at < 10 * 60e3)) return { ok: true, asked: false };
+  const asked = (state.sigAsked ||= {}); if (Date.now() - (asked[k] || 0) < SIG_DAY_MS) return { ok: true, asked: false };
+  asked[k] = Date.now();
+  const guess = guessPlaceFromDevice(name);
+  state.pendingQ = { type: 'where', dev: name, key: k, guess, at: Date.now() }; saveState();
+  deliver(guess ? `Your phone just connected to ${name}. Are you at ${guess}?` : `Your phone just connected to ${name}. Where are you?`, 'Jarvis', true);
+  return { ok: true, asked: true, guess };
+}
+const cleanPlaceName = t => t.replace(/^(?:hey )?jarvis /, '').replace(/^(?:yes |yeah |no |nope )?(?:i m |im |i am |we re |we are )?(?:at|in|inside|over at)? ?(?:the )?/, '').trim();
+const titleCase = s => s.replace(/\b[a-z]/g, c => c.toUpperCase());
+async function whereAnswer(q, text) {
+  const t = norm(text), say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
+  if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 10) { state.pendingQ = null; saveState(); return false; }
+  if (/^(ignore( it| that)?|skip( it)?|never ?mind|that s nothing|it s nothing|not a place|doesn t matter|don t ask( me)? (about )?(that|it)( again)?|stop asking)$/.test(t)) {
+    if (!state.sigIgnore.includes(q.key)) state.sigIgnore.push(q.key); state.pendingQ = null; saveState(); return say(`Very good, sir. I will not ask about ${q.dev} again.`);
+  }
+  let place = '';
+  if (/^(yes|yeah|yep|yup|ya|correct|right|that s right|affirmative|sure|exactly|indeed)\b/.test(t) && q.guess) place = q.guess;
+  else if (/^(no|nope|nah)$/.test(t)) { state.pendingQ = { ...q, guess: '', at: Date.now() }; saveState(); return say('Where are you then, sir?'); }
+  else place = cleanPlaceName(t);
+  if (!place || place.split(' ').length > 5) { state.pendingQ = null; saveState(); return false; }   // unrelated request: let it through
+  const saved = findPlace(place), name = saved ? saved.name : titleCase(place.replace(/^the /, ''));
+  state.sigPlaces[q.key] = { place: name, at: Date.now() }; state.pendingQ = null;
+  setPres(name, 'said');
+  let extra = '';
+  if (!saved && state.location && Date.now() - Date.parse(state.location.at) < 10 * 60e3) { try { await handlers.place_save({ name, radius_m: 100 }); extra = ` I have saved ${name} on the map too.`; } catch {} }
+  saveState();
+  return say(`${name}, noted. ${q.dev} means ${name} from now on, so I will not ask again.${extra}`);
+}
+handlers.presence_get = async () => { const log = (state.presLog || []).slice(-6).map(x => `${x.place} ${fmtClock(x.since)}-${fmtClock(x.until)}`).join('; '); return (presLine() || 'I have no idea where he is yet.') + (log ? ` Recent stops: ${log}.` : '') + ((state.sigLog || []).length ? ` Last Bluetooth clues: ${(state.sigLog || []).slice(-4).map(x => `${x.name} ${x.st} ${fmtClock(x.t)}`).join('; ')}.` : ''); };
+handlers.presence_set = async ({ place, device, ignore_device } = {}) => {
+  if (ignore_device) { const k = norm(ignore_device); if (!state.sigIgnore.includes(k)) state.sigIgnore.push(k); saveState(); return `I will not ask about ${ignore_device} again.`; }
+  const p = String(place || '').trim(); if (!p) return 'Which place?';
+  const saved = findPlace(p), name = saved ? saved.name : titleCase(p.replace(/^the /i, ''));
+  setPres(name, 'said');
+  if (device) state.sigPlaces[norm(device)] = { place: name, at: Date.now() };
+  let extra = '';
+  if (!saved && state.location && Date.now() - Date.parse(state.location.at) < 10 * 60e3) { try { await handlers.place_save({ name, radius_m: 100 }); extra = ' Saved it on the map.'; } catch {} }
+  saveState();
+  return `Noted: he is at ${name}.${device ? ` ${device} now means ${name}.` : ''}${extra}`;
 };
 handlers.place_list = async () => state.places.length ? state.places.map(p => `${p.name}${p.kind === 'home' ? ' (home)' : ''}`).join(', ') + (currentPlace() ? `. He is at ${currentPlace().name} now (last phone position ${Math.round((Date.now() - Date.parse(state.location.at)) / 60000)} min ago).` : '. He is not at any saved place now.') : 'No places saved yet.';
 handlers.reminder_add = async a => {
@@ -1289,6 +1381,7 @@ function onMove() {
   if (prev) (state.leftAt ||= {})[prevKey] = now;
   const rearmed = !pl || !state.leftAt?.[key] || now - state.leftAt[key] >= REARM_MS; // same place re-entered soon after leaving: no new greeting
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
+  setPres(pl ? pl.name : '', 'gps');
   const c = nowCtx(), parts = [];
   if (prev) { // left somewhere
     const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : (tripOn() ? { answered: true } : null); // an ANSWERED departure question (this trip) counts as handled, whatever place it recorded
@@ -1538,7 +1631,7 @@ function navLive() { const n = state.nav; return !!(n?.on && Date.now() - n.upda
 function navArrive(pl) { // same effects as a GPS arrival, so bring items clear and arrive triggers fire; GPS will find state.at already set
   const key = placeKey(pl.name); if (state.at === key) return '';
   const c = nowCtx(), parts = [], now = Date.now();
-  state.at = key; state.atSince = now; state.lastPlace = key; state.cand = null; state.heading = null; state.trip = null;
+  state.at = key; state.atSince = now; state.lastPlace = key; state.cand = null; state.heading = null; state.trip = null; setPres(pl.name, 'gps');
   if (key === 'shop') { state.workDay = { day: c.day, on: true }; if (state.shopAsk) state.shopAsk.pending = false; }
   const brought = bringFor(pl.name);
   if (brought.length) { parts.push(`Hope you remembered ${listJoin(brought.map(r => r.text))}, sir.`); state.reminders = state.reminders.filter(r => !brought.includes(r)); }
@@ -2866,9 +2959,11 @@ app.post('/api/loc', (req, res) => {
   state.location = { lat: +lat.toFixed(4), lon: +lon.toFixed(4), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz, bg: true };
   if (moved) state.weather = undefined;
   driveFix(lat, lon, Number(req.body?.speed));
-  saveState(); onMove();
+  saveState(); onMove(); presDrift();
   res.json({ ok: true, at: state.at || null });
 });
+// The phone reports a clue (Bluetooth device connected/disconnected). Same cookie auth as /api/loc.
+app.post('/api/signal', async (req, res) => { try { res.json(await onSignal(req.body || {})); } catch (e) { console.warn('signal failed: ' + e.message); res.status(500).json({ ok: false }); } });
 // The phone app's background service asks for a line to speak: text plus a Jarvis-voice clip when Fish works (the app falls back to the phone's own voice).
 app.get('/api/say-next', async (_req, res) => {
   const it = sayQ.find(x => !x.taken && Date.now() - x.at < 85000); if (!it) return res.json({});

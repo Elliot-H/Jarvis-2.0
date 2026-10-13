@@ -504,3 +504,11 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - Phase 2 (local remotes): Zigbee USB dongle on each Pi + zigbee2mqtt + stick-on Zigbee buttons; press toggles the plug locally with no internet, and Jarvis sees the state. Alternative if no Pi: Tapo H100 hub + S200B buttons with Tapo plugs (unverified that it switches Wi-Fi plugs directly).
 - Phase 3: scenes tied to A-functions (arrive home, close-out checklist W8, away check).
 - REVISED 2026-10-12 (Owner): no vendor clouds or accounts, everything LAN-only except Jarvis. Kasa/Tapo dropped (setup and newer firmware want a TP-Link account). New plan: Pi per site + Zigbee USB dongle + zigbee2mqtt (fully local, no accounts) for plugs, switches and buttons; hardwired loads either Zigbee in-wall switches (neutral needed) or Shelly relays behind the existing switch (local HTTP API, cloud switchable off). Pi talks to Jarvis outbound only. Specific Zigbee models not yet chosen/verified.
+
+## Dynamic whereabouts (2026-10-12)
+- state.pres {place, since, from, via gps|bt|said, lat, lon}; state.presLog last 40; state.sigPlaces {normalized BT name: {place}}; state.sigIgnore; state.sigLog. All in BACKUP_KEYS (pres, presLog, sigPlaces, sigIgnore).
+- setPres(place, via) is called from onMove (GPS place change) and navArrive; presDrift() (after /api/loc) ends a BT/said place that is not a saved place once he is >350 m away.
+- Phone: KeepAliveService registers ACL_CONNECTED/DISCONNECTED and POSTs /api/signal {kind:'bt', state, name} (cookie auth like /api/loc). Needs a new APK; BLUETOOTH_CONNECT is already requested.
+- onSignal: OBD dongles ignored; known mapping (or a speaker with an area) sets presence silently; unknown device asks ONLY if GPS has no saved place, not on a trip/nav, not quiet hours, no other question open, and not asked about that device in 6 h. pendingQ type 'where' -> whereAnswer (yes = guess, "no" asks where, a place name, or "ignore"). New place is saved on the map (100 m) when the location is fresh.
+- Brain: presContext() in every prompt; tools presence_get, presence_set (persona section "Where he is").
+- Tested locally with a mock: ask, yes, remembered (no second ask), ignore path, drift clears. Not tested on the phone.
