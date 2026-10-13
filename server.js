@@ -177,7 +177,7 @@ function remember(role, text) {
   state.history = state.history.slice(-12);
   saveState();
 }
-const FAILURE_TTL = 7 * 24 * 60 * 60_000; // forget failed commands after about a week
+const FAILURE_TTL = 24 * 60 * 60_000; // forget unresolved failed commands after a day (never announced; only on request)
 function pruneFailures() {
   const cutoff = Date.now() - FAILURE_TTL;
   const kept = state.failures.filter(f => Date.parse(f.at) > cutoff);
@@ -1300,8 +1300,11 @@ function queueSpoken(text, title) {
   sayQ.push(it); while (sayQ.length > 6) sayQ.shift();
   setTimeout(() => { const i = sayQ.indexOf(it); if (i < 0) return; sayQ.splice(i, 1); if (it.taken) return; console.log(`  spoken line not picked up, sending notification: ${text}`); holdLine(text, false); alertOut(title, text).catch(() => {}); }, 90000);
 }
+let lastQ = { k: '', at: 0 };
 function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
-  text = tripDedupe(text.replace(/\s+/g, ' ').trim()); if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
+  text = tripDedupe(text.replace(/\s+/g, ' ').trim());
+  if (question && text) { const k = text.toLowerCase(), now = Date.now(); if ((lastQ.k === k && now - lastQ.at < 10 * 60e3) || now - lastQ.at < 90e3) return; lastQ = { k, at: now }; }   // no back-to-back duplicate questions
+  if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
   (state.remarks ||= []).push(Date.now()); saveState();
   remember('jarvis', text);
   if (clients.size) {
@@ -1315,7 +1318,7 @@ function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
     // Every line is also held and spoken aloud the moment the app opens, and sent as a Jarvis-voice audio clip (Telegram) so it is heard, not just read.
     holdLine(text, question);
     sendVoiceClip(title, text).catch(() => {});
-    alertOut(title, question ? 'Open Jarvis, sir. I have a question for you.' : text).catch(() => {});
+    alertOut(title, text).catch(() => {});   // the push carries the real question; no vague "I have a question" ping
   }
 }
 // Jarvis actually saying the line: Fish JARVIS voice clip (cached by text) sent as a Telegram audio message. Needs FISH_API_KEY + Telegram; otherwise silent no-op.
@@ -1864,8 +1867,7 @@ async function localGreeting(memo) {
   const wx = await weatherLine(today);
   state.greetedDay = today; saveState();
   const day = first ? ` It's ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: tz })}.` : '';
-  const n = state.failures.length;
-  const open = n ? ` ${n} earlier request${n > 1 ? 's' : ''} didn't go through; ask me to retry when you're ready.` : '';
+  const open = '';   // failed-command count is no longer announced; he asks when he wants it
   // First open of the day gets the full greeting; later opens are short and only carry news (weather change, failures).
   const ctx = contextNote() + takePendingSay() + (state.at === 'shop' || nowCtx().h < 12 ? followupNote() : ''); // an arrival remark from the same moment joins the greeting instead of cutting it off
   if (first) return `${part}${day}${wx} All systems online.${open}${ctx}`; // ctx last: it may be a question he answers

@@ -1,7 +1,7 @@
 STATUS: done
-TIME: 2026-10-13T01:30:36Z
-REQUEST: Fix wake word not taking in follow-up speech, and app showing fresh initialization on manual open
+TIME: 2026-10-13T20:51:04Z
+REQUEST: Stop vague "I want to talk to you" pushes and duplicate questions; stop nagging about stale failed commands
 RESULT:
-Done, Owner, but untested on the phone. After "Hey Jarvis" the listening window now stays open 25 seconds, retries more patiently if the mic blips, and gives a tick the moment the mic is really open so you know it is listening.
-The app no longer shows the INITIALIZE screen when reopened; it goes straight in with your saved settings.
-Both are web changes that go live with the Railway deploy; no APK reinstall needed. I could not find the cause of the 29 failed commands from here, so tell me if they continue.
+Done, Owner. The phone push for a question now carries the actual question text instead of a vague "I have a question for you", and a repeat question within 90 seconds is dropped.
+Old failed commands now expire after one day instead of a week, and the greeting no longer announces the failed count at all. Ask me about failures when you want them.
+To dismiss them, say "forget those" and I clear the list. Untested on the phone; it goes live with the Railway deploy, no APK reinstall needed.
