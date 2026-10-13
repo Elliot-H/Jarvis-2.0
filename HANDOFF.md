@@ -512,3 +512,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 - onSignal: OBD dongles ignored; known mapping (or a speaker with an area) sets presence silently; unknown device asks ONLY if GPS has no saved place, not on a trip/nav, not quiet hours, no other question open, and not asked about that device in 6 h. pendingQ type 'where' -> whereAnswer (yes = guess, "no" asks where, a place name, or "ignore"). New place is saved on the map (100 m) when the location is fresh.
 - Brain: presContext() in every prompt; tools presence_get, presence_set (persona section "Where he is").
 - Tested locally with a mock: ask, yes, remembered (no second ask), ignore path, drift clears. Not tested on the phone.
+
+## Wake window + reopen fix (2026-10-13)
+- After "Hey Jarvis" the listening window is 25 s (was 20), blip-retries allowed 6 (was 3) with growing waits, and a tick + "Listening, sir." activity line confirms the instant the recognizer is really open (`confirmPending`, `goActive({confirm:true})`).
+- Android app never shows the INITIALIZE boot overlay (hidden at load, boot auto-runs); a reopen/reload resumes with saved settings. Not changed: MainActivity.onResume still `recreate()`s if the page does not answer in 3 s (needs an APK rebuild if that proves to be the cause).
+- Untested on a device. The ~29 failed commands could not be investigated from logs here.

@@ -675,7 +675,7 @@
     if (!SR) { chip('#chipMic', 'bad', 'NO SPEECH API'); caption('Voice input needs Chrome or Edge. You can still type.', { typed: false, pre: '!!' }); return; }
     rec = new SR();
     rec.continuous = true; rec.interimResults = true; rec.lang = params.get('lang') || 'en-US';
-    rec.onstart = () => { recOn = true; recT0 = Date.now(); };
+    rec.onstart = () => { recOn = true; recT0 = Date.now(); if (confirmPending && mode === 'active') { confirmPending = false; chime(true); addActivity('Listening, ' + cfg.userTitle + '. Go ahead.'); } };   // after "Hey Jarvis": a tick the moment the mic is really open
     rec.onend = () => {
       recOn = false;
       { const dur = Date.now() - recT0; if (mode === 'active') addActivity('Mic session ended after ' + (dur / 1000).toFixed(1) + 's' + (lastRecErr && Date.now() - lastRecErrAt < 1500 ? ' (' + lastRecErr + ')' : '') + (pending || carry ? ', words heard' : ', nothing heard') + (recWanted ? ', re-opening' : '') + '.'); }
@@ -687,7 +687,7 @@
       // Android's recognizer refuses restarts that come too fast (error 10). Back off, then ease back down.
       if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
       recThrottled = false;
-      const wait = recBackoff || (recErrs.length >= 3 ? 8000 : (Date.now() - recT0 < 1500 ? 700 : 250));   // a blip session: pause a beat so it does not flicker   // repeated failures: pause before retrying
+      const wait = recBackoff || (blipN ? 400 * blipN : 0) || (recErrs.length >= 3 ? 8000 : (Date.now() - recT0 < 1500 ? 700 : 250));   // a blip session: pause a beat so it does not flicker   // repeated failures: pause before retrying
       // With the wake word engine healthy the recognizer is single-shot: one session per "Hey Jarvis" / mic tap / question, so it does not
       // re-open (and ding, through the Bluetooth speaker when music plays) every second. It only re-opens to finish a sentence he is mid-way through.
       const single = WAKE_FIRST && wakeEver && !wakeErrShown;
@@ -695,7 +695,7 @@
       // (a blip: wake engine still releasing the mic, recognizer's own no-speech timeout) must NOT close the window: re-open until the window times out.
       // Never loop: a window that keeps ending in under 1.5 s with nothing heard (open, beep, close, beep...) is given up after 3 tries.
       if (mode === 'active' && !pending && !carry && Date.now() - recT0 < 1500) blipN++;
-      const looping = blipN >= 3;
+      const looping = blipN >= 6;
       if (looping) { blipN = 0; micNotBefore = Date.now() + 10000; addActivity('Mic kept closing by itself; stopped re-opening it. Tap the mic or say "Hey Jarvis".'); }
       if (single && !pending && !carry && (looping || !(mode === 'active' && recWanted && !muted))) {   // nothing heard in this session: done. If he was speaking (pending), re-open until he pauses for PAUSE_MS
         manualMicUntil = 0;
@@ -758,15 +758,15 @@
   window.__micKick = () => { recBackoff = 0; recThrottled = false; micNotBefore = 0; recErrs = []; ensureMic(); };
   // "Hey Jarvis" on its own: he answers "Yes, sir?" (cached clip, on the phone's own route), THEN the mic opens for the command,
   // so the recognizer never hears his reply. No clip available: the old chime.
-  let wakeAnswering = false;
+  let wakeAnswering = false, confirmPending = false;
   function answerWake() {
     const url = !DISPLAY_ONLY && booted ? pickFiller('wake', 'generic') : null;
     if (muted) return;
-    if (!url || wakeAnswering) return goActive();
+    if (!url || wakeAnswering) return goActive({ confirm: true });
     wakeAnswering = true;
     try { pauseListening(); } catch {}
     setState('speaking', { echo: false });
-    let done = false; const go = () => { if (done) return; done = true; wakeAnswering = false; goActive({ quiet: true }); };
+    let done = false; const go = () => { if (done) return; done = true; wakeAnswering = false; goActive({ quiet: true, confirm: true, ms: 25000 }); };
     const a = newClip(url); a.onended = go; a.onerror = go; a.onpause = go;
     setTimeout(go, 2500);
     a.play().catch(go);
@@ -775,6 +775,7 @@
     if (muted) return;
     stopSpeaking(false);
     blipN = 0; mode = 'active'; setState('listening'); if (!o.quiet) chime(true);
+    confirmPending = !!o.confirm;
     caption('', {});
     clearTimeout(uttTimer); pending = null; carry = ''; lastHeard = ''; uttStart = lastLen;
     recWanted = true; ensureMic();
@@ -1056,6 +1057,7 @@
   $('#bootBtn').onclick = boot;
   // Inside the Android app there is no tap-to-start: boot straight away, and let the side key jump to listening.
   if (/JarvisApp/.test(navigator.userAgent)) {
+    $('#boot').classList.add('hide');   // already installed and set up: never show the INITIALIZE screen again on a reopen
     setTimeout(boot, 500);
     window.__jarvisWake = () => { if (!booted) boot(); else goActive(); };   // side key: ignored while muted (goActive)
   }

@@ -1,8 +1,7 @@
 STATUS: done
-TIME: 2026-10-12T13:58:22Z
-REQUEST: Fix travel questions: capture the answered destination, stop re-asking, tailor lines, trigger departure promptly
+TIME: 2026-10-13T01:30:36Z
+REQUEST: Fix wake word not taking in follow-up speech, and app showing fresh initialization on manual open
 RESULT:
-Fixed, Owner. When you answer where you are headed, Jarvis now saves it for the whole trip, whether it is home, the shop, the Camden house or any other place.
-He stops asking again, and his lines follow that destination: bring list, reminders, Maps ETA, and today's jobs for the shop.
-The saved destination clears when you arrive. The engine-start check now runs every minute instead of two, so the question comes sooner.
-This is a server change and goes live with the Railway deploy; no APK reinstall. I only syntax-checked it and could not run it end to end here, so please test it on the next drive.
+Done, Owner, but untested on the phone. After "Hey Jarvis" the listening window now stays open 25 seconds, retries more patiently if the mic blips, and gives a tick the moment the mic is really open so you know it is listening.
+The app no longer shows the INITIALIZE screen when reopened; it goes straight in with your saved settings.
+Both are web changes that go live with the Railway deploy; no APK reinstall needed. I could not find the cause of the 29 failed commands from here, so tell me if they continue.
