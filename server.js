@@ -772,7 +772,7 @@ async function currentWeather() {
   return { kind: WX_KINDS(j.current.weather_code), temp: Math.round(j.current.temperature_2m), unit: j.__f ? 'degrees' : 'degrees Celsius' };
 }
 // ---------- places & random contextual reminders ----------
-// Places are named by voice ("this is Brenda's") and stored with the phone's position. Reminders sit in a bucket, each tied
+// Places are named by voice ("this is the Camden house") and stored with the phone's position. Reminders sit in a bucket, each tied
 // to optional triggers (place, time of day, weekdays). They are checked on app open and now and then while the app is open,
 // with a dice roll and a cooldown, so they never feel scheduled.
 state.places ||= []; state.reminders ||= [];
@@ -1587,7 +1587,7 @@ async function departAnswer(q, text) {
   if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
   const named = !dest && !DEPART_YES.test(t) && t.match(/^(?:i'?m |im |we'?re )?(?:going|headed|heading|off|driving|running) (?:over )?(?:to|for|into) (?:the )?([a-z0-9' &.-]{2,40})$/); // an unsaved destination ("headed to Lowe's"): answer it here so the vehicle-check offer still follows
   if (named) { finish(); setHeading(named[1], q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + vscanTail()); }
-  if (!dest && !DEPART_YES.test(t) && !CHECK_CMD.test(t) && t.split(' ').length <= 4 && t.length > 2) { // a bare unsaved place ("Lowe's", "Brenda's"): that IS the answer, remember it
+  if (!dest && !DEPART_YES.test(t) && !CHECK_CMD.test(t) && t.split(' ').length <= 4 && t.length > 2) { // a bare unsaved place ("Lowe's", "the Camden house"): that IS the answer, remember it
     finish(); setHeading(t, q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
     return say([`Very good, sir. Headed to ${t}.`, ...lv].slice(0, 2).join(' ') + vscanTail());
   }
