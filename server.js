@@ -82,7 +82,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1128,6 +1128,52 @@ function quietAnswer(text) {
   return true;
 }
 if (!process.env.JARVIS_SMOKE) setInterval(quietActive, 30_000);
+// Finance hold ("hold all investment notes for today"): silences every stock / trade / crypto / stop phone alert and the crypto briefs for 24 h
+// (FIN_HOLD_HOURS) or until he says "resume investment notes". Everything else (car, home, reminders) is untouched. Held alerts are counted, not queued;
+// the broker's own resting stop orders keep working. State is phone-backed up (BACKUP_KEYS 'finHold').
+const FIN_TITLE = /^(BUY-WATCH|SUDDEN DROP|DOWN ON THE DAY|MOVER|Sell warning|BROKER STOP|ALERT LEVEL|Investment Watch|Crypto\b|Stock\b|Stop\b|Trade\b|Premarket|Pre-market|Signal)/i;
+const finTitle = (title, link) => FIN_TITLE.test(String(title || '')) || /\/chart\?/.test(String([].concat(link || [])[0] || ''));
+function finHoldActive() {
+  const h = state.finHold; if (!h?.on) return false;
+  const end = h.until || (h.at + Number(process.env.FIN_HOLD_HOURS || 24) * 3600e3);
+  if (Date.now() >= end) { endFinHold(true); return false; }
+  return true;
+}
+function endFinHold(auto) {
+  const n = state.finHold?.held || 0; state.finHold = { on: false }; saveState(); broadcast({ type: 'finhold', on: false });
+  if (auto) { const r = `Investment notes are back on, sir.${n ? ` I held ${n} alert${n === 1 ? '' : 's'} meanwhile.` : ''}`; remember('jarvis', r); if (clients.size) broadcast({ type: 'say', text: r, speak: true }); else push('Investment notes back on', r.replace(/^Investment notes are back on, sir\. ?/, '') || 'Back on.', undefined, true).catch(() => {}); }
+  return n;
+}
+function setFinHold(on, hours) {
+  if (!on) return endFinHold(false);
+  state.finHold = { on: true, at: Date.now(), until: hours ? Date.now() + hours * 3600e3 : 0, held: 0 }; saveState(); broadcast({ type: 'finhold', on: true });
+}
+const finHoldBlocks = (title, link) => { if (!finHoldActive() || !finTitle(title, link)) return false; state.finHold.held = (state.finHold.held || 0) + 1; saveState(); return true; };
+const FIN_HOLD_ON = /\b(hold|pause|silence|mute|stop|no more|turn off|shut off|skip)\b.{0,30}\b(investment|investing|stock|stocks|trade|trades|trading|market|crypto|financial|finance)\b.{0,20}\b(notes?|alerts?|notifications?|pushes|updates?|briefs?|briefings?)\b|\bhold (all )?(the )?(investment|stock|trade|financial|crypto) (notes?|alerts?)\b/;
+const FIN_HOLD_OFF = /\b(resume|restart|unhold|release|turn back on|back on|start|unmute|unpause|lift)\b.{0,30}\b(investment|investing|stock|stocks|trade|trades|trading|market|crypto|financial|finance)\b.{0,20}\b(notes?|alerts?|notifications?|pushes|updates?|briefs?|briefings?)\b|\b(investment|stock|trade|financial|crypto) (notes?|alerts?) (back )?on\b/;
+function holdAnswer(text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (t.split(' ').length > 18) return false;
+  const off = FIN_HOLD_OFF.test(t), on = !off && FIN_HOLD_ON.test(t);
+  if (!on && !off) return false;
+  let reply;
+  if (off) { const was = finHoldActive(), n = was ? endFinHold(false) : 0; reply = was ? `Investment notes are back on, sir.${n ? ` I held ${n} alert${n === 1 ? '' : 's'} meanwhile.` : ''}` : 'Investment notes were not on hold, sir.'; }
+  else {
+    const m = t.match(/\bfor (the next )?(\d+|a|an|one|two|three|four|six|eight|twelve) (hours?|days?)\b/), n = m ? (/^\d/.test(m[2]) ? Number(m[2]) : NUMW[m[2]] || 1) * (/day/.test(m[3]) ? 24 : 1) : 0;
+    const hrs = n ? Math.min(n, 72) : 0;
+    setFinHold(true, hrs);
+    reply = `Investment notes on hold for ${hrs ? hrs + (hrs === 1 ? ' hour' : ' hours') : 'the next ' + Number(process.env.FIN_HOLD_HOURS || 24) + ' hours'}, sir. No stock, trade, crypto or stop alerts. Resting broker stops still work. Say "resume investment notes" to end it.`;
+  }
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
+  return true;
+}
+handlers.finance_hold = async ({ action, hours } = {}) => {
+  if (action === 'off') { const n = finHoldActive() ? endFinHold(false) : 0; return `Investment notes are back on.${n ? ` ${n} alerts were held meanwhile.` : ''} Tell the user.`; }
+  if (action === 'status') return finHoldActive() ? `On hold since ${new Date(state.finHold.at).toLocaleString('en-US', { timeZone: 'America/New_York' })}; ${state.finHold.held || 0} alerts held so far.` : 'Not on hold.';
+  setFinHold(true, hours ? Math.min(Number(hours), 72) : 0);
+  return `Investment notes on hold ${hours ? 'for ' + hours + ' hours' : 'for 24 hours'}: no stock, trade, crypto or stop phone alerts or crypto briefs until then or until the user says resume. Resting broker stop orders still execute. Confirm to the user.`;
+};
 async function shopAnswer(text) {
   const a = state.shopAsk;
   if (!a?.pending || Date.now() - a.at > 10 * 60e3) return false;
@@ -1941,7 +1987,7 @@ async function tgPoll() {
       const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the user's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
-      if (!silentAnswer(t) && !(await panelAnswer(t)) && !quietAnswer(t) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+      if (!silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
     }
   } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
   setImmediate(tgPoll);
@@ -2011,6 +2057,7 @@ function rememberRec(link, title, body) {
 }
 async function push(title, body, link, force = false) {
   if (silentActive()) { console.log(`silent mode: held back phone alert "${title}"`); return null; }   // silent mode mutes every phone alert (Pushover/Telegram/ntfy), even forced ones; they resume when it ends
+  if (finHoldBlocks(title, link)) { console.log(`finance hold: held back "${title}"`); return null; }   // before 'force': a hold silences even forced finance pushes
   if (!force && quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(body))) { console.log(`quiet mode: held back "${title}"`); return null; }
   const links = [].concat(link || []).filter(Boolean), first = links[0] || '', watch = watchLink(first), buy = buyLink(first);
   if (watch) rememberRec(first, title, body);
@@ -2475,6 +2522,7 @@ if (!process.env.JARVIS_SMOKE) {
   setTimeout(alertLoop, 20000); setInterval(() => slowAlertTick().catch(() => {}), 60e3); setInterval(() => sweepTick().catch(() => {}), 60e3); setInterval(() => moverTick().catch(() => {}), 60e3);
 }
 async function cryptoBrief(slot) {
+  if (finHoldActive()) { console.log(`crypto ${slot} brief skipped: finance hold`); return; }
   const blocked = overBudget('chat');
   if (blocked) { console.log(`crypto ${slot} brief skipped: ${blocked}`); return; }
   let prompt;
@@ -3317,7 +3365,7 @@ wss.on('connection', ws => {
     if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice and phone alerts are back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !holdAnswer(msg.text.trim()) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };

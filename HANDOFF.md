@@ -524,3 +524,8 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Mic -> assistant delivery fix (2026-10-13)
 - `send()` in public/app.js used to drop an `ask` silently when the WebSocket was reconnecting (speech heard, nothing reached Jarvis). Now `ask` is held in an outbox (90s) and delivered on reconnect.
 - `goActive()` no longer wipes words already heard (follow-up window or mic tap used to discard a command in progress). Tapping the mic while words are pending sends them now (push-to-talk). Web-only change, live on deploy; no APK reinstall.
+
+## Finance hold (2026-10-14)
+- `state.finHold` {on, at, until, held} (BACKUP_KEYS). Voice: `holdAnswer` (server.js, after `quietAnswer`, chained before it in both ask paths): "hold all investment notes (for N hours)" / "resume investment notes"; no AI call. Tool `finance_hold` (tools.js PHONE_TOOLS). Expires on its own after FIN_HOLD_HOURS (24, max 72 by voice) with a one-line "back on, N held".
+- Gate: `finHoldBlocks(title, link)` at the top of `push()`, before quiet/force. Finance = title matches FIN_TITLE (BUY-WATCH, SUDDEN DROP, DOWN ON THE DAY, MOVER, Sell warning, BROKER STOP, ALERT LEVEL, Investment Watch, Crypto, Stock, Stop, Trade, Premarket, Signal) or a /chart link. `cryptoBrief` skips while held. Held alerts are counted, not queued. Includes the critical stop-hit alerts by design (he asked for all); broker stop orders still execute at the broker.
+- A new finance alert title must match FIN_TITLE or it will not be held. Tested: regexes and boot only, not live.
