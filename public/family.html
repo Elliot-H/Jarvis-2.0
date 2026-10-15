@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Family</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>html,body{margin:0;height:100%;background:#02060c;color:#cfefff;font-family:system-ui,sans-serif}#map{height:62%}#list{height:38%;overflow:auto;padding:8px 16px}
+.r{padding:10px 0;border-bottom:1px solid #123;display:flex;justify-content:space-between;gap:10px}.n{color:#3fe0ff;font-weight:700}.d{color:#8fb;font-size:14px}.o{color:#ff4d5e}</style></head>
+<body><div id="map"></div><div id="list"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const map=L.map('map').setView([39.0,-75.6],10);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+let marks={},fit=true;
+async function load(){try{const d=await (await fetch('/api/family')).json();const list=document.getElementById('list');list.innerHTML='';const pts=[];
+d.people.forEach(p=>{const row=document.createElement('div');row.className='r';const where=!p.sharing?'<span class="o">sharing off</span>':p.lat==null?'no fix yet':(p.place?'at '+p.place+(p.since?' · '+p.since:''):'out')+(p.mph>3?' · '+p.mph+' mph':'');
+row.innerHTML='<div><div class="n"></div><div class="d"></div></div><div class="d"></div>';row.querySelector('.n').textContent=p.name;row.querySelectorAll('.d')[0].textContent=where;row.querySelectorAll('.d')[1].textContent=p.ago+(p.batt!=null?' · '+p.batt+'%':'');list.appendChild(row);
+if(p.lat!=null&&p.sharing){pts.push([p.lat,p.lon]);if(marks[p.id])marks[p.id].setLatLng([p.lat,p.lon]);else marks[p.id]=L.marker([p.lat,p.lon]).addTo(map);marks[p.id].bindTooltip(p.name,{permanent:true,direction:'top'});}});
+if(fit&&pts.length){map.fitBounds(pts,{padding:[40,40],maxZoom:15});fit=false;}}catch(e){}}
+load();setInterval(load,15000);
+</script></body></html>

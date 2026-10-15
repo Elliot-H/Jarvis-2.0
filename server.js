@@ -82,7 +82,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -2867,6 +2867,56 @@ app.all('/api/outbox/:id/sent', (req, res) => {
 // picked up but never confirmed within 2 hours: put it back so the next run retries
 setInterval(() => { let c = false; for (const f of state.followups) if (f.status === 'sending' && Date.now() - f.pickedAt > 2 * 3600e3) { f.status = 'approved'; c = true; } if (c) saveState(); }, 10 * 60_000);
 const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png|m\/[\w-]{8,40}\.(jpg|mp4))$/;
+// ---------- Family locations (Jarvis mini, phase 1) ----------
+// Each family member runs OwnTracks (free iPhone/Android app, HTTP mode) pointed at /api/ot?k=<their token>. No PIN cookie on that route (the phone app has none):
+// the per-person token is the key. Fixes land in state.family.kids[id]; a saved place entered/left for 2 fixes in a row pings the Owner (title "Family: ...").
+// Each person can switch sharing off in the app; the HUD/tool show the age of the last fix, never a guess.
+state.family ||= { kids: {} };
+const famKey = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20);
+const famAgo = at => { const m = Math.round((Date.now() - at) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' days ago'; };
+const famPlaceName = k => { const l = k.loc; if (!l) return null; const pl = placeFor({ lat: l.lat, lon: l.lon }, k.place ? placeKey(k.place) : ''); return pl ? pl.name : null; };
+function famFix(kid, o) {
+  const lat = Number(o.lat), lon = Number(o.lon); if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const acc = Number(o.acc) || 0, now = Date.now();
+  kid.loc = { lat: +lat.toFixed(5), lon: +lon.toFixed(5), at: (Number(o.tst) ? Number(o.tst) * 1000 : now), acc, batt: Number.isFinite(Number(o.batt)) ? Number(o.batt) : (kid.loc?.batt ?? null), mph: Number.isFinite(Number(o.vel)) ? Math.round(Number(o.vel) * 0.621) : 0 };
+  (kid.hist ||= []).push({ lat: kid.loc.lat, lon: kid.loc.lon, at: kid.loc.at }); kid.hist = kid.hist.slice(-60);
+  if (acc > 200) return;   // too fuzzy to call a place
+  const nm = famPlaceName(kid), cur = kid.place || null;
+  if ((nm || null) === cur) { kid.cand = null; return; }
+  if (kid.cand?.to === (nm || null)) kid.cand.n++; else kid.cand = { to: nm || null, n: 1 };
+  if (kid.cand.n < 2) return;
+  kid.cand = null; const from = cur; kid.place = nm || null; kid.since = now;
+  (kid.events ||= []).push({ at: now, from, to: kid.place }); kid.events = kid.events.slice(-30);
+  if (kid.notify === false) return;
+  const msg = kid.place ? `${kid.name} arrived at ${kid.place}.` : `${kid.name} left ${from}.`;
+  push(kid.place ? `Family: ${kid.name} arrived` : `Family: ${kid.name} left`, msg).catch(() => {});
+}
+app.post('/api/ot', (req, res) => {
+  const tok = String(req.query.k || ''), kid = Object.values(state.family.kids).find(x => x.token && x.token === tok);
+  if (!kid) return res.status(401).json([]);
+  const b = req.body || {};
+  try { if (b._type === 'location' && kid.sharing !== false) { famFix(kid, b); saveState(); } } catch (e) { console.warn('family fix failed: ' + e.message); }
+  res.json([]);   // OwnTracks expects a JSON array (commands/cards for the phone)
+});
+const famRows = () => Object.entries(state.family.kids).map(([id, k]) => ({ id, name: k.name, sharing: k.sharing !== false, at: k.loc?.at || null, ago: k.loc ? famAgo(k.loc.at) : 'no fix yet', lat: k.loc?.lat ?? null, lon: k.loc?.lon ?? null, place: k.place || null, since: k.since ? famAgo(k.since) : null, mph: k.loc?.mph ?? null, batt: k.loc?.batt ?? null, acc: k.loc?.acc ?? null }));
+handlers.family_add = async ({ name, adult } = {}) => {
+  const id = famKey(name); if (!id) return 'Need a name.';
+  const k = (state.family.kids[id] ||= { name: String(name).trim().slice(0, 30), token: crypto.randomBytes(12).toString('hex') });
+  k.adult = !!adult; saveState();
+  const base = (publicBase() || '').replace(/\/+$/, '') || 'https://YOUR-JARVIS-URL';
+  return `${k.name} added. Setup for ${k.name}'s iPhone: install OwnTracks (App Store, free), Settings > Connection > Mode "HTTP", URL ${base}/api/ot?k=${k.token} , leave user/password empty, allow Location "Always", turn Move mode on. Send him that URL and steps. ${adult ? 'He is an adult: make sure he agrees to share before he sets it up.' : ''}`;
+};
+handlers.family_where = async ({ name } = {}) => {
+  const rows = famRows(); if (!rows.length) return 'Nobody is set up yet. Use family_add.';
+  const pick = name ? rows.filter(r => r.id === famKey(name) || r.name.toLowerCase().includes(String(name).toLowerCase())) : rows;
+  if (!pick.length) return `No family member called ${name}.`;
+  return pick.map(r => !r.sharing ? `${r.name}: sharing is off.` : r.lat == null ? `${r.name}: no location yet (OwnTracks not reporting).` : `${r.name}: ${r.place ? 'at ' + r.place + (r.since ? ' since ' + r.since : '') : 'out and about (' + r.lat + ', ' + r.lon + ')'}${r.mph > 3 ? ', moving about ' + r.mph + ' mph' : ''}, last fix ${r.ago}${r.batt != null ? ', phone battery ' + r.batt + '%' : ''}.`).join('\n') + '\nSay it briefly. If a fix is old, say so rather than guessing.';
+};
+handlers.family_set = async ({ name, notify, remove } = {}) => {
+  const k = state.family.kids[famKey(name)]; if (!k) return `No family member called ${name}.`;
+  if (remove) { delete state.family.kids[famKey(name)]; saveState(); return `${k.name} removed.`; }
+  if (notify !== undefined) k.notify = !!notify; saveState(); return `${k.name}: arrive/leave alerts ${k.notify === false ? 'off' : 'on'}.`;
+};
 app.use((req, res, next) => {
   if (authed(req) || PUBLIC_FILES.test(req.path)) return next();
   // Claude can run and read the model test remotely with BENCH_TOKEN (set in Railway); only the bench and talk-model routes accept it.
@@ -2953,6 +3003,8 @@ app.get('/api/calendar-check', async (_req, res) => {
 });
 // ---------- Places box (/places): places + the reminder / mention / question bucket ----------
 app.get('/places', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'places.html')));
+app.get('/family', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'family.html')));
+app.get('/api/family', (_req, res) => res.json({ people: famRows(), places: state.places.map(p => ({ name: p.name, lat: p.lat, lon: p.lon, radius: p.radius || 150 })) }));
 const placesView = () => {
   const here = currentPlace();
   return { places: state.places.map(p => ({ name: p.name, kind: p.kind, radius: p.radius || 150, lat: p.lat, lon: p.lon, address: p.address })),
