@@ -1,7 +1,5 @@
 STATUS: done
-TIME: 2026-10-15T13:50:20Z
-REQUEST: Read the truck OBD dongle immediately at engine start, not 8+ minutes into the drive
+TIME: 2026-10-15T13:51:04Z
+REQUEST: Read the truck dongle ASAP, but only when the Owner's phone is in range and the engine is running or the truck is moving
 RESULT:
-Owner, the cause was that every background check was a full, slow diagnostic read, and a failed connection kept the scanner busy for minutes. I added a quick engine check that connects once and reads only rpm, speed and battery, so engine start is caught within about a minute.
-The departure questions, bring list and vehicle check now fire off that quick read, and the full scan runs right after. The server side goes live on the Railway deploy.
-You need to reinstall the new APK for the quick check to work. Until then the old slow scan keeps running. I could not test it on the truck from here.
+Owner, the rule you described was already how the read works: the phone does the reading, so if you are out of range nothing is scanned and no departure questions fire. I made it faster on top of the quick engine check added earlier. Jarvis now reads the dongle right away when the app connects and when your phone starts moving, instead of waiting for the next timer. If someone else starts the truck while you are away, nothing happens. This part is server only and goes live on the Railway deploy. The quick engine check from the earlier request still needs the new APK. I could not test it on the real truck.

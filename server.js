@@ -1746,7 +1746,8 @@ function driveFix(lat, lon, speedMs) { // every phone position (background /api/
   if (mph == null && pf && now - pf.t >= 15e3 && now - pf.t <= 10 * 60e3) mph = km(pf, { lat, lon }) * 0.621 / ((now - pf.t) / 3600e3);
   if (mph != null) driveSignal('gps', mph);
 }
-function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
+async function driveStart(src, mph) { // movement just began: stage 2 of the travel protocol (copilotTick picks the trip up within a minute)
+  if (src === 'gps') await obdNudge().catch(() => {}); // phone is moving: read the dongle NOW (success = phone in range, engine start gets seen before the question below); out of range just fails quietly
   const now = Date.now(), d = state.departed;
   const asked = tripOn() || !!headingFresh() || (state.vehicles || []).some(v => v.lastDepart && now - v.lastDepart < 45 * 60e3) || (d && now - d.at < 45 * 60e3);
   const qFresh = !!state.pendingQ && now - (state.pendingQ.at || 0) < 3 * 60e3;   // answers are only accepted for 3 min; an older question must not block this one (Oct 4: a stale one silenced the 12:18 departure)
@@ -3415,7 +3416,7 @@ wss.on('connection', ws => {
       state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
     if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice and phone alerts are back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
-    if (msg.type === 'hello' && msg.device) deviceClients.add(ws);
+    if (msg.type === 'hello' && msg.device) { deviceClients.add(ws); setTimeout(() => obdNudge().catch(() => {}), 2000); } // phone app (re)connected: look for the dongle right away
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
     if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !holdAnswer(msg.text.trim()) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
@@ -3519,6 +3520,12 @@ async function obdTick() {
     if (v.scanning) continue;
     if (!v.lastTry || Date.now() - v.lastTry > gap) { v.scanning = true; try { await obdScan(v); } catch (e) { console.warn('obd', e.message); } finally { v.scanning = false; } }
   }
+}
+let obdNudgeAt = 0;
+async function obdNudge() { // read every saved dongle right now instead of waiting for the poll timer; the read succeeding is the gate (phone in Bluetooth range), so a truck started by someone else with the phone away triggers nothing
+  if (Date.now() - obdNudgeAt < 20e3 || !deviceClients.size) return; obdNudgeAt = Date.now();
+  for (const v of state.vehicles) if (!v.scanning) v.lastTry = 0;
+  await obdTick();
 }
 if (!process.env.JARVIS_SMOKE) setInterval(obdTick, 15_000);
 // Least-squares slope of resting voltage over at least 2 days of readings, as volts lost per day (positive = draining).
