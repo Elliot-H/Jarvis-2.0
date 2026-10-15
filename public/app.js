@@ -121,7 +121,7 @@
       case 'device':
         if (m.action === 'obd_scan' || m.action === 'obd_clear') { // vehicle OBD dongle: answered by the app's ObdBridge
           if (!window.AndroidObd) { send({ type: 'device_result', id: m.id, ok: false, detail: 'This app build cannot read OBD dongles yet. Install the newest Jarvis app.' }); break; }
-          try { window.AndroidObd[m.action === 'obd_clear' ? 'clearCodes' : 'scan'](m.id, String(m.dongle || '')); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); }
+          try { window.AndroidObd[m.action === 'obd_clear' ? 'clearCodes' : (m.fast && window.AndroidObd.scanFast ? 'scanFast' : 'scan')](m.id, String(m.dongle || '')); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); }
           break;
         }
         if (window.AndroidDevice) { try { window.AndroidDevice.run(JSON.stringify(m)); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); } }

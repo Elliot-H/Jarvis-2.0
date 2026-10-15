@@ -27,10 +27,12 @@ public class ObdBridge {
 
   ObdBridge(Context c, WebView w) { ctx = c; web = w; }
 
-  @JavascriptInterface public void scan(final String id, final String dongle) { run(id, dongle, false); }
-  @JavascriptInterface public void clearCodes(final String id, final String dongle) { run(id, dongle, true); }
+  @JavascriptInterface public void scan(final String id, final String dongle) { run(id, dongle, false, false); }
+  // Quick engine check for the background watch: one connect round, then only volts/rpm/run time/speed. Engine start is seen in seconds, not minutes.
+  @JavascriptInterface public void scanFast(final String id, final String dongle) { run(id, dongle, false, true); }
+  @JavascriptInterface public void clearCodes(final String id, final String dongle) { run(id, dongle, true, false); }
 
-  private void run(final String id, final String dongle, final boolean clear) {
+  private void run(final String id, final String dongle, final boolean clear, final boolean fast) {
     if (busy) { reply(id, err("busy", "Another vehicle scan is running.")); return; }
     busy = true;
     new Thread(() -> {
@@ -66,8 +68,8 @@ public class ObdBridge {
         // Cheap clone dongles often refuse the first try: secure socket, insecure socket, channel 1, then the whole round once more after a pause.
         // Modes: 0 secure SPP, 1 insecure SPP, 2-4 raw RFCOMM channels 1-3 (some clones ignore the UUID), 5 the dongle's own advertised UUID.
         String lastErr = "";
-        for (int round = 0; round < 3 && s == null; round++) {
-          for (int mode = 0; mode < 6 && s == null; mode++) {
+        for (int round = 0; round < (fast ? 1 : 3) && s == null; round++) {
+          for (int mode = 0; mode < (fast ? 3 : 6) && s == null; mode++) {
             BluetoothSocket t = null;
             try {
               if (mode == 5) {
@@ -82,7 +84,7 @@ public class ObdBridge {
               t.connect(); s = t;
             } catch (Exception e) { lastErr = "mode " + mode + ": " + e.getMessage(); try { if (t != null) t.close(); } catch (Exception ignored) {} Thread.sleep(300); }
           }
-          if (s == null && round < 2) Thread.sleep(1500);
+          if (s == null && round < 2 && !fast) Thread.sleep(1500);
         }
         if (s == null) { reply(id, err("out_of_range", "Could not open a connection to " + dev.getName() + " (" + dev.getAddress() + "): " + lastErr + ". Check the car's ignition is on, the dongle's light is lit, and the dongle is not connected to another phone. Some dongles are Bluetooth LE type, which this app cannot use.")); return; }
         InputStream in = s.getInputStream(); OutputStream out = s.getOutputStream();
@@ -90,6 +92,15 @@ public class ObdBridge {
         JSONObject r = new JSONObject().put("ok", true).put("dongle", dev.getName()).put("address", dev.getAddress());
         String volts = cmd(in, out, "ATRV", 1500).replaceAll("[^0-9.]", "");
         if (!volts.isEmpty()) r.put("volts", Double.parseDouble(volts));
+        if (fast) {
+          int[] rp = bytes(cmd(in, out, "010C", 3500), "410C", 2);
+          if (rp != null) {
+            r.put("ecu", true).put("fast", true).put("rpm", (rp[0] * 256 + rp[1]) / 4);
+            int[] rt = bytes(cmd(in, out, "011F", 2500), "411F", 2); if (rt != null) r.put("runSec", rt[0] * 256 + rt[1]);
+            int[] sp = bytes(cmd(in, out, "010D", 2500), "410D", 1); if (sp != null) r.put("speedKph", sp[0]);
+          } else r.put("ecu", false).put("fast", true);
+          reply(id, r); return;
+        }
         if (clear) {
           String c = cmd(in, out, "04", 5000);
           r.put("cleared", c.contains("44"));

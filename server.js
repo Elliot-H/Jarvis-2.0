@@ -3462,14 +3462,18 @@ const vFind = name => state.vehicles.find(v => norm(v.name) === norm(name)) || (
   || state.vehicles.find(v => norm(v.name).includes(norm(name || '#')) || norm(name || '#').includes(norm(v.name)));
 async function obdScan(v, why = 'auto') {
   v.lastTry = Date.now(); saveState();
-  const r = await deviceAction('obd_scan', { dongle: v.dongle }, 45000);
+  // Background watch = quick engine check (new app build); a full diagnostic read only on request or every OBD_EVERY while the dongle is up. Older app builds ignore `fast`.
+  const fast = why === 'auto' && !state.shutdown?.active && !(v.last?.rpm && (!v.lastFull || Date.now() - v.lastFull > OBD_EVERY)); // engine start is read fast; the full read follows once it is already running
+  const r = await deviceAction('obd_scan', { dongle: v.dongle, fast }, fast ? 20000 : 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
   if (!d.ok) { v.reachable = false; if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
     if (why !== 'auto' || Date.now() - (v.failNote || 0) > 30 * 60e3) { v.failNote = Date.now(); console.log(`obd ${v.name}: ${d.detail || d.code || 'no answer'}`); } return { ok: false, why: d.detail || d.code || 'no answer' }; }
   if (!v.reachable) dlog('dongle-seen', { vehicle: v.name, rpm: d.rpm ?? null, volts: d.volts ?? null, why }); // dongle just came into range (or first read)
   v.reachable = true; v.lastOk = Date.now();
   if (d.speedKph > 0) driveSignal('obd', d.speedKph * 0.621);
-  const prev = v.last || {}; d.at = new Date().toISOString(); v.last = d; v.alerts ||= {};
+  const prev = v.last || {}; d.at = new Date().toISOString(); v.alerts ||= {};
+  if (d.fast) { d = { ...prev, ...d, fast: undefined, rpm: d.rpm || 0, speedKph: d.speedKph, runSec: d.runSec }; } else v.lastFull = Date.now(); // quick read keeps the last full diagnostic fields
+  v.last = d;
   const now = Date.now(), lines = [], once = (k, h) => { if (v.alerts[k] && now - v.alerts[k] < h * 3600e3) return false; v.alerts[k] = now; return true; };
   const fresh = (d.dtcs || []).filter(c => !(prev.dtcs || []).includes(c));
   if (fresh.length) lines.push(`Heads up, sir: the ${v.name} has ${fresh.length > 1 ? 'new trouble codes' : 'a new trouble code'}, ${listJoin(fresh)}${d.mil ? ', and the check engine light is on' : ''}. Ask me what ${fresh.length > 1 ? 'they mean' : 'it means'}.`);
