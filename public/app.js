@@ -669,7 +669,8 @@
     if (!window.AndroidWake || !booted) return;
     try {
       if (muted) { if (wakeOn) window.AndroidWake.stop(); return; }
-      const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil;
+      // Never open the wake engine's own recorder while the recognizer is starting or has just started: two recorders on the mic at once leave the recognizer deaf (the first minute after the app opens).
+      const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil && Date.now() - lastMicStart > 8000;
       if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
     } catch {}

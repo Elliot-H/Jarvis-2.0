@@ -38,13 +38,20 @@ public class SttBridge {
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
   private long readyAt = 0, lastRms = 0, lastDeadReset = 0; private int rmsCount = 0;
+  private boolean levelsEver = false, coldTried = false;   // this phone has reported audio levels at least once / the one cold-start reset was used
   /** A session that says "ready" but never delivers audio levels is a dead mic (another app or the wake engine holds it): the page shows
    *  "listening" while nothing hears him. Reset it so the page opens a fresh one. */
   private final Runnable deadCheck = new Runnable() { @Override public void run() {
     if (!running || !ready) return;
     long now = System.currentTimeMillis();
-    boolean dead = rmsCount > 0 && now - lastRms > 3500;   // only when levels WERE flowing and then stopped (never judge a phone that sends no levels)
-    if (dead && now - lastDeadReset < 60000) dead = false;   // at most one restart a minute: never a beep loop
+    boolean dead = rmsCount > 0 && now - lastRms > 3500;   // levels were flowing and then stopped
+    // Deaf from the very first moment ("listening" lit, zero levels ever): seen for about a minute after the app opens, until the 60 s stall watchdog
+    // happened to reset it. Judge it after 3.5 s on a phone known to send levels, or once per app run (6 s) on a phone not yet known to.
+    if (rmsCount == 0) {
+      if (levelsEver && now - readyAt > 3500) dead = true;
+      else if (!levelsEver && !coldTried && now - readyAt > 6000) { dead = true; coldTried = true; }
+    }
+    if (dead && now - lastDeadReset < (rmsCount == 0 ? 12000 : 60000)) dead = false;   // at most one restart a minute: never a beep loop
     if (dead) { lastDeadReset = now; emit("diag", "mic was open but no audio reached it (" + (rmsCount > 0 ? "levels stopped" : "no levels at all") + "), restarting it"); reset(); emit("error", "aborted"); emit("end", ""); return; }
     ui.postDelayed(this, 1000);
   } };
@@ -216,7 +223,7 @@ public class SttBridge {
       ready = true; readyAt = System.currentTimeMillis(); lastRms = readyAt; rmsCount = 0; ui.removeCallbacks(deadCheck); ui.postDelayed(deadCheck, 2500); ui.removeCallbacks(stall); ui.postDelayed(stall, 60000);   // a live session never runs this long
       emit("start", ""); hush(600); }   // re-arm: a slow start must not leave the ready beep audible
     @Override public void onBeginningOfSpeech() {}
-    @Override public void onRmsChanged(float v) { if (v > maxRms) maxRms = v; lastRms = System.currentTimeMillis(); rmsCount++; }
+    @Override public void onRmsChanged(float v) { if (v > maxRms) maxRms = v; lastRms = System.currentTimeMillis(); rmsCount++; levelsEver = true; }
     @Override public void onBufferReceived(byte[] b) {}
     @Override public void onEndOfSpeech() { hush(1500); }
     @Override public void onError(int code) {
