@@ -47,8 +47,8 @@ public class KeepAliveService extends Service {
   private final Handler hnd = new Handler(Looper.getMainLooper());
   private boolean sayLoop = false;
   private TextToSpeech tts;
-  // Lines Jarvis wants spoken while the app screen is closed (arrivals, leaving): asked for every 12 s, plus right after each position report.
-  private final Runnable sayPoll = new Runnable() { @Override public void run() { pollOnce(); hnd.postDelayed(this, 12_000); } };
+  // Lines Jarvis wants spoken while the app screen is closed (arrivals, leaving): asked for every 6 s, plus right after each position report.
+  private final Runnable sayPoll = new Runnable() { @Override public void run() { pollOnce(); hnd.postDelayed(this, 6_000); } };
 
   @Override public int onStartCommand(Intent intent, int flags, int startId) {
     NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
@@ -151,7 +151,7 @@ public class KeepAliveService extends Service {
         String ck = cookieFor(base); if (ck != null) c.setRequestProperty("Cookie", ck);
         if (c.getResponseCode() != 200) { c.disconnect(); return; }
         JSONObject j = new JSONObject(new String(readAll(c.getInputStream()), StandardCharsets.UTF_8)); c.disconnect();
-        String text = j.optString("text", ""), clip = j.optString("clip", "");
+        String text = j.optString("text", ""), clip = j.optString("clip", ""); final boolean ask = j.optBoolean("ask", false);
         if (text.isEmpty()) return;
         File f = null;
         if (!clip.isEmpty()) {
@@ -164,9 +164,28 @@ public class KeepAliveService extends Service {
           } catch (Exception e) { f = null; }
         }
         final File ff = f; final String tx = text;
-        hnd.post(() -> speak(tx, ff));
+        hnd.post(() -> speak(tx, ff, ask));
       } catch (Exception ignored) {}
     }).start();
+  }
+
+
+  /** After Jarvis has spoken a QUESTION, bring him to the front so the mic is open for the answer (MainActivity.onNewIntent starts listening).
+   *  Android only lets a background service start an activity when "Display over other apps" is allowed; otherwise a high-priority
+   *  full-screen notification does the same and, failing that, is one tap. */
+  private void openToAnswer() {
+    Intent i = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT).putExtra("answer", true);
+    try {
+      if (Build.VERSION.SDK_INT < 29 || android.provider.Settings.canDrawOverlays(this)) { startActivity(i); return; }
+    } catch (Exception ignored) {}
+    try {
+      NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+      nm.createNotificationChannel(new NotificationChannel("answer", "Jarvis is asking", NotificationManager.IMPORTANCE_HIGH));
+      PendingIntent pi = PendingIntent.getActivity(this, 7, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+      Notification n = new Notification.Builder(this, "answer").setSmallIcon(R.drawable.ic_stat).setContentTitle("Jarvis").setContentText("Tap to answer")
+          .setContentIntent(pi).setFullScreenIntent(pi, true).setAutoCancel(true).setCategory(Notification.CATEGORY_CALL).build();
+      nm.notify(77, n);
+    } catch (Exception ignored) {}
   }
 
   private static byte[] readAll(InputStream in) throws Exception {
@@ -176,12 +195,12 @@ public class KeepAliveService extends Service {
   }
 
   // Say it aloud: the Jarvis-voice clip when we have it, else the phone's own voice. Music ducks while he talks.
-  private void speak(String text, File clip) {
+  private void speak(String text, File clip, boolean ask) {
     final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
     final AudioAttributes at = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
     final AudioFocusRequest fr = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(at).build();
     am.requestAudioFocus(fr);
-    final Runnable done = () -> { try { am.abandonAudioFocusRequest(fr); } catch (Exception ignored) {} };
+    final Runnable done = () -> { try { am.abandonAudioFocusRequest(fr); } catch (Exception ignored) {} if (ask) hnd.postDelayed(this::openToAnswer, 400); };
     if (clip != null && clip.exists()) {
       try {
         MediaPlayer mp = new MediaPlayer();
@@ -195,8 +214,15 @@ public class KeepAliveService extends Service {
     tts = new TextToSpeech(this, st -> {
       if (st != TextToSpeech.SUCCESS || tts == null) { done.run(); return; }
       try { tts.setAudioAttributes(at); } catch (Exception ignored) {}
+      final boolean[] fin = {false};
+      final Runnable finish = () -> { if (fin[0]) return; fin[0] = true; try { tts.shutdown(); } catch (Exception ignored) {} done.run(); };
+      tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+        @Override public void onStart(String id) {}
+        @Override public void onDone(String id) { hnd.post(finish); }
+        @Override public void onError(String id) { hnd.post(finish); }
+      });
       tts.speak(say, TextToSpeech.QUEUE_FLUSH, null, "jarvis");
-      hnd.postDelayed(() -> { try { tts.shutdown(); } catch (Exception ignored) {} done.run(); }, 20_000);
+      hnd.postDelayed(finish, 25_000);
     });
   }
 

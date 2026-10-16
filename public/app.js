@@ -132,6 +132,7 @@
         if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
         window.__silent = silent;
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
+      case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
         if (m.memo) saveMemo(m.memo);
         ticker('');

@@ -151,6 +151,21 @@ public class MainActivity extends Activity {
     askPermissions();
     web.loadUrl(origin + "/?app=1" + buyParam(getIntent()));
     startKeepAlive();
+    askOverlayOnce();
+  }
+
+  /** One time: "Display over other apps" lets the background service bring Jarvis up (mic open) right after he asks a question aloud. */
+  private void askOverlayOnce() {
+    try {
+      if (Build.VERSION.SDK_INT < 23 || android.provider.Settings.canDrawOverlays(this)) return;
+      android.content.SharedPreferences sp = getSharedPreferences("jarvis", MODE_PRIVATE);
+      if (sp.getBoolean("overlayAsked", false)) return;
+      sp.edit().putBoolean("overlayAsked", true).apply();
+      ui.postDelayed(() -> { try {
+        android.widget.Toast.makeText(this, "Allow \"Display over other apps\" for Jarvis so he can open and listen after he asks you a question.", android.widget.Toast.LENGTH_LONG).show();
+        startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+      } catch (Exception ignored) {} }, 8000);
+    } catch (Exception ignored) {}
   }
 
   private void askPermissions() {
@@ -223,6 +238,7 @@ public class MainActivity extends Activity {
   @Override protected void onNewIntent(Intent i) {
     super.onNewIntent(i);
     setIntent(i);
+    if (i.getBooleanExtra("answer", false)) { try { if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); } } catch (Exception ignored) {} }   // Jarvis asked a question aloud: open over the lock screen to hear the answer
     String buy = buyParam(i);
     if (!buy.isEmpty() && web != null) { web.loadUrl(BuildConfig.BASE_URL + "/?app=1" + buy); return; }   // alert "Buy" button: jarvis://open?buy=SYM
     if (i.getBooleanExtra("silent", false)) return; // returning from another app: do not start listening

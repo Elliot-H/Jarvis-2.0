@@ -1341,8 +1341,8 @@ async function sayClipFile(text) {
   if (!fs.existsSync(file)) { const out = await fishFetch(text.slice(0, 400)); if (!out.r) return ''; fs.writeFileSync(file, Buffer.from(await out.r.arrayBuffer())); }
   return file;
 }
-function queueSpoken(text, title) {
-  const it = { id: crypto.randomBytes(5).toString('hex'), text, title, at: Date.now(), taken: false };
+function queueSpoken(text, title, ask = false) {
+  const it = { id: crypto.randomBytes(5).toString('hex'), text, title, at: Date.now(), taken: false, ask };
   sayQ.push(it); while (sayQ.length > 6) sayQ.shift();
   setTimeout(() => { const i = sayQ.indexOf(it); if (i < 0) return; sayQ.splice(i, 1); if (it.taken) return; console.log(`  spoken line not picked up, sending notification: ${text}`); holdLine(text, false); alertOut(title, text).catch(() => {}); }, 90000);
 }
@@ -1358,6 +1358,9 @@ function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
     // A question (leaving / departure prompts) is spoken live and answered by voice: no notification while the app is connected.
     setTimeout(() => { if (pendingSay?.text === text) { pendingSay = null; broadcast({ type: 'say', text, speak: true }); } }, question ? 300 : busy ? 6000 : 2500);
   } else {
+    // A QUESTION with the app closed is spoken aloud by the phone's background service, which then brings Jarvis to the front with the mic open to hear the answer
+    // (no notification to tap). It is held first so that if the line is not picked up (phone off, service dead) or he opens the app, it is still asked.
+    if (question && !silentActive()) { holdLine(text, true); queueSpoken(text, title, true); return; }
     if (!question && SPOKEN_VARY.has(vary) && !silentActive()) { queueSpoken(text, title); return; }
     // App not connected: a notification is the only way to reach him; the question is also held and spoken when he opens the app.
     // The question itself is NOT sent as a notification: the push only says to open Jarvis, who then asks it aloud.
@@ -1400,8 +1403,11 @@ function holdLine(text, question) {
   state.held.push({ text, at: now, q: !!question }); state.held = state.held.slice(-4); saveState();
 }
 function takeHeld() {
-  const now = Date.now(), live = (state.held || []).filter(h => now - h.at < (h.q ? HELD_Q_MS : HELD_MS));
+  const now = Date.now(), live0 = (state.held || []).filter(h => now - h.at < (h.q ? HELD_Q_MS : HELD_MS));
   if (!(state.held || []).length) return '';
+  // A question the phone already SPOKE aloud (background service) is not said twice: just open the mic for his answer.
+  const heard = live0.filter(h => h.q && h.spoken && now - h.spoken < 5 * 60e3), live = live0.filter(h => !heard.includes(h));
+  if (heard.length) { if (state.pendingQ) state.pendingQ.at = now; setTimeout(() => broadcast({ type: 'listen' }), 900); }
   state.held = [];
   // The question is being asked NOW: restart its answer window so his reply counts as the answer.
   if (live.some(h => h.q) && state.pendingQ) state.pendingQ.at = now;
@@ -3072,7 +3078,8 @@ app.get('/api/say-next', async (_req, res) => {
   const it = sayQ.find(x => !x.taken && Date.now() - x.at < 85000); if (!it) return res.json({});
   it.taken = true; setTimeout(() => { const i = sayQ.indexOf(it); if (i >= 0) sayQ.splice(i, 1); }, 120000);
   let clip = ''; try { if (await sayClipFile(it.text)) clip = `/api/say-clip/${it.id}.mp3`; } catch {}
-  console.log(`  speaking on the phone: ${it.text}`); res.json({ id: it.id, text: it.text, clip });
+  if (it.ask) { const h = (state.held || []).find(x => x.q && x.text === it.text); if (h) { h.spoken = Date.now(); saveState(); } }   // spoken aloud already: opening the app must not ask it again
+  console.log(`  speaking on the phone${it.ask ? ' (question, then opens the app to listen)' : ''}: ${it.text}`); res.json({ id: it.id, text: it.text, clip, ask: !!it.ask });
 });
 app.get('/api/say-clip/:id.mp3', (req, res) => { const it = sayQ.find(x => x.id === req.params.id); const f = it && alertFile(it.text); if (!f || !fs.existsSync(f)) return res.status(404).end(); res.type('audio/mpeg').sendFile(f); });
 app.get('/followups', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'followups.html')));
