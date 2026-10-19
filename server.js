@@ -2010,7 +2010,7 @@ async function pushNtfy(title, body, link, watch, buy) {
 }
 // Pushover: a notification-only app that lets the user upload his own sound (website: Custom Sounds).
 // Needs PUSHOVER_APP_TOKEN (the app/API token) and PUSHOVER_USER_KEY. PUSHOVER_SOUND is the sound's name as uploaded (default "jarvis").
-async function pushPushover(title, body, link, watch, buy) {
+async function pushPushover(title, body, link, watch, buy, emergency = false) {
   try {
     const r = await fetch('https://api.pushover.net/1/messages.json', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -2018,8 +2018,9 @@ async function pushPushover(title, body, link, watch, buy) {
         token: process.env.PUSHOVER_APP_TOKEN, user: process.env.PUSHOVER_USER_KEY,
         title: String(title).slice(0, 250), message: watch ? String(body).slice(0, 800).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + `\n<a href="${buy}">Buy</a> | <a href="${watch}">Add to watch list</a>` : String(body).slice(0, 1000) || ' ',
         ...(watch ? { html: '1' } : {}),
-        sound: process.env.PUSHOVER_SOUND || 'jarvis', priority: process.env.PUSHOVER_PRIORITY || '0',
-        ...(link ? { url: link, url_title: /\/chart\?/.test(link) ? 'Open chart' : 'Open Jarvis' } : {})
+        sound: emergency ? 'siren' : (process.env.PUSHOVER_SOUND || 'jarvis'), priority: emergency ? '2' : (process.env.PUSHOVER_PRIORITY || '0'),
+        ...(emergency ? { retry: '60', expire: '3600' } : {}),   // priority 2: repeats every 60 s (up to an hour) until he acknowledges it, through silent mode and Do Not Disturb
+        ...(link ? { url: link, url_title: emergency ? 'Open map' : /\/chart\?/.test(link) ? 'Open chart' : 'Open Jarvis' } : {})
       }), signal: AbortSignal.timeout(10000)
     });
     return r.ok ? null : `Pushover answered ${r.status}: ${(await r.text()).slice(0, 160)}`;
@@ -2062,7 +2063,8 @@ function rememberRec(link, title, body) {
     saveState();
   } catch {}
 }
-async function push(title, body, link, force = false) {
+async function push(title, body, link, force = false, emergency = false) {
+  if (emergency) { const e1 = await pushPushover(title, body, link, '', '', true).catch(e => String(e.message || e)); if (process.env.TELEGRAM_BOT_TOKEN) pushTelegram(title, body, link).catch(() => {}); return process.env.PUSHOVER_APP_TOKEN ? e1 : pushNtfy(title, body, link); }   // a HELP alert ignores silent / quiet / finance hold
   if (silentActive()) { console.log(`silent mode: held back phone alert "${title}"`); return null; }   // silent mode mutes every phone alert (Pushover/Telegram/ntfy), even forced ones; they resume when it ends
   if (finHoldBlocks(title, link)) { console.log(`finance hold: held back "${title}"`); return null; }   // before 'force': a hold silences even forced finance pushes
   if (!force && quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(body))) { console.log(`quiet mode: held back "${title}"`); return null; }
@@ -2905,13 +2907,55 @@ app.post('/api/ot', (req, res) => {
   try { if (b._type === 'location' && kid.sharing !== false) { famFix(kid, b); saveState(); } } catch (e) { console.warn('family fix failed: ' + e.message); }
   res.json([]);   // OwnTracks expects a JSON array (commands/cards for the phone)
 });
+// HELP ("get dad"): the family member's phone (iPhone Shortcut / Jarvis mini) POSTs here. Sends the Owner an EMERGENCY alert (Pushover priority 2: loud, repeats until he
+// acknowledges, ignores silent/Do Not Disturb) with who, a map link, street address, moving or not, accuracy and battery. It never dials 911 by itself; he decides, and the
+// alert carries the address to read to the dispatcher. ?test=1 sends a harmless test line instead.
+const helpLast = new Map();
+async function revGeo(lat, lon) {
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/reverse?' + new URLSearchParams({ lat, lon, format: 'jsonv2', zoom: '18', addressdetails: '0' }), { headers: { 'User-Agent': 'Jarvis-personal-assistant/1.0' }, signal: AbortSignal.timeout(5000) });
+    const j = r.ok ? await r.json() : null; return j?.display_name ? String(j.display_name).replace(/, United States$/, '') : '';
+  } catch { return ''; }
+}
+app.post('/api/help', async (req, res) => {
+  const tok = String(req.query.k || ''), kid = Object.values(state.family.kids).find(x => x.token && x.token === tok);
+  if (!kid) return res.status(401).json({ ok: false });
+  const b = req.body || {}, test = String(req.query.test || b.test || '') === '1', now = Date.now();
+  if (!test && now - (helpLast.get(kid.name) || 0) < 45000) return res.json({ ok: true, repeat: true });   // a double tap does not send two alert storms
+  helpLast.set(kid.name, now);
+  res.json({ ok: true });   // answer the phone at once; the rest can take a few seconds
+  try {
+    let lat = Number(b.lat), lon = Number(b.lon), acc = Number(b.acc) || null, fresh = 'now';
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) { const l = kid.loc; if (l) { lat = l.lat; lon = l.lon; acc = l.acc || null; fresh = famAgo(l.at); } else { lat = NaN; } }
+    const have = Number.isFinite(lat) && Number.isFinite(lon);
+    const mph = Number.isFinite(Number(b.speed_mph)) ? Math.round(Number(b.speed_mph)) : Number.isFinite(Number(b.speed)) && Number(b.speed) >= 0 ? Math.round(Number(b.speed) * 2.237) : (kid.loc && now - kid.loc.at < 3 * 60e3 ? kid.loc.mph : null);
+    const batt = Number.isFinite(Number(b.batt)) ? Number(b.batt) : kid.loc?.batt ?? null;
+    const addr = have ? await revGeo(lat, lon) : '';
+    const near = have ? placeFor({ lat, lon }, '') : null;
+    const move = mph == null ? 'movement unknown' : mph >= 8 ? `DRIVING / MOVING about ${mph} mph` : 'not moving';
+    const lines = [
+      `${kid.name} ${kid.adult ? 'needs help' : 'needs you'}${b.note ? ': "' + String(b.note).slice(0, 120) + '"' : ''}.`,
+      have ? `${addr || 'Address not found'} (${lat.toFixed(5)}, ${lon.toFixed(5)}${acc ? ', within ' + Math.round(acc) + ' m' : ''}${fresh !== 'now' ? ', last fix ' + fresh : ''}).` : 'No location available from the phone.',
+      near ? `At/near your saved place: ${near.name}.` : '',
+      `${move}.${batt != null ? ' Phone battery ' + batt + '%.' : ''}`,
+      kid.phone ? `Call ${kid.name}: ${kid.phone}.` : '',
+      'Jarvis did NOT call 911. If you do, the address above is what to tell them.'
+    ].filter(Boolean).join(' ');
+    const link = have ? `https://maps.google.com/?q=${lat},${lon}` : undefined;
+    (state.family.helpLog ||= []).push({ at: now, who: kid.name, lat: have ? lat : null, lon: have ? lon : null, mph, test }); state.family.helpLog = state.family.helpLog.slice(-20); saveState();
+    broadcast({ type: 'activity', text: (test ? 'HELP TEST: ' : 'HELP: ') + lines });
+    if (clients.size) { remember('jarvis', lines); broadcast({ type: 'say', text: (test ? 'Test. ' : 'Sir, ') + lines.slice(0, 300), speak: true }); }
+    const err = test ? await push(`TEST: ${kid.name} help button`, lines, link, true) : await push(`HELP: ${kid.name}`, lines, link, true, true);
+    console.log(`help ${test ? 'test ' : ''}from ${kid.name}: ${err || 'alert sent'}`);
+  } catch (e) { console.warn('help failed: ' + e.message); try { await push(`HELP: ${kid.name}`, `${kid.name} pressed help but Jarvis hit an error (${String(e.message).slice(0, 80)}). Call them now.`, undefined, true, true); } catch {} }
+});
 const famRows = () => Object.entries(state.family.kids).map(([id, k]) => ({ id, name: k.name, sharing: k.sharing !== false, at: k.loc?.at || null, ago: k.loc ? famAgo(k.loc.at) : 'no fix yet', lat: k.loc?.lat ?? null, lon: k.loc?.lon ?? null, place: k.place || null, since: k.since ? famAgo(k.since) : null, mph: k.loc?.mph ?? null, batt: k.loc?.batt ?? null, acc: k.loc?.acc ?? null }));
 handlers.family_add = async ({ name, adult } = {}) => {
   const id = famKey(name); if (!id) return 'Need a name.';
   const k = (state.family.kids[id] ||= { name: String(name).trim().slice(0, 30), token: crypto.randomBytes(12).toString('hex') });
   k.adult = !!adult; saveState();
   const base = (publicBase() || '').replace(/\/+$/, '') || 'https://YOUR-JARVIS-URL';
-  return `${k.name} added. Setup for ${k.name}'s iPhone: install OwnTracks (App Store, free), Settings > Connection > Mode "HTTP", URL ${base}/api/ot?k=${k.token} , leave user/password empty, allow Location "Always", turn Move mode on. Send him that URL and steps. ${adult ? 'He is an adult: make sure he agrees to share before he sets it up.' : ''}`;
+  return `${k.name} added. Setup for ${k.name}'s iPhone: install OwnTracks (App Store, free), Settings > Connection > Mode "HTTP", URL ${base}/api/ot?k=${k.token} , leave user/password empty, allow Location "Always", turn Move mode on. HELP button: the same token works at ${base}/api/help?k=${k.token} (an iPhone Shortcut named "Get Dad" posts there; ask me for the steps). Send him that URL and steps. ${adult ? 'He is an adult: make sure he agrees to share before he sets it up.' : ''}`;
 };
 handlers.family_where = async ({ name } = {}) => {
   const rows = famRows(); if (!rows.length) return 'Nobody is set up yet. Use family_add.';
@@ -2919,9 +2963,10 @@ handlers.family_where = async ({ name } = {}) => {
   if (!pick.length) return `No family member called ${name}.`;
   return pick.map(r => !r.sharing ? `${r.name}: sharing is off.` : r.lat == null ? `${r.name}: no location yet (OwnTracks not reporting).` : `${r.name}: ${r.place ? 'at ' + r.place + (r.since ? ' since ' + r.since : '') : 'out and about (' + r.lat + ', ' + r.lon + ')'}${r.mph > 3 ? ', moving about ' + r.mph + ' mph' : ''}, last fix ${r.ago}${r.batt != null ? ', phone battery ' + r.batt + '%' : ''}.`).join('\n') + '\nSay it briefly. If a fix is old, say so rather than guessing.';
 };
-handlers.family_set = async ({ name, notify, remove } = {}) => {
+handlers.family_set = async ({ name, notify, remove, phone } = {}) => {
   const k = state.family.kids[famKey(name)]; if (!k) return `No family member called ${name}.`;
   if (remove) { delete state.family.kids[famKey(name)]; saveState(); return `${k.name} removed.`; }
+  if (phone !== undefined) { k.phone = String(phone).replace(/[^0-9+]/g, '').slice(0, 16); saveState(); return `${k.name}'s number saved for HELP alerts.`; }
   if (notify !== undefined) k.notify = !!notify; saveState(); return `${k.name}: arrive/leave alerts ${k.notify === false ? 'off' : 'on'}.`;
 };
 app.use((req, res, next) => {
