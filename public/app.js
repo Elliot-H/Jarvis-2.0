@@ -119,6 +119,11 @@
       case 'log': addLog(m.role === 'user' ? 'user' : 'system', m.text); break;
       case 'activity': addActivity(m.text); ticker(m.text); break;
       case 'device':
+        if (m.action === 'bt_scan') {   // nearby Bluetooth device names: answered by the app's BtScanBridge
+          if (!window.AndroidBtScan) { send({ type: 'device_result', id: m.id, ok: false, detail: JSON.stringify({ ok: false, detail: 'This app build cannot scan Bluetooth yet. Install the newest Jarvis app.' }) }); break; }
+          try { window.AndroidBtScan.scan(m.id); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: JSON.stringify({ ok: false, detail: String(e) }) }); }
+          break;
+        }
         if (m.action === 'obd_scan' || m.action === 'obd_clear') { // vehicle OBD dongle: answered by the app's ObdBridge
           if (!window.AndroidObd) { send({ type: 'device_result', id: m.id, ok: false, detail: 'This app build cannot read OBD dongles yet. Install the newest Jarvis app.' }); break; }
           try { window.AndroidObd[m.action === 'obd_clear' ? 'clearCodes' : (m.fast && window.AndroidObd.scanFast ? 'scanFast' : 'scan')](m.id, String(m.dongle || '')); } catch (e) { send({ type: 'device_result', id: m.id, ok: false, detail: String(e) }); }
@@ -357,6 +362,7 @@
   // speaker while a Bluetooth speaker is playing music). PhoneClip looks enough like an Audio element for the code below.
   const PHONE_AUDIO = !!window.AndroidPhoneAudio;
   let clipSeq = 0; const clips = {};
+  window.__btscan = (id, json) => { let r = {}; try { r = JSON.parse(json); } catch {} send({ type: 'device_result', id, ok: !!r.ok, detail: json }); };
   window.__obd = (id, json) => { let r = {}; try { r = JSON.parse(json); } catch {} send({ type: 'device_result', id, ok: !!r.ok, detail: json }); };
   window.__phoneClip = (id, ev) => {
     ev = String(ev || '');

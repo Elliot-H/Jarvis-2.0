@@ -2949,6 +2949,16 @@ app.post('/api/help', async (req, res) => {
     console.log(`help ${test ? 'test ' : ''}from ${kid.name}: ${err || 'alert sent'}`);
   } catch (e) { console.warn('help failed: ' + e.message); try { await push(`HELP: ${kid.name}`, `${kid.name} pressed help but Jarvis hit an error (${String(e.message).slice(0, 80)}). Call them now.`, undefined, true, true); } catch {} }
 });
+// Nearby Bluetooth device NAMES (his own phone scans for ~9 s; no addresses, no connecting). Phones do not broadcast phone numbers, so names are all there is.
+handlers.bluetooth_nearby = async () => {
+  const r = await deviceAction('bt_scan', {}, 25000);
+  let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
+  if (!d.ok) return `Could not scan: ${d.detail || 'the phone did not answer'}. Tell him plainly.`;
+  const list = (d.devices || []).sort((a, b) => b.rssi - a.rssi);
+  state.btNearby = { at: new Date().toISOString(), names: list.slice(0, 30).map(x => x.name) }; saveState();
+  const close = x => x.rssi >= -60 ? 'very close' : x.rssi >= -75 ? 'close' : 'far';
+  return list.length ? `Bluetooth devices heard around his phone (${list.length} named, ${d.unnamed || 0} unnamed): ` + list.slice(0, 30).map(x => `${x.name} (${close(x)})`).join('; ') + '. Names only: Bluetooth cannot reveal phone numbers or owners. Read the closest few.' : `No named Bluetooth devices heard (${d.unnamed || 0} unnamed ones).`;
+};
 const famRows = () => Object.entries(state.family.kids).map(([id, k]) => ({ id, name: k.name, sharing: k.sharing !== false, at: k.loc?.at || null, ago: k.loc ? famAgo(k.loc.at) : 'no fix yet', lat: k.loc?.lat ?? null, lon: k.loc?.lon ?? null, place: k.place || null, since: k.since ? famAgo(k.since) : null, mph: k.loc?.mph ?? null, batt: k.loc?.batt ?? null, acc: k.loc?.acc ?? null }));
 handlers.family_add = async ({ name, adult } = {}) => {
   const id = famKey(name); if (!id) return 'Need a name.';
