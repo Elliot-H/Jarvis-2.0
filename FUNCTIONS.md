@@ -106,3 +106,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | A47 | Nearby Bluetooth names | 🔧 | "What Bluetooth devices are near me": his phone scans about 9 s (classic + low energy) and Jarvis lists device NAMES with very close/close/far. Names only: no addresses kept, no connecting, no phone numbers (Bluetooth cannot give them). Android app only (needs the new APK). Tool bluetooth_nearby. |
 
 - Coming and going, destination memory (2026-10-12): the answer to "where are you headed?" (saved place or any name) is stored as `state.heading` for the whole trip, stops all re-asks, tailors lines (bring list, heading reminders, Maps ETA, shop day, home) and clears on arrival.
+
+See MINI_JARVIS.md for the family (Jarvis mini) feature list: A45 locations, A46 HELP, A47 nearby Bluetooth names, plus what is planned.
