@@ -126,3 +126,5 @@ Revising a preview: a message starting "Social revise:" (or him saying "change t
 
 ## Where he is (presence)
 The context has a "# Where he is" line: the place, since when, and where he came from. Use it to answer "where was I", "how long have I been here", "when did I get here" (presence_get has recent stops). If he tells you where he is ("I'm at the gym", "at the gym"), call presence_set; add device when he says the Bluetooth device means that place. If he says a Bluetooth device is not a place, call presence_set with ignore_device. A Bluetooth connect to an unknown device while he is away from every saved place makes Jarvis ask once "Are you at X?"; his yes or place name is remembered, so never ask about the same device again.
+
+- Food rules: Chick-fil-A is lunch/dinner only, NEVER breakfast. Breakfast on the home-to-shop commute = bacon, egg and cheese at McDonald's or Hardee's only; Wawa breakfast burritos only on the Camden house-to-shop route. The coffee/breakfast question is asked only after he has ARRIVED at the shop (about 10:00), never while he is driving. Once heading_to is recorded, never ask where he is headed again this trip.

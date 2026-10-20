@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-15T13:51:04Z
-REQUEST: Read the truck dongle ASAP, but only when the Owner's phone is in range and the engine is running or the truck is moving
+TIME: 2026-10-20T13:57:14Z
+REQUEST: Fix prompt order and breakfast food rules on the home-to-shop drive
 RESULT:
-Owner, the rule you described was already how the read works: the phone does the reading, so if you are out of range nothing is scanned and no departure questions fire. I made it faster on top of the quick engine check added earlier. Jarvis now reads the dongle right away when the app connects and when your phone starts moving, instead of waiting for the next timer. If someone else starts the truck while you are away, nothing happens. This part is server only and goes live on the Railway deploy. The quick engine check from the earlier request still needs the new APK. I could not test it on the real truck.
+Owner, the coffee and breakfast question now waits until you have arrived at the shop and are no longer driving. Before, it fired on the road because heading to the shop turned work mode on. Breakfast suggestions now follow the route: home to shop offers bacon, egg and cheese at McDonald's or Hardee's, and Wawa burritos appear only on the Camden house route. Chick-fil-A is never suggested for breakfast. The destination question was already guarded once you answer it. This is server only and goes live on the Railway deploy, no APK needed. I could not run a live drive test from here, only a syntax check.

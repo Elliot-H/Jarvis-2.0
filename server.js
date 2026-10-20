@@ -1200,7 +1200,8 @@ function mealTick() {
   if (!(state.workDay?.day === c.day && state.workDay.on)) return;
   if (state.meal?.day !== c.day) state.meal = { day: c.day };
   const m = state.meal;
-  if (!m.asked && mins >= MEAL_ASK_MIN && mins < MEAL_ASK_MIN + MEAL_CATCHUP_MIN) {
+  const hp = hereNow(), atShop = !!hp && placeKey(hp.name) === 'shop';   // only once he has ARRIVED at the shop; never while still driving
+  if (!m.asked && atShop && !isDriving() && mins >= MEAL_ASK_MIN && mins < MEAL_ASK_MIN + MEAL_CATCHUP_MIN) {
     m.asked = true; state.pendingQ = { type: 'meal', at: Date.now() }; saveState();
     deliver('Coffee this morning, sir? Are you having breakfast with it, just the coffee, or neither?', 'Jarvis');
     return;
@@ -1769,7 +1770,13 @@ async function driveStart(src, mph) { // movement just began: stage 2 of the tra
 }
 if (!process.env.JARVIS_SMOKE) setInterval(() => { const dr = state.drive; if (dr?.moving && Date.now() - (dr.lastMoveAt || 0) > MOVE_HOLD) { dr.moving = false; dr.endedAt = Date.now(); dlog('drive-end', { minutes: Math.round((dr.endedAt - dr.since) / 60e3) }); saveState(); } }, 30_000);
 function isDriving() { return navLive() || !!state.drive?.moving; }
-const MEAL_DEFAULTS = { breakfast: { food: 'breakfast burritos', chain: 'Wawa' }, lunch: { food: 'chicken sandwiches', chain: 'Chick-fil-A' } };   // the user's stated preferences; a memory fact naming that meal wins
+const MEAL_DEFAULTS = { lunch: { food: 'chicken sandwiches', chain: 'Chick-fil-A' } };
+// Breakfast depends on the ROUTE, never on memory: home to shop = bacon, egg and cheese at McDonald's or Hardee's; Wawa breakfast burritos only on the
+// Camden house to shop route. Chick-fil-A is lunch/dinner ONLY and is never offered for breakfast.
+function breakfastPref() {
+  const h = headingFresh(), camden = /camden/i.test(`${h?.from || ''} ${h?.name || ''} ${hereNow()?.name || ''}`);
+  return camden ? { food: 'breakfast burritos', chain: 'Wawa', chains: ['Wawa'] } : { food: "a bacon, egg and cheese at McDonald's or Hardee's", chain: "McDonald's", chains: ["McDonald's", "Hardee's"] };
+}   // the user's stated preferences; a memory fact naming that meal wins
 function foodPref(slot) { // slot-specific memory fact, else the built-in default for that slot, else any liked-food fact; chain = a capitalised "at/from X"
   const SLOTS = ['breakfast', 'lunch', 'dinner'];
   const find = ok => {
@@ -1783,20 +1790,25 @@ function foodPref(slot) { // slot-specific memory fact, else the built-in defaul
     }
     return null;
   };
-  return find(n => slot && n.includes(slot)) || MEAL_DEFAULTS[slot] || find(n => !n.length || (slot && n.includes(slot))) || null;
+  if (slot === 'breakfast') return breakfastPref();
+  const any = find(n => !n.length || (slot && n.includes(slot)));
+  return find(n => slot && n.includes(slot)) || MEAL_DEFAULTS[slot] || any || null;
 }
 async function nearbySpot(pref) { // optional: needs GOOGLE_PLACES_KEY; any failure just means no place is named
   const key = process.env.GOOGLE_PLACES_KEY, L = state.location;
   if (!key || !L || Date.now() - Date.parse(L.at) > 5 * 60e3) return null;
+  for (const chain of pref.chains || [pref.chain || pref.food || pref.query]) {
   try {
     const r = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', signal: AbortSignal.timeout(6000),
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.displayName,places.location,places.currentOpeningHours.openNow' },
-      body: JSON.stringify({ textQuery: pref.chain || pref.food || pref.query, maxResultCount: 3, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius: 3000 } } }) });
-    if (!r.ok) return null;
+      body: JSON.stringify({ textQuery: chain, maxResultCount: 3, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius: 3000 } } }) });
+    if (!r.ok) continue;
     const p = ((await r.json()).places || []).find(x => x.currentOpeningHours?.openNow !== false && x.location);
-    if (!p) return null;
-    return { name: p.displayName?.text || pref.chain, miles: km(L, { lat: p.location.latitude, lon: p.location.longitude }) * 0.621 };
-  } catch { return null; }
+    if (!p) continue;
+    return { name: p.displayName?.text || chain, miles: km(L, { lat: p.location.latitude, lon: p.location.longitude }) * 0.621 };
+  } catch { /* try the next chain */ }
+  }
+  return null;
 }
 async function copilotTick() {
   const now = Date.now(), c = nowCtx();

@@ -562,3 +562,7 @@ Voice -> `maintenance_request` (tools.js MAINT_TOOLS, server.js) -> POST api.ant
 ## Nearby Bluetooth names (2026-10-19)
 - Owner asked for a list of local Bluetooth device names. `BtScanBridge.java` (`AndroidBtScan.scan(id)` -> `window.__btscan(id,json)` -> device_result): classic discovery + BLE scan for 9 s, returns {name, rssi, le} (names only; unnamed ones counted). Server `handlers.bluetooth_nearby` (deviceAction `bt_scan`, 25 s) -> tool `bluetooth_nearby`; last result in `state.btNearby`. Needs APK reinstall and the Nearby devices permission (already requested). Android phone only: an iPhone Shortcut cannot scan Bluetooth, so the kids' HELP alerts do not include it until a native kid app exists.
 - Not possible and not built: phone numbers of nearby devices (phones do not broadcast them; scans see random addresses and names).
+
+## Meal prompt order + breakfast routes (2026-10-20)
+- `mealTick` (10:00 coffee/breakfast question) now needs him AT the shop and not driving; it was firing en route because heading to the shop sets workDay.on.
+- Co-pilot breakfast is per route (`breakfastPref`): home-to-shop = bacon, egg and cheese at McDonald's/Hardee's; Camden route = Wawa burritos. Memory facts no longer override breakfast; Chick-fil-A is lunch/dinner only. Not tested live.
