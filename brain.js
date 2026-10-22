@@ -35,7 +35,7 @@ function explain(status, body) {
   const b = String(body || '');
   const said = rawMsg(body);
   if (status === 402 || /credit|insufficient|limit exceeded/i.test(b)) return `OpenRouter refused the request${KEY_NOTE}${said ? ': "' + said + '"' : ''}, sir. Check that this is the key on the account you topped up, and that the key has no credit limit.`;
-  if (status === 401) return 'The OpenRouter key is wrong or was deleted, sir. Check OPENROUTER_API_KEY in Railway.';
+  if (status === 401) return `OpenRouter rejected the key${KEY_NOTE}${said ? ': "' + said + '"' : ''}, sir. It is wrong, deleted or disabled. Make a new one at openrouter.ai/settings/keys and paste it into that Railway variable. If BRAIN_API_KEY is set it wins over OPENROUTER_API_KEY, so fix or delete that one.`;
   if (status === 429) return 'The model is rate limiting me, sir. Try again in a moment.';
   if (status === 404 || /not a valid model|no endpoints/i.test(b)) return 'That talk model name is not available on OpenRouter, sir. Check TALK_MODEL in Railway.';
   return `My brain returned error ${status}: ${b.slice(0, 160)}`;
