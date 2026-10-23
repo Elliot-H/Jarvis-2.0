@@ -860,7 +860,7 @@ async function arrivalStatement(q, text) {
   if (t.split(' ').length > 12 || /\b(?:leaving|headed|heading|going|on my way|about to)\b/.test(t) || /\?$/.test(String(text).trim())) return false;
   const m = t.match(ARRIVE_RE); if (!m) return false;
   const pl = findPlace(m[1].replace(/^(?:the )?/, '')); if (!pl) return false;
-  state.pendingQ = null; state.heading = null; state.trip = null; if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
+  state.pendingQ = null; state.heading = null; state.trip = null; state.corrected = Date.now(); if (state.lastCheck) state.lastCheck.answered = true; if (state.departed) state.departed.answered = true;
   const line = await varyLine('arrive', navArrive(pl) || `Noted, sir. You are at ${pl.name}.`); saveState();
   broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
   return true;
@@ -1494,7 +1494,7 @@ function onMove() {
       if (other) parts.push(bringLine(other.name));
     }
     if (!pl && dest) { const b = bringLine(dest.name); if (b) parts.push(b); }
-    if (!pl && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // always one short line on a departure, even when the engine-start question already handled this trip (Oct 2: the line never fired)
+    if (!pl && !dep && !parts.length) parts.push(prev.kind === 'home' ? 'Leaving home, sir.' : `Leaving ${prev.name}, sir.`); // one short line on a departure, but not when this trip's departure question was already asked/answered (Oct 23: redundant re-fire)
   }
   if (pl && rearmed) { // arrived somewhere
     state.trip = null; state.heading = null;   // trip over: the next start asks again
@@ -1621,8 +1621,11 @@ function tripDedupe(text) {
   t.said = [...said].slice(-40); return keep.join(' ');
 }
 function vehicleDeparture(v) {
-  if (tripOn() || headingFresh()) return '';
-  { const h = hereNow(); if (h && recentDeparture(h.name) && state.notLeft?.[placeKey(h.name)]) return ''; } // he said he had not left: no second departure question   // already answered for this trip: never ask again
+  if (tripOn() || headingFresh()) return '';   // already answered for this trip: never ask again
+  { const h = hereNow(); if (h && recentDeparture(h.name) && state.notLeft?.[placeKey(h.name)]) return ''; } // he said he had not left: no second departure question
+  if (state.corrected && Date.now() - state.corrected < 10 * 60e3) return '';   // he just told Jarvis where he is: do not ask again
+  if (!hereNow() && state.lastDepartAt && Date.now() - state.lastDepartAt < TRIP_MS) return '';   // stop-and-go away from a saved place (store stop, restart) is the same trip, not a fresh departure
+  state.lastDepartAt = Date.now();
   state.trip = { at: Date.now(), said: [], answeredAt: 0 };
   const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
@@ -4401,12 +4404,14 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
 // Music only starts when the user actually asked for it in this turn. Pause/next/volume/status are always allowed.
 {
   const _music = handlers.music_control;
-  const WANTS_MUSIC = /\b(music|tunes?|songs?|spotify|playlist|play|put on|turn on|start|resume|speaker|bluetooth|god ?mode|take over|queue|album|artist|radio)\b/i;
+  const WANTS_MUSIC = /\b(music|tunes?|songs?|spotify|playlist|play|put on|resume|speaker|bluetooth|god ?mode|queue|album|artist|radio)\b/i;
+  const MUSIC_WORD = /\b(music|tunes?|songs?|spotify|playlist|album|artist|radio|god ?mode)\b/i;   // an explicit music noun, required while a trip or departure question is open
   handlers.music_control = async a => {
     const starts = ['start', 'play', 'resume', 'resume_last'].includes(a?.action);
     if (starts) {
       const said = turn?.text || '';
-      if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said)) {
+      const inTrip = tripOn() || !!headingFresh() || ['depart', 'checklist', 'dest', 'vscan'].includes(state.pendingQ?.type) || (state.corrected && Date.now() - state.corrected < 10 * 60e3);   // replying to a departure question never starts media (Oct 23)
+      if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said) || (inTrip && !MUSIC_WORD.test(said))) {
         broadcast({ type: 'activity', text: `Blocked music ${a.action}: you did not ask for music (heard: "${said.slice(0, 60)}")` });
         console.log(`music ${a.action} BLOCKED, origin=${turn?.origin}, text="${said.slice(0, 80)}"`);
         return 'Refused: the user did not ask for music in this request. Do NOT start music. Just answer what he said.';

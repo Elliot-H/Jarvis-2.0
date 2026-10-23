@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-23T17:00:25Z
-REQUEST: Fix false departure/geofence trigger (repeat "you just left" prompts)
+TIME: 2026-10-23T17:01:15Z
+REQUEST: Fix unprompted music and repeated departure question after a store stop
 RESULT:
-Owner, a departure now has to hold for three minutes before Jarvis treats it as real, so a quick glitch no longer counts. The same place is never announced as left twice within thirty minutes, which covers your store stop. If you say you did not leave, Jarvis acknowledges it once and will not ask where you are again for that trip. It goes live on the next Railway deploy, no APK reinstall needed. I could only test this with simulated checks, not real GPS.
+Owner, music can no longer start while a departure question is open or right after you correct Jarvis about where you are, unless you actually say music, tunes, Spotify or a playlist. The words "start" and "turn on" no longer count as a music request. The extra "Leaving, sir" line is skipped when the departure was already asked, and a store stop then restart is treated as the same trip. After you correct Jarvis, he will not ask again for ten minutes. It goes live on the next Railway deploy, no APK reinstall. I could not test it on your phone from here.
