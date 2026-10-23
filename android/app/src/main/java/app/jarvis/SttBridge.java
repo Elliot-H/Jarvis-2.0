@@ -38,6 +38,7 @@ public class SttBridge {
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
   private long readyAt = 0, lastRms = 0, lastDeadReset = 0; private int rmsCount = 0;
+  private boolean firstStart = true;
   private boolean levelsEver = false, coldTried = false;   // this phone has reported audio levels at least once / the one cold-start reset was used
   /** A session that says "ready" but never delivers audio levels is a dead mic (another app or the wake engine holds it): the page shows
    *  "listening" while nothing hears him. Reset it so the page opens a fresh one. */
@@ -139,9 +140,37 @@ public class SttBridge {
   @JavascriptInterface public void stop() { ui.post(() -> { if (sr != null && running) sr.stopListening(); }); }
   @JavascriptInterface public void abort() { ui.post(this::cancel); }
 
+  /** True when the phone's default speech recognizer is Jarvis's own do-nothing stub (Jarvis is the chosen assistant). That stub answers every
+   *  request with ERROR_CLIENT (5) at once, so falling back to "the phone's default" would leave the mic permanently deaf. */
+  private boolean defaultIsOurStub() {
+    try {
+      String d = android.provider.Settings.Secure.getString(ctx.getContentResolver(), "voice_recognition_service");
+      return d != null && d.startsWith(ctx.getPackageName() + "/");
+    } catch (Exception e) { return false; }
+  }
+  private long defaultSince = 0;
+  private int altIdx = 0;
+  /** Another installed speech recognition service that is not Jarvis's own stub, cycling through them on each failure. */
+  private ComponentName nextAlt() {
+    try {
+      java.util.List<android.content.pm.ResolveInfo> l = ctx.getPackageManager().queryIntentServices(new Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0);
+      java.util.ArrayList<ComponentName> ok = new java.util.ArrayList<>();
+      for (android.content.pm.ResolveInfo ri : l) { if (ri.serviceInfo == null || ctx.getPackageName().equals(ri.serviceInfo.packageName)) continue; ok.add(new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name)); }
+      if (ok.isEmpty()) return null;
+      return ok.get(altIdx++ % ok.size());
+    } catch (Exception e) { return null; }
+  }
+  private boolean hasAlt() { try { int i = altIdx; ComponentName c = nextAlt(); altIdx = i; return c != null; } catch (Exception e) { return false; } }
+
   private SpeechRecognizer make() {
     // Force Google's recognizer. If Jarvis is the phone's chosen assistant, the default recognizer would be our stub.
-    if (useDefault) return SpeechRecognizer.createSpeechRecognizer(ctx);
+    if (useDefault && System.currentTimeMillis() - defaultSince > 90_000) useDefault = false;   // never stay on the fallback engine for good
+    if (useDefault) {
+      if (!defaultIsOurStub()) return SpeechRecognizer.createSpeechRecognizer(ctx);
+      ComponentName alt = nextAlt();   // the default is our own stub: use another installed recognizer (Samsung's, etc.) instead
+      if (alt != null) { emit("diag", "trying speech engine " + alt.getPackageName()); return SpeechRecognizer.createSpeechRecognizer(ctx, alt); }
+      useDefault = false;
+    }
     try {
       ctx.getPackageManager().getPackageInfo("com.google.android.googlequicksearchbox", 0);
       ComponentName g = new ComponentName("com.google.android.googlequicksearchbox", "com.google.android.voicesearch.serviceapi.GoogleRecognitionService");
@@ -186,7 +215,8 @@ public class SttBridge {
     running = true; ready = false; maxRms = -100f;
     hush(1600); // mute the recognizer's start "ding"
     try { sr.startListening(i); } catch (Exception e) { reset(); emit("error", "aborted"); emit("end", ""); return; }
-    ui.removeCallbacks(stall); ui.postDelayed(stall, 5000);
+    ui.removeCallbacks(stall); ui.postDelayed(stall, firstStart ? 12000 : 6000);   // Google's recognizer can take several seconds to bind the first time; resetting it at 5 s kept it from ever warming up
+    firstStart = false;
   }
 
   private void cancel() {
@@ -249,9 +279,9 @@ public class SttBridge {
         default: e = "android-error-" + code;   // shows up on the HUD so it can be read off the screen
       }
       // Google's recognizer could not be used: rebuild with the phone's default one and carry on.
-      if (code == 10) { useDefault = !useDefault; emit("diag", "Too many requests, switching to " + (useDefault ? "the phone's default recognizer" : "Google's recognizer")); }
-      if (!useDefault && (code == SpeechRecognizer.ERROR_CLIENT || code == 11 || code == 12 || code == 13)) {
-        useDefault = true; emit("diag", "Google recognizer failed (" + code + "), trying the phone's default");
+      if (code == 10) { useDefault = !useDefault && (!defaultIsOurStub() || hasAlt()); if (useDefault) defaultSince = System.currentTimeMillis(); emit("diag", "Too many requests, switching to " + (useDefault ? "the phone's default recognizer" : "Google's recognizer")); }
+      if (!useDefault && (!defaultIsOurStub() || hasAlt()) && (code == SpeechRecognizer.ERROR_CLIENT || code == 11 || code == 12 || code == 13)) {
+        useDefault = true; defaultSince = System.currentTimeMillis(); emit("diag", "Google recognizer failed (" + code + "), trying the phone's default");
       }
       if (code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == SpeechRecognizer.ERROR_CLIENT || code == 10 || useDefault && sr != null && code >= 11) {
         try { sr.destroy(); } catch (Exception ignored) {} sr = null;
