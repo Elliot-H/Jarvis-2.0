@@ -2701,7 +2701,9 @@ app.post('/login', (req, res) => {
   res.setHeader('Set-Cookie', `jarvis_auth=${TOKEN}; Path=/; Max-Age=${60 * 60 * 24 * 180}; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`);
   res.redirect(303, safeNext(req.query.next) || '/');
 });
-app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN}`));   // read on the phone to see whether Jarvis is wedged
+const diag = { locAt: 0, locN: 0, pollAt: 0, lock: 0, lockAt: 0 };
+const ago = t => t ? Math.round((Date.now() - t) / 1000) + 's' : 'never';
+app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN} | phoneLoc=${ago(diag.locAt)} (${diag.locN} since boot) phonePoll=${ago(diag.pollAt)} blockedPhone=${diag.lock}${diag.lockAt ? ' last ' + ago(diag.lockAt) : ''} places=${(state.places || []).length} at=${state.at || '-'} atInit=${!!state.atInit} pendingQ=${state.pendingQ ? state.pendingQ.type : '-'}`));   // read on the phone to see whether Jarvis is wedged
 // Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
 app.get('/open', (req, res) => {
   const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
@@ -3032,6 +3034,7 @@ app.use((req, res, next) => {
   // Claude can run and read the model test remotely with BENCH_TOKEN (set in Railway); only the bench and talk-model routes accept it.
   const BT = String(process.env.BENCH_TOKEN || '');
   if (BT.length >= 16 && /^\/api\/(bench|talk-model)$/.test(req.path) && String(req.query.token || req.headers['x-bench-token'] || '') === BT) return next();
+  if (/^\/api\/(loc|say-next|signal)/.test(req.path)) { diag.lock++; diag.lockAt = Date.now(); }
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'locked' });
   res.status(401).send(loginPage('', (req.path === '/chart' || (req.path === '/' && req.query.buy)) ? safeNext(req.originalUrl) : ''));
 });
@@ -3165,6 +3168,7 @@ app.post('/api/items', (req, res) => {
 app.delete('/api/items/:id', (req, res) => { state.reminders = state.reminders.filter(r => r.id !== req.params.id); saveState(); res.json(placesView()); });
 // Background position reports from the Android app (every ~100 m moved, at most once a minute).
 app.post('/api/loc', (req, res) => {
+  diag.locAt = Date.now(); diag.locN++;
   const lat = Number(req.body?.lat), lon = Number(req.body?.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).end();
   const moved = !state.location || Math.abs(state.location.lat - lat) > .5 || Math.abs(state.location.lon - lon) > .5;
@@ -3178,6 +3182,7 @@ app.post('/api/loc', (req, res) => {
 app.post('/api/signal', async (req, res) => { try { res.json(await onSignal(req.body || {})); } catch (e) { console.warn('signal failed: ' + e.message); res.status(500).json({ ok: false }); } });
 // The phone app's background service asks for a line to speak: text plus a Jarvis-voice clip when Fish works (the app falls back to the phone's own voice).
 app.get('/api/say-next', async (_req, res) => {
+  diag.pollAt = Date.now();
   const it = sayQ.find(x => !x.taken && Date.now() - x.at < 85000); if (!it) return res.json({});
   it.taken = true; setTimeout(() => { const i = sayQ.indexOf(it); if (i >= 0) sayQ.splice(i, 1); }, 120000);
   let clip = ''; try { if (await sayClipFile(it.text)) clip = `/api/say-clip/${it.id}.mp3`; } catch {}
@@ -3528,7 +3533,14 @@ wss.on('connection', ws => {
     if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice and phone alerts are back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) { deviceClients.add(ws); setTimeout(() => obdNudge().catch(() => {}), 2000); } // phone app (re)connected: look for the dongle right away
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim() && !silentAnswer(msg.text.trim()) && !(await panelAnswer(msg.text.trim())) && !holdAnswer(msg.text.trim()) && !quietAnswer(msg.text.trim()) && !(await shopAnswer(msg.text.trim())) && !(await bucketAnswer(msg.text.trim()))) ask(msg.text.trim());
+    if (msg.type === 'ask' && msg.text?.trim()) {
+      // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.
+      const tx = msg.text.trim(), lim = p => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('handler timed out')), 15000))]);
+      let handled = false;
+      try { handled = silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
+      catch (e) { console.error('answer shortcut failed, sending to the brain:', e?.stack || e); try { state.pendingQ = null; saveState(); } catch {} handled = false; }
+      if (!handled) ask(tx);
+    }
     if (msg.type === 'location' && Number.isFinite(msg.lat) && Number.isFinite(msg.lon)) {
       const moved = !state.location || Math.abs(state.location.lat - msg.lat) > .5 || Math.abs(state.location.lon - msg.lon) > .5;
       state.location = { lat: +msg.lat.toFixed(3), lon: +msg.lon.toFixed(3), at: new Date().toISOString(), tz: moved ? undefined : state.location?.tz };
