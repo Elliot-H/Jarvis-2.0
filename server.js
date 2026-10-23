@@ -8,6 +8,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { incidentsAhead, sayLine as roadSay, hasFeed as hasRoadFeed, bearing } from './roadwatch.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,7 +83,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1352,7 +1353,7 @@ function deliver(text, title = 'Jarvis', question = false, vary = '') {
 // Arrival and leaving lines are spoken aloud by the phone app's background service when the app screen is not connected: no notification.
 // The service polls /api/say-next; if it does not pick the line up within 90 s (phone off, service dead) it falls back to the notification.
 const sayQ = [];
-const SPOKEN_VARY = new Set(['arrive', 'leave']);
+const SPOKEN_VARY = new Set(['arrive', 'leave', 'road']);
 async function sayClipFile(text) {
   if (!process.env.FISH_API_KEY) return '';
   const file = alertFile(text);
@@ -1766,6 +1767,7 @@ function driveSignal(src, mph) {
 function driveFix(lat, lon, speedMs) { // every phone position (background /api/loc or app websocket)
   const now = Date.now(), dr = state.drive ||= { moving: false }, pf = dr.fix;
   dr.fix = { lat, lon, t: now };
+  if (pf && km(pf, { lat, lon }) >= 0.03) dr.brg = bearing(pf, { lat, lon }); // direction of travel for road alerts
   let mph = Number.isFinite(speedMs) && speedMs >= 0 ? speedMs * 2.237 : null;
   if (mph == null && pf && now - pf.t >= 15e3 && now - pf.t <= 10 * 60e3) mph = km(pf, { lat, lon }) * 0.621 / ((now - pf.t) / 3600e3);
   if (mph != null) driveSignal('gps', mph);
@@ -1858,6 +1860,23 @@ async function copilotAnswer(q, text) {
 }
 handlers.ate_now = async () => { const c = nowCtx(), s = mealSlot(minsNow()) || 'breakfast'; if (state.copilot?.day !== c.day) state.copilot = { day: c.day, sent: 0, declined: [], ate: [], topics: [] }; (state.copilot.ate ||= []).push(s); saveState(); return 'Recorded. Say "Noted, sir."'; };
 if (!process.env.JARVIS_SMOKE) setInterval(() => copilotTick().catch(e => console.warn('copilot', e.message)), 60_000);
+// Road alerts: while isDriving() and the GPS fix is fresh, poll incident feeds (roadwatch.js) every 60 s and speak accidents / closures / construction /
+// hazards ahead in the direction of travel. Each incident once per trip, max one line per 45 s. Server-originated: no microphone input is involved.
+const roadSeen = new Map(); let roadLast = 0, roadErr = 0;
+async function roadTick() {
+  const dr = state.drive, now = Date.now();
+  if (!hasRoadFeed() || state.roadAlerts === false || !isDriving() || !dr?.fix || dr.brg == null || now - dr.fix.t > 2 * 60e3) return;
+  if (quietNow() || now - roadLast < 45e3) return;
+  for (const [k, t] of roadSeen) if (now - t > 3 * 3600e3) roadSeen.delete(k);
+  try {
+    const list = await incidentsAhead({ lat: dr.fix.lat, lon: dr.fix.lon }, dr.brg, Math.min(4, Math.max(1.5, (dr.mph || 30) / 60 * 3)));
+    const i = list.find(x => !roadSeen.has(x.key)); if (!i) return;
+    roadSeen.set(i.key, now); roadLast = now; roadErr = 0;
+    const text = roadSay(i); dlog('road-alert', { text }); deliverNow(text, 'Jarvis', false, 'road');
+  } catch (e) { if (roadErr++ % 10 === 0) console.warn('roadwatch', e.message); }
+}
+if (!process.env.JARVIS_SMOKE) setInterval(() => roadTick().catch(() => {}), 60_000);
+handlers.road_alerts = async ({ on }) => { state.roadAlerts = !!on; saveState(); return !on ? 'Road alerts off.' : hasRoadFeed() ? 'Road alerts on. I will warn you while you drive.' : 'Road alerts on, but no traffic feed is connected yet (TOMTOM_KEY or HERE_API_KEY).'; };
 handlers.bring_add = async ({ place, item }) => {
   const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
