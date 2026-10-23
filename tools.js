@@ -73,8 +73,13 @@ export const MAINT_TOOLS = [
 ];
 
 export const DEV_TOOLS = [
-  { name: 'developer_send', description: 'DEVELOPER ROLE. Use when the user says "ask the developer ..." or "tell the developer ..." (the Claude Code session building his MyGuru Figma designs). message = his instruction or question in plain words with every detail. It is queued for the developer; the reply arrives later and is spoken automatically as "The developer says ...". Say only that it is sent. Never answer on the developer\'s behalf.', shape: { message: z.string() } },
-  { name: 'developer_status', description: 'Whether the developer has picked up his messages and what the last developer reply was ("did the developer answer?").', shape: {} }
+  { name: 'developer_request', description: 'DEVELOPER MODE. Use when the user says "developer mode" or "tell the developer to ...". Scope is ONLY MyGuru (his creator platform app) and its codebase: turning his Figma designs into real build, adding features, fixing bugs, working out kinks. Hands the request to a dedicated Claude Code engineer session. Anything about Jarvis himself (his code, screen, voice, settings) is maintenance_request instead. request = his full request in plain words with every detail he gave (if he only said "developer mode", ask what to build or fix first). Tell him it is sent and that he can ask "developer status" later. Never claim it is done; only developer_status can say that.', shape: { request: z.string() } },
+  { name: 'developer_status', description: 'Check the result of the last developer request ("developer status", "how is the developer doing?"). Reads the MyGuru engineer\'s report and tells the user what changed, whether it is live, and what is left. Report it in your own voice.', shape: {} }
+];
+
+export const DEVLINE_TOOLS = [
+  { name: 'developer_relay', description: 'LIVE DEVELOPER CHAT (not developer_request). Use for a back-and-forth with the already-running Claude Code session working on his MyGuru Figma designs: "ask the developer ...", "relay to the developer ...", design questions and instructions. Build/bug-fix hand-offs ("developer mode") use developer_request instead. message = his instruction or question in plain words with every detail. It is queued for the developer; the reply arrives later and is spoken automatically as "The developer says ...". Say only that it is sent. Never answer on the developer\'s behalf.', shape: { message: z.string() } },
+  { name: 'developer_relay_status', description: 'Whether the developer has picked up his messages and what the last developer reply was ("did the developer answer?").', shape: {} }
 ];
 
 export const PHONE_TOOLS = [
