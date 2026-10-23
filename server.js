@@ -286,17 +286,34 @@ let busy = false;
 let current = null; // running Query, for interrupt
 const queue = [];
 
+let busySince = 0, draining = false;
 function ask(text, opts = {}) {
   return new Promise(resolve => {
     queue.push({ text, opts, resolve });
-    if (!busy) drain();
+    // A turn stuck for 4 minutes (a hung request) must not make Jarvis deaf for good: abandon it and start over with what is waiting.
+    if (busy && busySince && Date.now() - busySince > 4 * 60e3) { console.error(`turn stuck for ${Math.round((Date.now() - busySince) / 1000)} s, abandoning it`); try { current?.interrupt?.(); } catch {} busy = false; draining = false; }
+    if (!busy && !draining) drain();
   });
 }
+// Every turn is guarded: if run() throws anywhere (prompt building, a tool, a bad state value) the queue must keep going and he must be told,
+// otherwise `busy` stays true and every later message waits forever (Jarvis "not listening" to voice AND text until a redeploy).
 async function drain() {
-  while (queue.length) {
-    const { text, opts, resolve } = queue.shift();
-    resolve(await run(text, opts));
-  }
+  draining = true;
+  try {
+    while (queue.length) {
+      const { text, opts, resolve } = queue.shift();
+      busySince = Date.now();
+      let out = '';
+      try { out = await run(text, opts); }
+      catch (e) {
+        console.error('turn crashed:', e);
+        busy = false; current = null; broadcast({ type: 'state', state: 'idle' });
+        out = `Something broke while I was thinking, sir: ${String(e?.message || e).slice(0, 140)}. I am still here; try again.`;
+        if (opts.origin === undefined || opts.origin === 'user') { broadcast({ type: 'say', text: out, speak: opts.spoken !== false }); try { recordFailure(text, String(e?.message || e)); } catch {} }
+      }
+      busySince = 0; resolve(out);
+    }
+  } finally { draining = false; busy = false; busySince = 0; }
 }
 
 async function run(text, { spoken = true, origin = 'user', label, forceMode } = {}) {
@@ -2665,7 +2682,7 @@ app.post('/login', (req, res) => {
   res.setHeader('Set-Cookie', `jarvis_auth=${TOKEN}; Path=/; Max-Age=${60 * 60 * 24 * 180}; HttpOnly; SameSite=Lax${req.secure ? '; Secure' : ''}`);
   res.redirect(303, safeNext(req.query.next) || '/');
 });
-app.get('/health', (_req, res) => res.send('ok'));
+app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN}`));   // read on the phone to see whether Jarvis is wedged
 // Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
 app.get('/open', (req, res) => {
   const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
