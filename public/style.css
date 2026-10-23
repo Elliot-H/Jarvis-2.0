@@ -126,6 +126,7 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
 .msg .who{font-family:"JetBrains Mono";font-size:10px;letter-spacing:.2em;display:block;margin-bottom:2px}
 .msg.user .who{color:var(--muted)} .msg.user{color:#e6f7ff}
 .msg.jarvis .who{color:var(--c)} .msg.jarvis{color:var(--c2)}
+.msg.developer .who{color:#ffb454} .msg.developer{color:#ffd9a0}
 .msg.system .who{color:var(--amber)} .msg.system{color:var(--muted);font-size:12px}
 .activity{list-style:none;padding:10px 14px;font-family:"JetBrains Mono";font-size:11px;max-height:150px;overflow:auto}
 .activity li{padding:3px 0;color:var(--muted);display:flex;gap:8px}

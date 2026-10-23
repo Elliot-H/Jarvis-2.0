@@ -72,6 +72,11 @@ export const MAINT_TOOLS = [
   { name: 'maintenance_status', description: 'Check the result of the last maintenance request ("maintenance status", "did the fix go through?"). Reads the engineer\'s report and tells the user what changed, whether it is live, and whether he must reinstall the app.', shape: {} }
 ];
 
+export const DEV_TOOLS = [
+  { name: 'developer_send', description: 'DEVELOPER ROLE. Use when the user says "ask the developer ..." or "tell the developer ..." (the Claude Code session building his MyGuru Figma designs). message = his instruction or question in plain words with every detail. It is queued for the developer; the reply arrives later and is spoken automatically as "The developer says ...". Say only that it is sent. Never answer on the developer\'s behalf.', shape: { message: z.string() } },
+  { name: 'developer_status', description: 'Whether the developer has picked up his messages and what the last developer reply was ("did the developer answer?").', shape: {} }
+];
+
 export const PHONE_TOOLS = [
   {
     name: 'phone_alert',

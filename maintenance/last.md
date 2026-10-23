@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-23T01:38:39Z
-REQUEST: Replace the joke-decline fallback line "Not now, Jarvis." and fix any other fallback lines that address Jarvis by name
+STATUS: done
+TIME: 2026-10-23T01:45:08Z
+REQUEST: Add a "developer" role so the Owner can relay messages to and from his Claude Code Figma session
 RESULT:
-Owner, I changed nothing, because the line is not in the code. I searched every file on main and the full git history for "Not now, Jarvis" and for any joke feature, and found neither. The only decline replies in the code are "Very good, sir." and the quiet-mode lines, which are all fine. I also checked the other canned lines for ones addressed to Jarvis and found none. If you heard that line, it may come from the AI model's own improvisation, or from an older build still on the phone. Tell me roughly when you heard it and I can tighten the persona prompt instead.
+Owner, the developer role is added. Say "ask the developer" or "tell the developer" and Jarvis queues your message; the reply is spoken as "The developer says" and shows on the HUD in amber as DEVELOPER, while Jarvis keeps his own voice. It works by typing too, so the mic fault does not block it. The channel is a small mailbox on Jarvis behind the normal PIN login: the Claude Code session signs in with the PIN, then reads messages at /api/dev/outbox and answers at /api/dev/reply. I did not add a token shortcut around the PIN, because that is a security change for you to decide. It is not tested against a live session, and the page reloads with the deploy, so no APK reinstall is needed.

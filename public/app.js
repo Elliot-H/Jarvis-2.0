@@ -116,7 +116,7 @@
         if (m.state === 'thinking') { setState('thinking', { echo: false }); ticker('Processing…'); }
         else if (DISPLAY_ONLY) setState(m.state, { echo: false });
         break;
-      case 'log': addLog(m.role === 'user' ? 'user' : 'system', m.text); break;
+      case 'log': addLog(m.role === 'user' ? 'user' : m.role === 'developer' ? 'developer' : 'system', m.text); break;
       case 'activity': addActivity(m.text); ticker(m.text); break;
       case 'device':
         if (m.action === 'bt_scan') {   // nearby Bluetooth device names: answered by the app's BtScanBridge
@@ -141,7 +141,7 @@
       case 'say':
         if (m.memo) saveMemo(m.memo);
         ticker('');
-        if (m.text) addLog('jarvis', m.text);
+        if (m.text) addLog(m.role === 'developer' ? 'developer' : 'jarvis', m.text);
         if (m.speak && !silent && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
         else { stopFillers(); caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
@@ -163,7 +163,7 @@
 
   // ======================= log / activity / caption =======================
   function addLog(kind, text) {
-    const who = kind === 'user' ? 'YOU' : kind === 'jarvis' ? cfg.name.toUpperCase() : 'SYSTEM';
+    const who = kind === 'user' ? 'YOU' : kind === 'developer' ? 'DEVELOPER' : kind === 'jarvis' ? cfg.name.toUpperCase() : 'SYSTEM';
     const el = document.createElement('div');
     el.className = 'msg ' + kind;
     el.innerHTML = `<span class="who">${who} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as social from './social.js';
 import * as media from './media.js';
@@ -706,7 +706,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -4116,6 +4116,48 @@ handlers.gaming_mode = async ({ game, room } = {}) => {
     return `${rows.map(r => `${r.label}: ${r.ok ? 'CONFIRMED, ' : ''}${r.detail}`).join(' | ')}. ${bad.length ? `Not everything worked: ${bad.length} step(s) not done.` : 'All steps confirmed.'} Read it out step by step in a few short lines: what actually turned on (${done.join(', ') || 'nothing'}), and plainly what is missing and what hardware or connection is still needed. Never claim a step worked unless it says CONFIRMED.`;
   } finally { gamingBusy = false; }
 };
+// ---------- Developer role: bridge to the Owner's Claude Code design session (mailbox over HTTP) ----------
+// Jarvis never calls out. Messages for the developer wait in state.dev.out; the Claude Code session reads them (long poll) and posts its reply.
+// Both routes sit behind the normal PIN login (no auth bypass): the session signs in once with POST /login (pin=...) and reuses the cookie.
+// Replies are spoken as "The developer says ..." and shown on the HUD as DEVELOPER.
+state.dev ||= { seq: 0, out: [] };
+let devWaiters = [];
+const devVoiceLine = t => `The developer says: ${String(t).replace(/\s+/g, ' ').trim()}`;
+handlers.developer_send = async ({ message }) => {
+  const text = String(message || '').trim().slice(0, 4000);
+  if (!text) return 'Nothing to send. Ask the user what to tell the developer.';
+  const m = { id: ++state.dev.seq, text, at: Date.now() };
+  state.dev.out.push(m); state.dev.out = state.dev.out.slice(-50); saveState();
+  broadcast({ type: 'log', role: 'developer', text: 'To developer: ' + text });
+  for (const w of devWaiters.splice(0)) w();
+  return `Queued for the developer (message ${m.id}). Tell the user it is sent; the reply will be spoken when it arrives. Do not answer for the developer.`;
+};
+handlers.developer_status = async () => {
+  const waiting = state.dev.out.filter(x => !x.read).length, lr = state.dev.lastReply;
+  return `${waiting} message(s) not yet picked up by the developer. ${lr ? `Last reply ${Math.round((Date.now() - lr.at) / 60000)} minutes ago: ${lr.text.slice(0, 300)}` : 'No reply yet.'}`;
+};
+// Claude Code session: GET /api/dev/outbox?after=<id>&wait=25 -> {messages:[{id,text,at}]} (long poll, up to 25 s)
+app.get('/api/dev/outbox', async (req, res) => {
+  const after = Number(req.query.after) || 0, wait = Math.min(25, Math.max(0, Number(req.query.wait) || 0));
+  const fresh = () => state.dev.out.filter(m => m.id > after);
+  let msgs = fresh();
+  if (!msgs.length && wait) {
+    await new Promise(r => { const f = () => { clearTimeout(t); devWaiters = devWaiters.filter(w => w !== f); r(); }; const t = setTimeout(f, wait * 1000); devWaiters.push(f); });
+    msgs = fresh();
+  }
+  for (const m of msgs) m.read = true;
+  if (msgs.length) saveState();
+  res.json({ messages: msgs.map(({ id, text, at }) => ({ id, text, at })) });
+});
+// Claude Code session: POST /api/dev/reply {text, speak?: false = HUD only}
+app.post('/api/dev/reply', (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 1500);
+  if (!text) return res.status(400).json({ error: 'empty' });
+  state.dev.lastReply = { at: Date.now(), text }; saveState();
+  remember('assistant', devVoiceLine(text));
+  broadcast({ type: 'say', role: 'developer', text: devVoiceLine(text), speak: req.body?.speak !== false });
+  res.json({ ok: true });
+});
 // ---------- Maintenance mode (A22): voice request -> Claude Code routine on the user's plan -> pushes to GitHub -> Railway redeploys ----------
 const MAINT_ID = process.env.MAINT_ROUTINE_ID || 'trig_017yUMN1pQPd3PtArSRC2bzh';
 const GH_REPO = () => process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0';

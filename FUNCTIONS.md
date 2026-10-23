@@ -108,3 +108,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - Coming and going, destination memory (2026-10-12): the answer to "where are you headed?" (saved place or any name) is stored as `state.heading` for the whole trip, stops all re-asks, tailors lines (bring list, heading reminders, Maps ETA, shop day, home) and clears on arrival.
 
 See MINI_JARVIS.md for the family (Jarvis mini) feature list: A45 locations, A46 HELP, A47 nearby Bluetooth names, plus what is planned.
+
+- Developer role (2026-10-23): "ask / tell the developer ..." (tool `developer_send`) queues a message for the Claude Code session doing the MyGuru Figma work; its reply is spoken as "The developer says ..." and logged on the HUD as DEVELOPER (amber). `developer_status` = did it answer. Channel = HTTP mailbox behind the normal PIN login: the session signs in once with POST /login (pin=...), then `GET /api/dev/outbox?after=<id>&wait=25` (long poll) reads Jarvis's messages and `POST /api/dev/reply {"text":"...","speak":true}` answers. Text works fully (type on the HUD, read the log). Untested against a live session.
