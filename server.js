@@ -4173,33 +4173,33 @@ handlers.maintenance_status = async () => {
 const DEV_ID = process.env.DEV_ROUTINE_ID || '';
 handlers.developer_request = async ({ request }) => {
   const tok = process.env.DEV_ROUTINE_TOKEN;
-  if (!tok || !DEV_ID) return 'Developer mode is not connected yet: DEV_ROUTINE_ID and DEV_ROUTINE_TOKEN are missing in Railway (a MyGuru Claude Code routine has to be created first). Tell the user plainly.';
+  if (!tok || !DEV_ID) return 'Adeel is not connected yet: DEV_ROUTINE_ID and DEV_ROUTINE_TOKEN are missing in Railway (a MyGuru Claude Code routine has to be created first). Tell the user plainly.';
   if (!String(request || '').trim()) return 'No request given. Ask the user what to build or fix in MyGuru.';
   try {
     const r = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${DEV_ID}/fire`, {
       method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${tok}`, 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: `Developer request, MyGuru only (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
+      body: JSON.stringify({ text: `Developer request for Adeel (the MyGuru engineer), MyGuru only (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return `The developer could not be started (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the user.`;
+    if (!r.ok) return `Adeel could not be reached (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the user.`;
     state.devLast = { at: Date.now(), request: String(request).slice(0, 300), session: j.claude_code_session_url || '' }; saveState();
-    broadcast({ type: 'activity', text: `Developer request sent: ${String(request).slice(0, 120)}${j.claude_code_session_url ? ' · ' + j.claude_code_session_url : ''}` });
-    return 'SENT: the MyGuru engineer session has started on it. Tell the user it is sent and to ask "developer status" later.';
-  } catch (e) { return `Could not reach the developer: ${e.message}`; }
+    broadcast({ type: 'activity', text: `Request sent to Adeel: ${String(request).slice(0, 120)}${j.claude_code_session_url ? ' · ' + j.claude_code_session_url : ''}` });
+    return 'SENT: Adeel (the MyGuru engineer) has the request. Tell the user it is passed to Adeel and to ask for Adeel\'s status later.';
+  } catch (e) { return `Could not reach Adeel: ${e.message}`; }
 };
 handlers.developer_status = async () => {
   try {
     const h = { Accept: 'application/vnd.github.raw+json', 'User-Agent': 'jarvis' };
     if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
     const r = await fetch(`https://api.github.com/repos/${process.env.DEV_REPORT_REPO || GH_REPO()}/contents/developer/last.md`, { headers: h, signal: AbortSignal.timeout(10000) });
-    if (r.status === 404) return state.devLast ? 'No report yet. The developer is probably still working. Ask again in a few minutes.' : 'No developer request has been sent yet.';
-    if (!r.ok) return `Could not read the developer report (HTTP ${r.status}).`;
+    if (r.status === 404) return state.devLast ? 'No report yet. Adeel is probably still working. Ask again in a few minutes.' : 'Nothing has been sent to Adeel yet.';
+    if (!r.ok) return `Could not read Adeel\'s report (HTTP ${r.status}).`;
     const txt = await r.text();
     const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1];
     const stale = state.devLast && t && Date.parse(t) < state.devLast.at - 60000;
-    return stale ? 'The developer has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : txt.slice(0, 1500);
-  } catch (e) { return `Could not read the developer report: ${e.message}`; }
+    return stale ? 'Adeel has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : 'ADEEL\'S REPORT (relay as Adeel\'s word, in your voice):\n' + txt.slice(0, 1500);
+  } catch (e) { return `Could not read Adeel\'s report: ${e.message}`; }
 };
 // Auto "build deployed" notice: the engineer's last push carries a fresh maintenance/last.md. When a boot finds one newer than the
 // pending request, tell the user once (spoken if the app is open, plus a phone push). Held while quiet mode is on, never dropped.

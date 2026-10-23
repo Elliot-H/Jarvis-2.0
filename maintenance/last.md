@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-23T01:47:14Z
-REQUEST: Travel/driving alerts for police, hazards, accidents, closures ahead
+STATUS: done
+TIME: 2026-10-23T01:49:45Z
+REQUEST: Wire the name "Adeel" into developer mode (MyGuru engineer)
 RESULT:
-Owner, road alerts are built. While you are moving, Jarvis checks TomTom and HERE traffic data every minute and says one short line per incident ahead in your direction, like "Accident reported ahead in half a mile, sir." It covers accidents, closures, construction, hazards and stalled vehicles. It goes live on the next Railway deploy, no APK reinstall. It needs you once: get a free TomTom key and put it in Railway as TOMTOM_KEY (HERE_API_KEY also works). Police and speed traps are not available from any public feed, since Waze and Google keep them private, so that part needs a paid partner feed.
+Owner, Adeel is now the permanent name of the MyGuru engineer. Saying "reach out to Adeel", "tell Adeel to..." or "developer mode" all go straight to the developer request, no questions. Jarvis now reports back as if Adeel is a colleague, for example "Adeel has responded, sir". The name lives in Jarvis's persona and tool text, so it does not depend on memory. Maintenance stays unnamed and developer mode is still MyGuru only. It goes live on the next Railway deploy, no APK reinstall.
