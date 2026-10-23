@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-23T01:49:45Z
-REQUEST: Wire the name "Adeel" into developer mode (MyGuru engineer)
+TIME: 2026-10-23T17:00:25Z
+REQUEST: Fix false departure/geofence trigger (repeat "you just left" prompts)
 RESULT:
-Owner, Adeel is now the permanent name of the MyGuru engineer. Saying "reach out to Adeel", "tell Adeel to..." or "developer mode" all go straight to the developer request, no questions. Jarvis now reports back as if Adeel is a colleague, for example "Adeel has responded, sir". The name lives in Jarvis's persona and tool text, so it does not depend on memory. Maintenance stays unnamed and developer mode is still MyGuru only. It goes live on the next Railway deploy, no APK reinstall.
+Owner, a departure now has to hold for three minutes before Jarvis treats it as real, so a quick glitch no longer counts. The same place is never announced as left twice within thirty minutes, which covers your store stop. If you say you did not leave, Jarvis acknowledges it once and will not ask where you are again for that trip. It goes live on the next Railway deploy, no APK reinstall needed. I could only test this with simulated checks, not real GPS.
