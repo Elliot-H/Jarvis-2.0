@@ -83,7 +83,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -866,8 +866,23 @@ async function arrivalStatement(q, text) {
   return true;
 }
 // A bucket question with its own yes/no replies is answered here (short answers only, within 10 minutes).
+const NOT_LEFT_RE = /\b(?:(?:(?:i|we)\s+(?:didnt|did not|havent|have not|arent|am not|not)|im not|were not)\s+(?:just\s+)?(?:leav\w*|left|go|going|depart\w*)|(?:not|never)\s+(?:just\s+)?left|(?:didnt|did not)\s+(?:just\s+)?leave|(?:still|already)\s+(?:here|there)|(?:wasnt|was not)\s+(?:leaving|a departure)|false\s+(?:alarm|trigger)|stop\s+asking)\b/;
+// "I did not just leave": acknowledge ONCE, record the correction, close every open departure question and never ask where he is again for this trip.
+function notLeftAnswer(q, text) {
+  const t = String(text || '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(hey )?jarvis /, ''); // apostrophes dropped: "didnt"
+  if (t.split(' ').length > 14 || /\?$/.test(String(text).trim()) || !NOT_LEFT_RE.test(t)) return false;
+  const nm = q.from || state.departed?.place || state.lastCheck?.from || '', k = placeKey(nm);
+  if (k) (state.notLeft ||= {})[k] = Date.now();
+  tripAnswered(); state.pendingQ = null; state.heading = state.heading || null;
+  if (state.departed) state.departed.answered = true; if (state.lastCheck) state.lastCheck.answered = true;
+  dlog('not-left', { place: nm, text: String(text).slice(0, 80) });
+  const line = 'Understood, sir. Noted, I will not ask again for this trip.';
+  saveState(); broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
+  return true;
+}
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
+  if (['dest', 'checklist', 'depart'].includes(q.type) && notLeftAnswer(q, text)) return true;
   if (['dest', 'checklist', 'depart'].includes(q.type) && await arrivalStatement(q, text)) return true; // "no, I'm at the Camden house now" is an ARRIVAL, never a departure answer
   if (q.type === 'where') return whereAnswer(q, text);
   if (q.type === 'dest') return destAnswer(q, text);
@@ -1257,6 +1272,12 @@ if (!process.env.JARVIS_SMOKE) { setInterval(mealTick, 60_000); setTimeout(mealT
 // kind bring = something to bring TO that place (said when he leaves anywhere else / says he's headed there; cleared on arrival).
 const LEAVE_MARGIN = 120, QUIET_FROM = Number(process.env.QUIET_FROM ?? 22), QUIET_TO = Number(process.env.QUIET_TO ?? 6);
 const CONFIRM_MS = Number(process.env.PLACE_CONFIRM_MIN || 1) * 60e3, REARM_MS = Number(process.env.ARRIVE_REARM_MIN || 30) * 60e3;
+// A leave from a place must hold LEAVE_CONFIRM_MIN before it counts, and the same place is never announced as left twice within DEPART_DEDUPE_MIN (stop-and-go, GPS/geofence glitch).
+const LEAVE_CONFIRM_MS = Number(process.env.LEAVE_CONFIRM_MIN || 3) * 60e3, DEPART_DEDUPE_MS = Number(process.env.DEPART_DEDUPE_MIN || 30) * 60e3;
+function recentDeparture(name) { // was a departure from this place already announced / answered / denied inside the window?
+  const k = placeKey(name || ''), now = Date.now(), w = DEPART_DEDUPE_MS;
+  return !!k && ((state.leftAt?.[k] && now - state.leftAt[k] < w) || (state.notLeft?.[k] && now - state.notLeft[k] < w) || (state.lastCheck && placeKey(state.lastCheck.from || '') === k && now - state.lastCheck.at < w) || (state.departed && placeKey(state.departed.place || '') === k && now - state.departed.at < w));
+}
 const MAX_REMARKS_HOUR = Number(process.env.MAX_REMARKS_HOUR || 4);
 function placeFor(L, prevKey) {
   let best = null;
@@ -1449,15 +1470,18 @@ function onMove() {
   // A stationary phone sends no new fix, so re-check shortly after the confirm window instead of waiting for the next report.
   // Arriving well inside the perimeter (or leaving well outside it) confirms at once.
   const deep = pl ? pl.d <= (pl.radius || 150) * .6 : !!prev0 && km(L, prev0) * 1000 > (prev0.radius || 150) + LEAVE_MARGIN + 150;
-  if (!deep && (now - state.cand.since < CONFIRM_MS || state.cand.n < 2)) { clearTimeout(moveTimer); moveTimer = setTimeout(onMove, CONFIRM_MS + 5000); return; }
+  const confirmMs = !pl && prev0 ? LEAVE_CONFIRM_MS : CONFIRM_MS; // leaving needs a sustained time away; a brief glitch is not a departure
+  if (!deep && (now - state.cand.since < confirmMs || state.cand.n < 2)) { clearTimeout(moveTimer); moveTimer = setTimeout(onMove, confirmMs + 5000); return; }
   state.cand = null;
   const prev = state.places.find(p => placeKey(p.name) === prevKey);
-  if (prev) (state.leftAt ||= {})[prevKey] = now;
+  const dupeLeave = !!prev && recentDeparture(prev.name); // already announced (or denied) for this trip: update state, say nothing
+  if (prev && !(state.leftAt?.[prevKey] && dupeLeave)) (state.leftAt ||= {})[prevKey] = now; // keep the FIRST leave time so the window is not extended by repeats
   const rearmed = !pl || !state.leftAt?.[key] || now - state.leftAt[key] >= REARM_MS; // same place re-entered soon after leaving: no new greeting
   state.at = key; state.atSince = Date.now(); state.lastPlace = key; saveState();
   setPres(pl ? pl.name : '', 'gps');
   const c = nowCtx(), parts = [];
-  if (prev) { // left somewhere
+  if (prev && dupeLeave) dlog('leave-suppressed', { place: prev.name, why: 'already announced/denied within window' });
+  if (prev && !dupeLeave) { // left somewhere
     const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : (tripOn() ? { answered: true } : null); // an ANSWERED departure question (this trip) counts as handled, whatever place it recorded
     dlog('leave', { place: prev.name, vehicleHandled: !!dep, arrivedAt: pl ? pl.name : null, quiet: quietNow(), clients: clients.size });
     if (!dep) parts.push(...eventLines('leave', prev.name, Math.random, true));
@@ -1484,7 +1508,7 @@ function onMove() {
   }
   saveState();
   const text = parts.filter(Boolean).join(' ');
-  const leaving = !!prev && !pl, speak = !!text && (leaving || !quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t))); // a departure is always announced, even in quiet hours
+  const leaving = !!prev && !pl && !dupeLeave, speak = !!text && (leaving || !quietNow() || parts.some(t => /bring|remembered|grab|before you go|you left/i.test(t))); // a departure is always announced, even in quiet hours
   if (prev) dlog('leave-announce', { place: prev.name, spoken: speak, text: text.slice(0, 120) });
   if (speak) deliver(text, leaving ? `Leaving ${prev.name}` : pl ? pl.name : 'Jarvis', leaving, leaving ? (state.pendingQ?.type === 'checklist' ? 'checklist' : 'leave') : 'arrive');
   if (speak && leaving && state.lastCheck && !state.lastCheck.answered) { state.lastCheck.pushed = true; saveState(); }   // it reached his phone: no repeat on arrival
@@ -1597,7 +1621,8 @@ function tripDedupe(text) {
   t.said = [...said].slice(-40); return keep.join(' ');
 }
 function vehicleDeparture(v) {
-  if (tripOn() || headingFresh()) return '';   // already answered for this trip: never ask again
+  if (tripOn() || headingFresh()) return '';
+  { const h = hereNow(); if (h && recentDeparture(h.name) && state.notLeft?.[placeKey(h.name)]) return ''; } // he said he had not left: no second departure question   // already answered for this trip: never ask again
   state.trip = { at: Date.now(), said: [], answeredAt: 0 };
   const here = hereNow(), opts = [];
   const nextGuess = here ? guessNext(placeKey(here.name)) : null;
