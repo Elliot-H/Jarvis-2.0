@@ -1,5 +1,5 @@
 STATUS: needs-owner
-TIME: 2026-10-23T01:38:39Z
-REQUEST: Replace the joke-decline fallback line "Not now, Jarvis." and fix any other fallback lines that address Jarvis by name
+TIME: 2026-10-23T01:50:00Z
+REQUEST: Add a developer role/mode (MyGuru only) with developer_request and developer_status tools
 RESULT:
-Owner, I changed nothing, because the line is not in the code. I searched every file on main and the full git history for "Not now, Jarvis" and for any joke feature, and found neither. The only decline replies in the code are "Very good, sir." and the quiet-mode lines, which are all fine. I also checked the other canned lines for ones addressed to Jarvis and found none. If you heard that line, it may come from the AI model's own improvisation, or from an older build still on the phone. Tell me roughly when you heard it and I can tighten the persona prompt instead.
+Owner, the developer mode is built: Jarvis now has developer_request and developer_status, which work like the maintenance ones but hand off to a separate MyGuru engineer session. It goes live on the next Railway deploy, no APK reinstall. It needs you once: create a MyGuru Claude Code routine on claude.ai/code and put its ID and token in Railway as DEV_ROUTINE_ID and DEV_ROUTINE_TOKEN. Until then Jarvis will say developer mode is not connected. No separate voice is needed, replies come back in Jarvis's voice. The earlier voice-intercom idea was never in the code, so there was nothing to undo.

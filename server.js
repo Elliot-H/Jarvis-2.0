@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as social from './social.js';
 import * as media from './media.js';
@@ -82,7 +82,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -706,7 +706,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -4149,6 +4149,38 @@ handlers.maintenance_status = async () => {
     if (!stale && state.maintLast && !state.maintLast.announced) { state.maintLast.announced = true; saveState(); }   // he asked: no auto notice needed
     return stale ? 'The engineer has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : txt.slice(0, 1500);
   } catch (e) { return `Could not read the report: ${e.message}`; }
+};
+// ---------- Developer mode: same hand-off as maintenance, but a separate engineer session scoped ONLY to MyGuru ----------
+const DEV_ID = process.env.DEV_ROUTINE_ID || '';
+handlers.developer_request = async ({ request }) => {
+  const tok = process.env.DEV_ROUTINE_TOKEN;
+  if (!tok || !DEV_ID) return 'Developer mode is not connected yet: DEV_ROUTINE_ID and DEV_ROUTINE_TOKEN are missing in Railway (a MyGuru Claude Code routine has to be created first). Tell the user plainly.';
+  if (!String(request || '').trim()) return 'No request given. Ask the user what to build or fix in MyGuru.';
+  try {
+    const r = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${DEV_ID}/fire`, {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+      headers: { Authorization: `Bearer ${tok}`, 'anthropic-beta': 'experimental-cc-routine-2026-04-01', 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: `Developer request, MyGuru only (sent ${new Date().toISOString()}):\n${String(request).slice(0, 4000)}` })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return `The developer could not be started (HTTP ${r.status}${j?.error?.message ? ': ' + j.error.message : ''}). Tell the user.`;
+    state.devLast = { at: Date.now(), request: String(request).slice(0, 300), session: j.claude_code_session_url || '' }; saveState();
+    broadcast({ type: 'activity', text: `Developer request sent: ${String(request).slice(0, 120)}${j.claude_code_session_url ? ' · ' + j.claude_code_session_url : ''}` });
+    return 'SENT: the MyGuru engineer session has started on it. Tell the user it is sent and to ask "developer status" later.';
+  } catch (e) { return `Could not reach the developer: ${e.message}`; }
+};
+handlers.developer_status = async () => {
+  try {
+    const h = { Accept: 'application/vnd.github.raw+json', 'User-Agent': 'jarvis' };
+    if (process.env.GITHUB_TOKEN) h.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const r = await fetch(`https://api.github.com/repos/${process.env.DEV_REPORT_REPO || GH_REPO()}/contents/developer/last.md`, { headers: h, signal: AbortSignal.timeout(10000) });
+    if (r.status === 404) return state.devLast ? 'No report yet. The developer is probably still working. Ask again in a few minutes.' : 'No developer request has been sent yet.';
+    if (!r.ok) return `Could not read the developer report (HTTP ${r.status}).`;
+    const txt = await r.text();
+    const t = (txt.match(/^TIME:\s*(.+)$/m) || [])[1];
+    const stale = state.devLast && t && Date.parse(t) < state.devLast.at - 60000;
+    return stale ? 'The developer has not reported on the latest request yet. It is still working or it failed to start. Ask again shortly.' : txt.slice(0, 1500);
+  } catch (e) { return `Could not read the developer report: ${e.message}`; }
 };
 // Auto "build deployed" notice: the engineer's last push carries a fresh maintenance/last.md. When a boot finds one newer than the
 // pending request, tell the user once (spoken if the app is open, plus a phone push). Held while quiet mode is on, never dropped.
