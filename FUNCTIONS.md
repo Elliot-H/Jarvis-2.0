@@ -110,3 +110,4 @@ Status: ✅ built · 🔧 next up · 💡 idea
 - Coming and going, destination memory (2026-10-12): the answer to "where are you headed?" (saved place or any name) is stored as `state.heading` for the whole trip, stops all re-asks, tailors lines (bring list, heading reminders, Maps ETA, shop day, home) and clears on arrival.
 
 See MINI_JARVIS.md for the family (Jarvis mini) feature list: A45 locations, A46 HELP, A47 nearby Bluetooth names, plus what is planned.
+- Do-not-interrupt: no alerts, arrival/departure lines or reminders while the user speaks or Jarvis is working; held and delivered after (always on).

@@ -598,3 +598,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## False "Music is playing" at app open (2026-10-24)
 - `PhoneAudio.otherMusicActive` now needs media volume > 0 and audio active continuously for 3 s (blips at app start no longer count); the HUD line says "Phone audio is in use by another app" (Android cannot say which app, and it counts muted video/silent streams). If it still fires with nothing playing, another app holds a media stream: check Samsung's media controls for the culprit.
+
+## Do-not-interrupt window (2026-10-24)
+- server.js `talkWindow()` is true while the phone reports `listening`/`speaking` (state msgs, 90 s staleness cap) or a brain turn is busy (4 min cap). `deferTalk()` holds unprompted spoken lines (`deliverNow`) and non-forced `push()` alerts in `heldOut` (max 25, expire 2 h); a 1.5 s loop releases them one at a time, 6 s apart, after `HOLD_SETTLE_SEC` (default 4) of quiet. The 25-min reminder roll also skips during the window. Forced pushes (explicit phone_alert) and HELP emergencies bypass it. Direct replies to the user are not affected.

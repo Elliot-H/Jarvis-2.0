@@ -288,6 +288,34 @@ let current = null; // running Query, for interrupt
 const queue = [];
 
 let busySince = 0, draining = false;
+// ---------- do-not-interrupt window ----------
+// While the user is speaking, or Jarvis is thinking / running tools / speaking his reply, every unprompted alert (phone push, arrival/departure line, reminder,
+// follow-up, market/crypto/stop alert) is held and delivered once both have finished (short settle delay, one at a time). HELP and forced pushes pass through.
+const uiState = { s: 'idle', at: 0 };
+const talkWindow = () => (['listening', 'speaking'].includes(uiState.s) && Date.now() - uiState.at < 90e3) || (busy && busySince && Date.now() - busySince < 4 * 60e3);
+const heldOut = []; let heldFlushing = false, windowEndedAt = 0;
+function deferTalk(fn, label) {
+  if (!talkWindow()) return false;
+  if (heldOut.length < 25) heldOut.push({ fn, label: String(label || '').slice(0, 60), at: Date.now() });
+  console.log(`do-not-interrupt: held "${label}"`);
+  return true;
+}
+if (!process.env.JARVIS_SMOKE) setInterval(async () => {
+  if (talkWindow()) { windowEndedAt = 0; return; }
+  if (!heldOut.length || heldFlushing) return;
+  if (!windowEndedAt) { windowEndedAt = Date.now(); return; }
+  if (Date.now() - windowEndedAt < Number(process.env.HOLD_SETTLE_SEC || 4) * 1000) return;
+  heldFlushing = true;
+  try {
+    while (heldOut.length && !talkWindow()) {
+      const it = heldOut.shift();
+      if (Date.now() - it.at > 2 * 3600e3) continue;
+      try { await it.fn(); } catch (e) { console.warn('held item failed: ' + e.message); }
+      await new Promise(r => setTimeout(r, 6000));
+    }
+  } finally { heldFlushing = false; windowEndedAt = 0; }
+}, 1500);
+
 function ask(text, opts = {}) {
   return new Promise(resolve => {
     queue.push({ text, opts, resolve });
@@ -1043,7 +1071,7 @@ if (!state.seededReminders) { // starter bucket; the user can edit by voice
 }
 // While the app is open, now and then, a reminder can come up on its own (only when Jarvis is idle).
 if (!process.env.JARVIS_SMOKE) setInterval(() => {
-  if (busy || !clients.size || quietBlocks() || Math.random() > .35) return;
+  if (busy || talkWindow() || !clients.size || quietBlocks() || Math.random() > .35) return;
   const text = shopQuestion() || pickReminder()?.text; if (text) { remember('jarvis', text); broadcast({ type: 'say', text, speak: true }); }
 }, 25 * 60_000);
 
@@ -1388,6 +1416,7 @@ function queueSpoken(text, title, ask = false) {
 }
 let lastQ = { k: '', at: 0 };
 function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
+  if (deferTalk(() => deliverNow(text, title, question, vary), text)) return;
   text = tripDedupe(text.replace(/\s+/g, ' ').trim());
   if (question && text) { const k = text.toLowerCase(), now = Date.now(); if ((lastQ.k === k && now - lastQ.at < 10 * 60e3) || now - lastQ.at < 90e3) return; lastQ = { k, at: now }; }   // no back-to-back duplicate questions
   if (!text || quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(text))) return;
@@ -2141,6 +2170,7 @@ function rememberRec(link, title, body) {
 }
 async function push(title, body, link, force = false, emergency = false) {
   if (emergency) { const e1 = await pushPushover(title, body, link, '', '', true).catch(e => String(e.message || e)); if (process.env.TELEGRAM_BOT_TOKEN) pushTelegram(title, body, link).catch(() => {}); return process.env.PUSHOVER_APP_TOKEN ? e1 : pushNtfy(title, body, link); }   // a HELP alert ignores silent / quiet / finance hold
+  if (!force && deferTalk(() => push(title, body, link, force), title)) return null;
   if (silentActive()) { console.log(`silent mode: held back phone alert "${title}"`); return null; }   // silent mode mutes every phone alert (Pushover/Telegram/ntfy), even forced ones; they resume when it ends
   if (finHoldBlocks(title, link)) { console.log(`finance hold: held back "${title}"`); return null; }   // before 'force': a hold silences even forced finance pushes
   if (!force && quietBlocks(CRITICAL_ALERT.test(title) || CRITICAL_ALERT.test(body))) { console.log(`quiet mode: held back "${title}"`); return null; }
@@ -3584,7 +3614,7 @@ wss.on('connection', ws => {
       state.sessionId = null; state.workSessionId = null; state.history = []; saveState();
       broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
     }
-    if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
+    if (msg.type === 'state') { uiState.s = String(msg.state); uiState.at = Date.now(); } if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
     if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
   });
 });
