@@ -604,3 +604,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Do-not-interrupt: voice activity (2026-10-24, follow-up)
 - The first window only knew "listening" after the wake word. Now the app sends `voice_activity` (throttled 1.5 s) on any speech the mic hears, even before the wake word or mid-sentence; `talkWindow()` holds alerts for `VOICE_HOLD_SEC` (default 7) after the last one. Server and public/app.js change only, no APK reinstall.
+
+## Do-not-interrupt, phone-side gate (2026-10-24, second report)
+- Server hold alone missed unprompted `say` broadcasts (~15 emitters call broadcast directly). `public/app.js` now gates them itself: a `say` that arrives while no reply is due (`replyDue`, set on sending ask/wake) and the user is busy (speech heard < 7s ago, utterance pending/carried, or Jarvis speaking) is queued in `heldSays` and released one at a time, 6s apart, once quiet. Replies to the user always pass. Server `talkWindow`/`deferTalk` still holds pushes and arrival/departure lines. Needs the new web build (Railway deploy); the APK loads the site, so no reinstall.

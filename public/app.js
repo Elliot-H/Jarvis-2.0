@@ -90,7 +90,18 @@
   }
   // Spoken commands must never be lost to a dropped link: hold them (up to 90s) and deliver the moment the socket is back.
   const outbox = [];
+  // Do-not-interrupt gate (phone side): an unprompted 'say' (alert, reminder, travel line) never plays while speech is being heard,
+  // an utterance is pending, or a reply to the user is still due. It waits here and is released one at a time, 7s after the user stops and Jarvis has finished.
+  let replyDue = 0, lastVoice = 0; const heldSays = []; let heldLast = 0;
+  const HOLD_MS = 7000;
+  const userBusy = () => Date.now() - lastVoice < HOLD_MS || !!pending || !!carry || speaking || (replyDue && Date.now() - replyDue < 4 * 60e3);
+  setInterval(() => {
+    if (!heldSays.length || userBusy() || Date.now() - heldLast < 6000) return;
+    const h = heldSays.shift(); if (Date.now() - h.t > 2 * 3600e3) return;
+    heldLast = Date.now(); handle(h.m);
+  }, 1000);
   function send(o) {
+    if (o && (o.type === 'ask' || o.type === 'wake')) replyDue = Date.now();
     if (ws?.readyState === 1) { ws.send(JSON.stringify(o)); return; }
     if (o && o.type === 'ask') {
       outbox.push({ o, t: Date.now() });
@@ -139,6 +150,7 @@
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
+        if (!m.__rel) { if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
         if (m.memo) saveMemo(m.memo);
         ticker('');
         if (m.text) addLog('jarvis', m.text);
@@ -859,6 +871,7 @@
     if (uttStart > lastLen) uttStart = 0;
     const now = joinResults(e.results, uttStart);
     if (!now) return;
+    lastVoice = Date.now();
     if (!DISPLAY_ONLY && ws?.readyState === 1 && Date.now() - (onSpeech.vt || 0) > 1500) { onSpeech.vt = Date.now(); ws.send(JSON.stringify({ type: 'voice_activity' })); }   // any speech heard, even before the wake word: server holds alerts
     // words from earlier listening sessions of this same command (see rec.onend)
     const heard = carry ? carry + ' ' + now : now;
@@ -894,7 +907,7 @@
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
     if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
-    if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); setState('idle'); return; }
+    if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); replyDue = 0; setState('idle'); return; }
     if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
     if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     stopSpeaking(false);
