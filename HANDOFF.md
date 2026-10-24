@@ -601,3 +601,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Do-not-interrupt window (2026-10-24)
 - server.js `talkWindow()` is true while the phone reports `listening`/`speaking` (state msgs, 90 s staleness cap) or a brain turn is busy (4 min cap). `deferTalk()` holds unprompted spoken lines (`deliverNow`) and non-forced `push()` alerts in `heldOut` (max 25, expire 2 h); a 1.5 s loop releases them one at a time, 6 s apart, after `HOLD_SETTLE_SEC` (default 4) of quiet. The 25-min reminder roll also skips during the window. Forced pushes (explicit phone_alert) and HELP emergencies bypass it. Direct replies to the user are not affected.
+
+## Do-not-interrupt: voice activity (2026-10-24, follow-up)
+- The first window only knew "listening" after the wake word. Now the app sends `voice_activity` (throttled 1.5 s) on any speech the mic hears, even before the wake word or mid-sentence; `talkWindow()` holds alerts for `VOICE_HOLD_SEC` (default 7) after the last one. Server and public/app.js change only, no APK reinstall.

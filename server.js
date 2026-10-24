@@ -291,8 +291,8 @@ let busySince = 0, draining = false;
 // ---------- do-not-interrupt window ----------
 // While the user is speaking, or Jarvis is thinking / running tools / speaking his reply, every unprompted alert (phone push, arrival/departure line, reminder,
 // follow-up, market/crypto/stop alert) is held and delivered once both have finished (short settle delay, one at a time). HELP and forced pushes pass through.
-const uiState = { s: 'idle', at: 0 };
-const talkWindow = () => (['listening', 'speaking'].includes(uiState.s) && Date.now() - uiState.at < 90e3) || (busy && busySince && Date.now() - busySince < 4 * 60e3);
+const uiState = { s: 'idle', at: 0, voiceAt: 0 };
+const talkWindow = () => (Date.now() - uiState.voiceAt < Number(process.env.VOICE_HOLD_SEC || 7) * 1000) || (['listening', 'speaking'].includes(uiState.s) && Date.now() - uiState.at < 90e3) || (busy && busySince && Date.now() - busySince < 4 * 60e3);
 const heldOut = []; let heldFlushing = false, windowEndedAt = 0;
 function deferTalk(fn, label) {
   if (!talkWindow()) return false;
@@ -3614,6 +3614,7 @@ wss.on('connection', ws => {
       state.sessionId = null; state.workSessionId = null; state.history = []; saveState();
       broadcast({ type: 'log', role: 'system', text: 'New conversation started.' });
     }
+    if (msg.type === 'voice_activity') uiState.voiceAt = Date.now();
     if (msg.type === 'state') { uiState.s = String(msg.state); uiState.at = Date.now(); } if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
     if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
   });

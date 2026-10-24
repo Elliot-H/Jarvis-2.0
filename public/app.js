@@ -859,6 +859,7 @@
     if (uttStart > lastLen) uttStart = 0;
     const now = joinResults(e.results, uttStart);
     if (!now) return;
+    if (!DISPLAY_ONLY && ws?.readyState === 1 && Date.now() - (onSpeech.vt || 0) > 1500) { onSpeech.vt = Date.now(); ws.send(JSON.stringify({ type: 'voice_activity' })); }   // any speech heard, even before the wake word: server holds alerts
     // words from earlier listening sessions of this same command (see rec.onend)
     const heard = carry ? carry + ' ' + now : now;
     lastHeard = heard;
