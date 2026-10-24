@@ -652,7 +652,7 @@
       return;
     }
     if (now > manualMicUntil && musicPlaying()) {
-      if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Music is playing: listening is off so it does not cut out. Tap the mic button to talk.'); }
+      if (!musicHeld) { musicHeld = true; chip('#chipMic', 'warn', 'MIC: TAP TO TALK'); addActivity('Phone audio is in use by another app (music or video): hands-free listening is paused so it does not cut out. Tap the mic button to talk.'); }
       return;
     }
     if (musicHeld) { musicHeld = false; chip('#chipMic', 'ok', 'MIC'); }

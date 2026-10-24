@@ -595,3 +595,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Departure re-fire + unprompted music fix (2026-10-23)
 - Bug: after leaving the Camden House and a store stop, Jarvis re-fired the departure line and music started unasked. Fixes in server.js: (1) music start is refused while a trip/departure question is open or he just corrected his location unless the request has an explicit music word (music, tunes, songs, Spotify, playlist, album, artist, radio); "start", "turn on", "take over" no longer count as music requests anywhere; (2) onMove no longer adds the filler "Leaving X, sir." when this trip's departure was already asked/answered; (3) `vehicleDeparture` returns nothing for 10 min after a location correction (`state.corrected`) and for 45 min of stop-and-go away from a saved place (`state.lastDepartAt`). Server only, no APK reinstall. Not tested against a live phone.
+
+## False "Music is playing" at app open (2026-10-24)
+- `PhoneAudio.otherMusicActive` now needs media volume > 0 and audio active continuously for 3 s (blips at app start no longer count); the HUD line says "Phone audio is in use by another app" (Android cannot say which app, and it counts muted video/silent streams). If it still fires with nothing playing, another app holds a media stream: check Samsung's media controls for the culprit.

@@ -33,8 +33,17 @@ public class PhoneAudio {
   static volatile long lastOwnEnd = 0;   // when Jarvis's own voice last stopped
   /** True only when ANOTHER app is playing music. Jarvis's own voice (and the second after it) counts as music to Android, which made the app think music was on and press PLAY afterwards. */
   static boolean otherMusicActive(AudioManager am) {
-    try { return am.isMusicActive() && PLAYING.get() == 0 && System.currentTimeMillis() - lastOwnEnd > 1500; } catch (Exception e) { return false; }
+    try {
+      long now = System.currentTimeMillis();
+      boolean raw = am.isMusicActive() && PLAYING.get() == 0 && now - lastOwnEnd > 1500 && am.getStreamVolume(AudioManager.STREAM_MUSIC) > 0;   // muted media volume = nothing audible to protect
+      if (now - lastPoll > 8000) activeSince = 0;   // stale: only count audio seen continuously
+      lastPoll = now;
+      if (!raw) { activeSince = 0; return false; }
+      if (activeSince == 0) activeSince = now;
+      return now - activeSince >= 3000;   // a blip (app start, a notification, a silent stream) is not music
+    } catch (Exception e) { return false; }
   }
+  private static long activeSince = 0, lastPoll = 0;
   private final Map<String, MediaPlayer> players = new HashMap<>();
   private final Map<String, android.media.audiofx.LoudnessEnhancer> boosts = new HashMap<>();
   private static final int VOICE_GAIN_MB = 1200;   // +12 dB on Jarvis's voice so it carries over the shop and over music
