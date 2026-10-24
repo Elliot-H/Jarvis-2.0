@@ -1,5 +1,5 @@
-STATUS: done
-TIME: 2026-10-24T23:05:00Z
-REQUEST: Still interrupted while speaking; queue all alerts until Jarvis finishes replying
+STATUS: needs-owner
+TIME: 2026-10-24T23:05:26Z
+REQUEST: Give Jarvis read access to the Owner's Claude account memory and projects to pull in the MyGuru financial forecast
 RESULT:
-Sir, I found why it still leaked. The server hold only covered pushes and some lines, but about fifteen other spoken lines went straight to your phone. The phone now holds any unprompted spoken line itself while it hears you, while a reply to you is pending, or while Jarvis is talking. They play one at a time, six seconds apart, after seven seconds of quiet. Your own replies are never held. It goes live on the next Railway deploy, no APK reinstall.
+Nothing was changed, Owner. Anthropic has no API or connector that reads claude.ai projects or account memory, and an API key only pays for Claude, it cannot see your chats. The repo is also public, so storing a financial forecast in it would expose it. The safe route is an export: in the MyGuru project, have Claude write the forecast as a short summary, then paste it to Jarvis by voice or text and tell him to remember it, or put it in a private Google Drive or Notion file for Jarvis to read. Tell me which and I will wire it up.
