@@ -607,3 +607,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Do-not-interrupt, phone-side gate (2026-10-24, second report)
 - Server hold alone missed unprompted `say` broadcasts (~15 emitters call broadcast directly). `public/app.js` now gates them itself: a `say` that arrives while no reply is due (`replyDue`, set on sending ask/wake) and the user is busy (speech heard < 7s ago, utterance pending/carried, or Jarvis speaking) is queued in `heldSays` and released one at a time, 6s apart, once quiet. Replies to the user always pass. Server `talkWindow`/`deferTalk` still holds pushes and arrival/departure lines. Needs the new web build (Railway deploy); the APK loads the site, so no reinstall.
+
+## Wake-up question keeps the mic open (2026-10-26)
+- Bug: the departure/bring-list question at the end of the wake-up briefing sometimes left the mic closed. `public/app.js` `afterReply` now also starts `holdOpenForAnswer()`: for 25 s after any spoken question, a 1.5 s watchdog re-opens the mic (goActive, quiet) if nothing has been heard and the mic is off. `ASKING` also matches "do you need", "anything you need/to bring", "need to bring/remember". Web-only, no APK reinstall. Not tested on hardware.

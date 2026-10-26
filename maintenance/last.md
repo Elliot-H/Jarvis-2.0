@@ -1,5 +1,5 @@
-STATUS: needs-owner
-TIME: 2026-10-25T17:43:06Z
-REQUEST: Wire Jarvis to the MyGuru financial forecast data directly, in a private file under ./self, no Owner action
+STATUS: done
+TIME: 2026-10-26T13:43:54Z
+REQUEST: Wake-up briefing departure/bring question must keep the mic open for the answer
 RESULT:
-Nothing was changed, Owner. I found the forecast: it is the Revenue Forecast page under MyGuru HQ, Finance, in your Notion. But a private file cannot work: Railway deploys from the public repo, so an ignored file never reaches Jarvis, and a committed one would expose the numbers. The only secure live link is Jarvis reading that Notion page directly, which needs a Notion integration token stored as a Railway variable. Only you can create that token, so I stopped rather than copy private financials into the repo. Say go once the token is set and I will build the read tool.
+Fixed, Owner. After any spoken question, including the one at the end of the wake-up briefing, Jarvis now keeps checking for 25 seconds and reopens the mic if it closed. Question detection also catches wordings like "do you need" and "anything to bring". It goes live on the next Railway deploy, and no APK reinstall is needed. I could not test on the phone, so tell me if it still cuts off.

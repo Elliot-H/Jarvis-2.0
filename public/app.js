@@ -767,14 +767,26 @@
   // When Jarvis asks something, open the mic for the answer straight away (no wake word).
   // Any question counts: a "?" anywhere in his last couple of sentences, or a phrase like "shall I" / "would you like".
   // After a normal reply the mic also stays open briefly, so you can just keep talking (?follow=0 turns that off).
-  const ASKING = /(\?|\b(shall i|should i|would you like|do you want|want me to|which (one|would|do)|let me know|your call|say yes|say the word|confirm)\b)/i;
+  const ASKING = /(\?|\b(shall i|should i|would you like|do you want|want me to|which (one|would|do)|let me know|your call|say yes|say the word|confirm|do you need|anything (you need|to bring)|need to (bring|remember))\b)/i;
   const FOLLOW_UP = params.get('follow') !== '0';
   function isQuestion(text) {
     const t = String(text || '').trim();
     return ASKING.test(t.slice(-220));
   }
+  // A spoken question must keep the mic open for the answer, even on the wake-up briefing (wake engine still releasing the mic, a late 'thinking' state, a blip).
+  // Watchdog: for 25 s after the question, if nothing has been heard and the mic is not on, open it again.
+  let askUntil = 0, askDog = 0, askHeard = '';
+  function holdOpenForAnswer() {
+    askUntil = Date.now() + 25000; askHeard = '';
+    if (askDog) return;
+    askDog = setInterval(() => {
+      if (Date.now() > askUntil || lastHeard !== askHeard || pending || carry || muted) { clearInterval(askDog); askDog = 0; return; }
+      if (speaking || state === 'thinking') return;
+      if (!recOn || mode !== 'active') { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000, quiet: true }); }
+    }, 1500);
+  }
   function afterReply(text) {
-    if (isQuestion(text)) setTimeout(() => { if (!speaking && state !== 'thinking') { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } }, 250);
+    if (isQuestion(text)) { holdOpenForAnswer(); setTimeout(() => { if (!speaking && state !== 'thinking') { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } }, 250); }
     else if (FOLLOW_UP && !(WAKE_FIRST && wakeEver && !wakeErrShown)) setTimeout(() => { if (!speaking && state !== 'thinking') goActive({ ms: 6000, quiet: true }); }, 250);
     else resumeListening();
   }
