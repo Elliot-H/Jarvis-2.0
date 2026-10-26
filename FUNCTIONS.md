@@ -111,3 +111,5 @@ Status: ✅ built · 🔧 next up · 💡 idea
 
 See MINI_JARVIS.md for the family (Jarvis mini) feature list: A45 locations, A46 HELP, A47 nearby Bluetooth names, plus what is planned.
 - Do-not-interrupt: no alerts, arrival/departure lines or reminders while the user speaks or Jarvis is working; held and delivered after (always on).
+
+- Vehicle trouble codes (2026-10-26): Jarvis never states OBD codes unprompted (scan summary, alert, departure check, stored snapshot). He only says the check engine light is on / codes are present and asks "would you like to know what they are, or should we revisit this later?". Codes are read only on a yes or an explicit ask (tools `vehicle_scan` / `vehicle_status` withhold them unless `codes:true`). Stored snapshots are still never presented as live.

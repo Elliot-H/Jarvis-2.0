@@ -622,3 +622,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 - Engine start (OBD sees a new start, any place) now fires `engineStartOffer()` by itself: ~3 s after the start, or 40 s if the departure question was also asked. Needs a live scan (rescans if stale; silent + dlog `start-offer-skip` if it fails). Not gated by the departure sequence.
 - Wording rotates (`vOfferLine`) from live fuel / volts / code count. `state.vAsked` {at, n, result} (in BACKUP_KEYS): no ask in the last 3 h = first-time wording; otherwise short follow-up ("Still want that vehicle data, sir?").
 - GPS leave (`armVscan`) re-arms the ask after the departure answers, unless asked <4 min ago or he said yes in the last 30 min. Live-only honesty unchanged (stored readings are dated, never quoted as current).
+
+## Trouble-code rule (2026-10-26)
+- OBD codes are withheld everywhere until the Owner says yes or explicitly asks: `vSummary(v, live, codes)` hides them, `vSpoken` and alerts (`obdScan`) use `codesAsk()` and arm a `vscan_explain` yes/no; tools `vehicle_scan`/`vehicle_status` take `codes:true` only after a yes. Persona "Vehicles" section carries the rule. Live vs stored rule unchanged.
