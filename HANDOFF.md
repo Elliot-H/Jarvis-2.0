@@ -613,3 +613,7 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Vehicle-check offer on every departure (2026-10-26)
 - Cause: `state.vscan` was armed only by OBD engine start (or drive-start with the truck seen running), so a GPS leave from any place without an engine-start read never offered it, and `destAnswer` ("Headed home, sir?") never chained it. Fix in server.js: `armVscan()` arms it on every confirmed GPS leave (`onMove`) and on a missed-engine-start drive-start; `destAnswer` yes now appends the tail; `vscanTail()` is async: a leave-armed offer re-reads the dongle (`obdScan 'asked'`, 20 s cap) and, if it fails, says plainly "Bluetooth is off on the phone, so I can't reach the truck" (code `bt_off`, now returned by `obdScan`) or "I can't reach the truck". Yes still reads `vSpoken` (full scan). Server only, no APK reinstall. node --check only; not driven live.
+
+
+## Vehicle data: live vs stored (2026-10-26)
+- A vehicle reading is live only if `obdScan` succeeded within 3 min (`isLive`). `vSummary(v, live)` labels stored snapshots with their date; persona rule forbids quoting them as current. Departure offer (`vscanTail`) says "I've connected to the vehicle" only after a real connection, else gives the failing step. Yes runs a fresh full scan in the background (`vscanReadout`, handler has a 15 s limit); new codes chain `vscan_explain`. Syntax-checked only, untested on hardware. Server only, no APK reinstall.

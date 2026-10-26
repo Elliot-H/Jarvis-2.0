@@ -917,6 +917,7 @@ async function bucketAnswer(text) {
   if (q.type === 'checklist') return checklistAnswer(q, text);
   if (q.type === 'depart') return departAnswer(q, text);
   if (q.type === 'vscan') return vscanAnswer(q, text);
+  if (q.type === 'vscan_explain') return vscanExplainAnswer(q, text);
   if (q.type === 'stay' || q.type === 'stay_music') return stayAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
   if (q.type === 'copilot') return copilotAnswer(q, text);
@@ -1669,16 +1670,11 @@ function vehicleDeparture(v) {
 }
 // Third departure prompt: a one-line OFFER of the full vehicle check, chained after the "where to / bring list" answer. Yes = read vehicle_scan aloud; no = dropped for the trip.
 const fuelWords = p => p == null ? '' : p >= 90 ? 'full' : p >= 68 ? 'about three quarters' : p >= 40 ? 'about half' : p >= 20 ? 'about a quarter' : `down to ${Math.round(p)} percent`;
-function vscanOfferText(v) {
-  const d = v.last; if (!d) return '';
-  const bits = [];
-  if (d.fuelPct != null) bits.push(d.fuelPct >= 90 ? 'fuel is full' : d.fuelPct < 20 ? `fuel ${fuelWords(d.fuelPct)}` : `fuel at ${fuelWords(d.fuelPct)}`);
-  if (d.volts) bits.push(`battery at ${Number(d.volts).toFixed(1)} volts`);
-  const n = (d.dtcs || []).length; bits.push(n ? `${n} fault code${n > 1 ? 's' : ''}${d.mil ? ' and the check engine light on' : ''}` : d.mil ? 'check engine light on' : 'no fault codes');
-  if (d.readiness?.ready) bits.push((d.readiness.notReady || []).length ? 'emissions not ready' : 'emissions ready');
-  const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
-  return `${nm}'s on, ${listJoin(bits)}. Would you like the full check before you pull off?`;
-}
+// A vehicle reading is LIVE only if a vehicle_scan succeeded moments ago (v.lastOk). Anything else is a stored snapshot and must be said so, never quoted as current.
+const LIVE_MS = 3 * 60e3, isLive = v => !!v.reachable && !!v.lastOk && Date.now() - v.lastOk < LIVE_MS;
+const storedDate = v => v.last?.at ? new Date(v.last.at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: process.env.TZ || undefined }) : '';
+const unreachWhy = r => r.code === 'bt_off' || /bluetooth is off/i.test(r.why || '') ? 'phone Bluetooth is off' : /app is not open/i.test(r.why || '') ? "the Jarvis app isn't open on the phone" : /did not answer|no answer in time/i.test(r.why || '') ? "the phone didn't answer in time" : "the dongle isn't answering (out of range, or the truck is off)";
+const storedNote = v => v.last ? ` I only have a stored reading from ${storedDate(v)}, which isn't current, so I won't quote it.` : '';
 // Departure from ANY saved place (GPS leave, missed engine start) arms the offer too: armVscan(). Engine start arms it with fresh readings;
 // a leave-armed offer re-reads the dongle first, and says plainly when the truck cannot be reached (Bluetooth off, out of range).
 function armVscan() {
@@ -1690,22 +1686,16 @@ async function vscanTail() { // returns the offer to append to a departure reply
   const o = state.vscan; if (!o || o.offered || Date.now() - o.at > 20 * 60e3) return '';
   const v = vFind(o.vehicle); if (!v) return '';
   o.offered = true;
-  const fresh = v.last && Date.now() - Date.parse(v.last.at || 0) < 3 * 60e3 && v.last.rpm;
-  if (o.leave && !fresh) {
-    const r = await Promise.race([obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message })), new Promise(res => setTimeout(() => res({ ok: false, why: 'no answer in time' }), 20000))]);
-    if (!r.ok) {
-      saveState();
-      const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
-      return r.code === 'bt_off' || /bluetooth is off/i.test(r.why || '') ? ` Bluetooth is off on the phone, sir, so I can't reach the ${v.name} for the vehicle check. Turn it on and ask me to scan the ${v.name}.` : ` I can't reach the ${v.name} for the vehicle check, sir. ${nm} isn't answering on Bluetooth.`;
-    }
+  if (!isLive(v)) {
+    const r = await Promise.race([obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message })), new Promise(res => setTimeout(() => res({ ok: false, why: 'no answer in time' }), 12000))]);
+    if (!r.ok) { saveState(); return ` I couldn't connect to the ${v.name}, sir: ${unreachWhy(r)}.${storedNote(v)} Fix that and ask me to scan the ${v.name}.`; }
   }
-  const t = vscanOfferText(v); if (!t) { saveState(); return ''; }
   state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; saveState();
-  return ' ' + t.replace(/^(\S+)'s on, /, o.leave ? "$1 reads, " : "$1's on, ");
+  return " Sir, I've connected to the vehicle — would you like the vehicle data?";
 }
 const VSCAN_YES = /^(yes|yeah|yep|yup|sure|please|go ahead|do it|read it|full check|full report|okay|ok|why not|let'?s hear it)\b/, VSCAN_NO = /^(no|nope|nah|skip|skip it|not now|no thanks|no thank you|i'?m good|im good|that'?s ok|thats ok|never mind|nevermind|don'?t)\b/;
 function vSpoken(v) {
-  const d = v.last, bits = [`Battery ${d.volts ?? 'unknown'} volts`, `check engine light ${d.mil ? 'on' : 'off'}`];
+  const d = v.last, bits = [`Live reading from the ${v.name}. Battery ${d.volts ?? 'unknown'} volts`, `check engine light ${d.mil ? 'on' : 'off'}`];
   bits.push((d.dtcs || []).length ? `trouble codes ${d.dtcs.join(', ')}` : 'no trouble codes');
   bits.push((d.pending || []).length ? `pending codes ${d.pending.join(', ')}` : 'no pending codes');
   if (d.readiness?.ready) bits.push((d.readiness.notReady || []).length ? `emissions monitors not ready: ${d.readiness.notReady.join(', ')}` : 'emissions monitors all ready');
@@ -1715,6 +1705,26 @@ function vSpoken(v) {
   if (d.fuelPct != null) bits.push(`fuel ${Math.round(d.fuelPct)} percent`);
   return bits.join('. ') + '.';
 }
+async function vscanReadout(v) {
+  const r = await obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message }));
+  let line;
+  if (!r.ok) line = `I couldn't reach the ${v.name}, sir: ${unreachWhy(r)}.${storedNote(v)}`;
+  else {
+    line = vSpoken(v);
+    if (r.newCodes?.length) { line += ` There ${r.newCodes.length > 1 ? 'are new trouble codes' : 'is a new trouble code'}, ${listJoin(r.newCodes)}. Would you like to know what ${r.newCodes.length > 1 ? 'they mean' : 'it means'}, sir?`; state.pendingQ = { type: 'vscan_explain', vehicle: v.name, codes: r.newCodes, at: Date.now() }; }
+  }
+  saveState(); remember('jarvis', line); broadcast({ type: 'say', text: line, speak: true });
+}
+async function vscanExplainAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  state.pendingQ = null; saveState();
+  if (Date.now() - q.at > 5 * 60e3 || t.split(' ').length > 8) return false;
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  if (VSCAN_NO.test(t)) { const l = 'Very good, sir.'; remember('jarvis', l); broadcast({ type: 'say', text: l, speak: true }); return true; }
+  if (!VSCAN_YES.test(t)) return false;
+  ask(`Explain trouble code ${q.codes.join(', ')} on the ${q.vehicle} in plain words: likely causes, how urgent, cheapest check first.`).catch(() => {});
+  return true;
+}
 async function vscanAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
@@ -1722,8 +1732,9 @@ async function vscanAnswer(q, text) {
   if (VSCAN_NO.test(t)) { state.pendingQ = null; saveState(); return say('Very good, sir.'); }
   if (VSCAN_YES.test(t)) {
     state.pendingQ = null; saveState();
-    const v = vFind(q.vehicle); if (!v?.last) return say('The readings are gone, sir. Ask me to scan the truck.');
-    return say(vSpoken(v));
+    const v = vFind(q.vehicle); if (!v) return say('I lost track of the vehicle, sir. Ask me to scan it.');
+    vscanReadout(v).catch(e => console.warn('vscan readout', e.message)); // fresh full read, spoken when it lands (the answer handler has a 15 s limit)
+    return say(`Reading the ${v.name} now, sir.`);
   }
   state.pendingQ = null; saveState(); return false; // unrelated request: let it through, no repeat
 }
@@ -3705,7 +3716,7 @@ async function obdScan(v, why = 'auto') {
   if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
   saveState();
   if (lines.length && why === 'auto') { const dq = lines.some(l => /headed somewhere|Where are you headed/.test(l)); deliver(lines.join(' '), v.name, dq, dq ? 'depart' : ''); }
-  return { ok: true, data: d, news: lines };
+  return { ok: true, data: d, news: lines, newCodes: fresh };
 }
 // The truck's dongle shows in the phone's Bluetooth list as "OBDII". Seeded once; after that the vehicle list is the user's.
 // Not connected yet (or last try failed) -> retry every OBD_RETRY_MIN so it connects as soon as it is in range; once connected, read
@@ -3737,8 +3748,8 @@ function voltDropPerDay(pts) {
   const num = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0), den = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
   return den ? -num / den : null;
 }
-const vSummary = v => { const d = v.last; if (!d) return `${v.name}: never read yet (dongle "${v.dongle}").`;
-  return `${v.name} (read ${d.at.slice(0, 16).replace('T', ' ')} UTC): battery ${d.volts ?? '?'} V${d.rpm ? ` (engine running, ${d.rpm} rpm)` : ' (engine off)'}, check engine light ${d.mil ? 'ON' : 'off'}, codes: ${(d.dtcs || []).join(', ') || 'none'}${d.fuelPct != null ? `, fuel ${d.fuelPct}%` : ''}${d.coolantC != null ? `, coolant ${d.coolantC} C` : ''}${d.kmSinceClear != null ? `, ${Math.round(d.kmSinceClear * 0.621)} miles since codes were last cleared` : ''}${d.vin ? `, VIN ${d.vin}` : ''}.`
+const vSummary = (v, live = false) => { const d = v.last; if (!d) return `${v.name}: never read yet (dongle "${v.dongle}").`;
+  return (live ? 'LIVE reading, just taken. ' : `STORED SNAPSHOT from ${storedDate(v)}, NOT live: the dongle was not reached just now. Say plainly it is a stored reading from that date and never present it as current. `) + `${v.name} (read ${d.at.slice(0, 16).replace('T', ' ')} UTC): battery ${d.volts ?? '?'} V${d.rpm ? ` (engine running, ${d.rpm} rpm)` : ' (engine off)'}, check engine light ${d.mil ? 'ON' : 'off'}, codes: ${(d.dtcs || []).join(', ') || 'none'}${d.fuelPct != null ? `, fuel ${d.fuelPct}%` : ''}${d.coolantC != null ? `, coolant ${d.coolantC} C` : ''}${d.kmSinceClear != null ? `, ${Math.round(d.kmSinceClear * 0.621)} miles since codes were last cleared` : ''}${d.vin ? `, VIN ${d.vin}` : ''}.`
   + ((d.pending || []).length ? ` Pending codes (light not on yet): ${d.pending.join(', ')}.` : '')
   + (d.readiness?.ready ? ` Emissions monitors not ready: ${(d.readiness.notReady || []).join(', ') || 'none'} (ready: ${d.readiness.ready.join(', ') || 'none'}). Inspection: ${d.mil ? 'would FAIL, check engine light is on' : (d.readiness.notReady || []).length <= 1 ? 'should pass on monitors (most states allow one not-ready)' : 'likely rejected until more monitors finish; drive a mixed highway/town cycle'}.` : '')
   + (d.trims ? ` Fuel trims (%; + = adding fuel/lean, - = rich): ${Object.entries(d.trims).map(([k, x]) => `${k} ${x}`).join(', ')}.` : '')
@@ -3754,9 +3765,9 @@ Object.assign(handlers, {
   vehicle_scan: async ({ name }) => {
     const v = vFind(name); if (!v) return state.vehicles.length ? `Which one? ${state.vehicles.map(x => x.name).join(', ')}.` : 'No vehicles set up yet. Pair the OBD dongle with the phone, then use vehicle_add (bluetooth_paired lists the paired names).';
     const r = await obdScan(v, 'asked');
-    return r.ok ? vSummary(v) + (r.news.length ? ' New: ' + r.news.join(' ') : '') + ' Explain any trouble codes in plain words (likely causes, how urgent).' : `Could not read the ${v.name}: ${r.why}`;
+    return r.ok ? vSummary(v, true) + (r.news.length ? ' New: ' + r.news.join(' ') : '') + ' Explain any trouble codes in plain words (likely causes, how urgent). If a code is new, ask whether he wants to know what it means.' : `Could not read the ${v.name}: ${unreachWhy(r)}.${v.last ? ' ' + vSummary(v) : ''} Say out loud that the dongle cannot be reached and why; any numbers above are stored, never live.`;
   },
-  vehicle_status: async ({ name }) => { const vs = name ? [vFind(name)].filter(Boolean) : state.vehicles; return vs.length ? vs.map(vSummary).join('\n') : 'No vehicles set up yet.'; },
+  vehicle_status: async ({ name }) => { const vs = name ? [vFind(name)].filter(Boolean) : state.vehicles; return vs.length ? vs.map(v => vSummary(v, isLive(v))).join('\n') : 'No vehicles set up yet.'; },
   vehicle_clear_codes: async ({ name }) => {
     const v = vFind(name); if (!v) return 'Which vehicle?';
     const r = await deviceAction('obd_clear', { dongle: v.dongle }, 30000);
