@@ -83,7 +83,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -1679,8 +1679,38 @@ const storedNote = v => v.last ? ` I only have a stored reading from ${storedDat
 // a leave-armed offer re-reads the dongle first, and says plainly when the truck cannot be reached (Bluetooth off, out of range).
 function armVscan() {
   const v = (state.vehicles || [])[0]; if (!v) return;
-  const o = state.vscan; if (o && Date.now() - o.at < 20 * 60e3 && (o.offered || !o.leave)) return; // already armed/offered for this trip
-  state.vscan = { vehicle: v.name, at: Date.now(), offered: false, leave: true };
+  const o = state.vscan, now = Date.now(), A = state.vAsked;
+  if (o && now - o.at < 20 * 60e3 && !o.offered && o.leave) return; // already armed for this leave
+  if (o && now - o.at < 20 * 60e3 && !o.offered && !o.leave) { o.leave = true; return; } // engine-start ask still pending: the leave just makes sure it is asked
+  if (A && now - A.at < 4 * 60e3) return; // just asked: no nagging
+  if (A && A.result === 'yes' && now - A.at < 30 * 60e3) return; // he already got the data this trip
+  state.vscan = { vehicle: v.name, at: now, offered: false, leave: true };
+}
+// Offer wording rotates and uses the live readings. First ask (none in the last 3 h) introduces it; a repeat ask is a short follow-up.
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function vOfferLine(v) {
+  const d = v.last || {}, A = state.vAsked, again = !!A && Date.now() - A.at < 3 * 3600e3, n = (d.dtcs || []).length;
+  if (again) return pick(["Still want that vehicle data, sir?", `The offer's still open on the ${v.name} data, sir.`, 'Want the vehicle data now that we are rolling, sir?', `Any interest in the ${v.name} readings, sir?`]);
+  const bits = [];
+  if (d.fuelPct != null) bits.push(`fuel is ${fuelWords(d.fuelPct)}`);
+  if (d.volts) bits.push(`battery is at ${Number(d.volts).toFixed(1)} volts`);
+  bits.push(n ? `there ${n > 1 ? 'are' : 'is'} ${n} trouble code${n > 1 ? 's' : ''}` : 'no trouble codes showing');
+  const b = () => bits.splice(Math.floor(Math.random() * bits.length), 1)[0], x = b(), y = bits.length ? b() : '', up = t => t[0].toUpperCase() + t.slice(1);
+  return pick([`Would you like the vehicle data, sir? ${up(x)}.`, `I'm connected to the ${v.name}, sir. Want the vehicle data?`, `Sir, the ${v.name} is talking to me: ${x}${y ? ' and ' + y : ''}. Shall I give you the full vehicle data?`, `Care for the vehicle data, sir? ${up(y || x)}.`, `Would you like a rundown on the ${v.name}, sir?`]);
+}
+function vOffered(v) { state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; const A = state.vAsked; state.vAsked = { at: Date.now(), vehicle: v.name, n: (A && Date.now() - A.at < 3 * 3600e3 ? A.n : 0) + 1, result: null }; saveState(); }
+// Engine start: ask on its own, not gated by the departure sequence, anywhere. Only after a live scan succeeded (obdScan just did).
+function engineStartOffer(v, delayMs) {
+  setTimeout(async () => {
+    try {
+      const o = state.vscan; if (!o || o.offered || o.vehicle !== v.name) { dlog('start-offer-skip', { why: 'already offered or disarmed' }); return; }
+      if (!isLive(v)) { const r = await Promise.race([obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message })), new Promise(res => setTimeout(() => res({ ok: false, why: 'no answer in time' }), 12000))]); if (!r.ok) { dlog('start-offer-skip', { why: 'not live: ' + r.why }); return; } }
+      if (!v.last?.rpm) { dlog('start-offer-skip', { why: 'engine not running' }); return; }
+      o.offered = true; vOffered(v); lastQ = { k: '', at: 0 };
+      dlog('start-offer', { vehicle: v.name, n: state.vAsked.n });
+      deliverNow(vOfferLine(v), 'Jarvis', true, '');
+    } catch (e) { console.warn('start offer', e.message); }
+  }, delayMs);
 }
 async function vscanTail() { // returns the offer to append to a departure reply (and arms the yes/no), or ''
   const o = state.vscan; if (!o || o.offered || Date.now() - o.at > 20 * 60e3) return '';
@@ -1690,8 +1720,8 @@ async function vscanTail() { // returns the offer to append to a departure reply
     const r = await Promise.race([obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message })), new Promise(res => setTimeout(() => res({ ok: false, why: 'no answer in time' }), 12000))]);
     if (!r.ok) { saveState(); return ` I couldn't connect to the ${v.name}, sir: ${unreachWhy(r)}.${storedNote(v)} Fix that and ask me to scan the ${v.name}.`; }
   }
-  state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; saveState();
-  return " Sir, I've connected to the vehicle — would you like the vehicle data?";
+  const line = vOfferLine(v); vOffered(v);
+  return ' ' + line;
 }
 const VSCAN_YES = /^(yes|yeah|yep|yup|sure|please|go ahead|do it|read it|full check|full report|okay|ok|why not|let'?s hear it)\b/, VSCAN_NO = /^(no|nope|nah|skip|skip it|not now|no thanks|no thank you|i'?m good|im good|that'?s ok|thats ok|never mind|nevermind|don'?t)\b/;
 function vSpoken(v) {
@@ -1729,9 +1759,9 @@ async function vscanAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 5 * 60e3 || t.split(' ').length > 8) { state.pendingQ = null; saveState(); return false; }
-  if (VSCAN_NO.test(t)) { state.pendingQ = null; saveState(); return say('Very good, sir.'); }
+  if (VSCAN_NO.test(t)) { state.pendingQ = null; if (state.vAsked) state.vAsked.result = 'no'; saveState(); return say('Very good, sir.'); }
   if (VSCAN_YES.test(t)) {
-    state.pendingQ = null; saveState();
+    state.pendingQ = null; if (state.vAsked) state.vAsked.result = 'yes'; saveState();
     const v = vFind(q.vehicle); if (!v) return say('I lost track of the vehicle, sir. Ask me to scan it.');
     vscanReadout(v).catch(e => console.warn('vscan readout', e.message)); // fresh full read, spoken when it lands (the answer handler has a 15 s limit)
     return say(`Reading the ${v.name} now, sir.`);
@@ -3701,7 +3731,7 @@ async function obdScan(v, why = 'auto') {
     const newStart = !v.lastRun || v.sawOff || restarted || now - v.lastRun > DEPART_GAP, recent = v.lastDepart && now - v.lastDepart < ((v.sawOff || restarted) ? 45e3 : 3 * 60e3); // no double ask from one start, but a real key-off/restart (Oct 2) counts after 45 s
     dlog('vehicle-start', { vehicle: v.name, rpm: d.rpm, runSec: d.runSec ?? null, restarted: !!restarted, volts: d.volts, newStart, sawOff: !!v.sawOff, minSinceRun: v.lastRun ? Math.round((now - v.lastRun) / 60e3) : null, fired: newStart && !recent, at: state.at ?? null });
     if (newStart && !recent && (v.sawOff || restarted) && state.at && state.trip) { dlog('trip-reset', { vehicle: v.name, at: state.at }); state.trip = null; state.departed = null; if (['depart', 'checklist', 'vscan'].includes(state.pendingQ?.type)) state.pendingQ = null; } // key cycled while still parked at a saved place: he has not left, so the whole departure sequence starts over
-    if (newStart && !recent) { v.lastDepart = now; state.vscan = { vehicle: v.name, at: now, offered: false }; lines.unshift(vehicleDeparture(v)); }
+    if (newStart && !recent) { v.lastDepart = now; state.vscan = { vehicle: v.name, at: now, offered: false }; const dl = vehicleDeparture(v); lines.unshift(dl); engineStartOffer(v, dl ? 40e3 : 3e3); } // vehicle ask fires on its own within ~40 s, any place
   }
   if (off) { if (v.lastRun) v.sawOff = true; } else { v.lastRun = now; v.sawOff = false; }
   if (off && d.volts && (!v.lastRun || now - v.lastRun > 2 * 3600e3)) {

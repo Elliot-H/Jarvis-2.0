@@ -617,3 +617,8 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Vehicle data: live vs stored (2026-10-26)
 - A vehicle reading is live only if `obdScan` succeeded within 3 min (`isLive`). `vSummary(v, live)` labels stored snapshots with their date; persona rule forbids quoting them as current. Departure offer (`vscanTail`) says "I've connected to the vehicle" only after a real connection, else gives the failing step. Yes runs a fresh full scan in the background (`vscanReadout`, handler has a 15 s limit); new codes chain `vscan_explain`. Syntax-checked only, untested on hardware. Server only, no APK reinstall.
+
+## Vehicle-data ask: own trigger (2026-10-26)
+- Engine start (OBD sees a new start, any place) now fires `engineStartOffer()` by itself: ~3 s after the start, or 40 s if the departure question was also asked. Needs a live scan (rescans if stale; silent + dlog `start-offer-skip` if it fails). Not gated by the departure sequence.
+- Wording rotates (`vOfferLine`) from live fuel / volts / code count. `state.vAsked` {at, n, result} (in BACKUP_KEYS): no ask in the last 3 h = first-time wording; otherwise short follow-up ("Still want that vehicle data, sir?").
+- GPS leave (`armVscan`) re-arms the ask after the departure answers, unless asked <4 min ago or he said yes in the last 30 min. Live-only honesty unchanged (stored readings are dated, never quoted as current).
