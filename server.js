@@ -1512,6 +1512,7 @@ function onMove() {
   if (prev && dupeLeave) dlog('leave-suppressed', { place: prev.name, why: 'already announced/denied within window' });
   if (prev && !dupeLeave) { // left somewhere
     const dep = state.departed?.answered && placeKey(state.departed.place) === prevKey && now - state.departed.at < 45 * 60e3 ? state.departed : (tripOn() ? { answered: true } : null); // an ANSWERED departure question (this trip) counts as handled, whatever place it recorded
+    if (!pl) armVscan(); // every departure from any saved place gets the vehicle-check offer after the where/bring answers
     dlog('leave', { place: prev.name, vehicleHandled: !!dep, arrivedAt: pl ? pl.name : null, quiet: quietNow(), clients: clients.size });
     if (!dep) parts.push(...eventLines('leave', prev.name, Math.random, true));
     const dest = pl || dep ? null : guessNext(prevKey);
@@ -1563,7 +1564,7 @@ async function checklistAnswer(q, text) {
   const say = async reply => { reply = await varyLine('reply', reply); broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 3 * 60e3 || (CHECK_CMD.test(t) && !CHECK_NO.test(t))) return false; // stale or an unrelated request: let it through, keep nothing
   const done = () => { tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; saveState(); };
-  if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + vscanTail()); }
+  if (CHECK_NO.test(t)) { done(); return say('Very good, sir. Safe travels.' + await vscanTail()); }
   if (/^(yes|yeah|yep|yup|i do|i did)$/.test(t)) { q.at = Date.now(); saveState(); return say('What is it, sir?'); }
   const stated = t.match(DEST_STMT);   // "headed to the shop" / "going home": a destination, never a bring item
   if (stated) {
@@ -1571,7 +1572,7 @@ async function checklistAnswer(q, text) {
     for (const it of items) await handlers.bring_add({ place: p ? p.name : sd, item: it });
     setHeading(sd, q.from);
     const tail = p ? await tripTail(p) : '';
-    return say([`Very good, sir. Headed ${p ? (p.kind === 'home' ? 'home' : 'to ' + p.name) : 'to ' + sd}.`, items.length ? `${listJoin(items)} noted.` : '', p ? bringLine(p.name) : '', ...(p ? eventLines('heading', p.name, Math.random, true) : []), tail].filter(Boolean).slice(0, 4).join(' ') + vscanTail());
+    return say([`Very good, sir. Headed ${p ? (p.kind === 'home' ? 'home' : 'to ' + p.name) : 'to ' + sd}.`, items.length ? `${listJoin(items)} noted.` : '', p ? bringLine(p.name) : '', ...(p ? eventLines('heading', p.name, Math.random, true) : []), tail].filter(Boolean).slice(0, 4).join(' ') + await vscanTail());
   }
   // Destination: the one guessed at departure, else a saved place named in the answer ("...for the camden house").
   let dest = q.dest ? findPlace(q.dest) : null, body = t;
@@ -1590,7 +1591,7 @@ async function checklistAnswer(q, text) {
   const all = [...(q.items || []), ...items];
   for (const it of all) await handlers.bring_add({ place: dest.name, item: it });
   tripAnswered(); state.pendingQ = null; if (state.lastCheck) state.lastCheck.answered = true; setHeading(dest.name, q.from);
-  return say([`Noted, sir. ${listJoin(all)} for ${dest.name}.`, await tripTail(dest)].filter(Boolean).join(' ') + vscanTail());
+  return say([`Noted, sir. ${listJoin(all)} for ${dest.name}.`, await tripTail(dest)].filter(Boolean).join(' ') + await vscanTail());
 }
 // Yes / no to "Headed home, sir?"
 async function destAnswer(q, text) {
@@ -1605,6 +1606,7 @@ async function destAnswer(q, text) {
   else if (!yes) reply = 'Very good, sir.';
   else { setHeading(q.place); reply = ['Very good, sir.', bringLine(q.place), ...eventLines('heading', q.place), await tripTail({ name: q.place })].filter(Boolean).join(' '); }
   if (yes && placeKey(q.place) === 'shop') setHeading(q.place);
+  if (yes) reply += await vscanTail();
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true });
   return true;
 }
@@ -1677,11 +1679,29 @@ function vscanOfferText(v) {
   const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
   return `${nm}'s on, ${listJoin(bits)}. Would you like the full check before you pull off?`;
 }
-function vscanTail() { // returns the offer to append to a departure reply (and arms the yes/no), or ''
+// Departure from ANY saved place (GPS leave, missed engine start) arms the offer too: armVscan(). Engine start arms it with fresh readings;
+// a leave-armed offer re-reads the dongle first, and says plainly when the truck cannot be reached (Bluetooth off, out of range).
+function armVscan() {
+  const v = (state.vehicles || [])[0]; if (!v) return;
+  const o = state.vscan; if (o && Date.now() - o.at < 20 * 60e3 && (o.offered || !o.leave)) return; // already armed/offered for this trip
+  state.vscan = { vehicle: v.name, at: Date.now(), offered: false, leave: true };
+}
+async function vscanTail() { // returns the offer to append to a departure reply (and arms the yes/no), or ''
   const o = state.vscan; if (!o || o.offered || Date.now() - o.at > 20 * 60e3) return '';
-  const v = vFind(o.vehicle), t = v && vscanOfferText(v); if (!t) return '';
-  o.offered = true; state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; saveState();
-  return ' ' + t;
+  const v = vFind(o.vehicle); if (!v) return '';
+  o.offered = true;
+  const fresh = v.last && Date.now() - Date.parse(v.last.at || 0) < 3 * 60e3 && v.last.rpm;
+  if (o.leave && !fresh) {
+    const r = await Promise.race([obdScan(v, 'asked').catch(e => ({ ok: false, why: e.message })), new Promise(res => setTimeout(() => res({ ok: false, why: 'no answer in time' }), 20000))]);
+    if (!r.ok) {
+      saveState();
+      const nm = v.name.charAt(0).toUpperCase() + v.name.slice(1);
+      return r.code === 'bt_off' || /bluetooth is off/i.test(r.why || '') ? ` Bluetooth is off on the phone, sir, so I can't reach the ${v.name} for the vehicle check. Turn it on and ask me to scan the ${v.name}.` : ` I can't reach the ${v.name} for the vehicle check, sir. ${nm} isn't answering on Bluetooth.`;
+    }
+  }
+  const t = vscanOfferText(v); if (!t) { saveState(); return ''; }
+  state.pendingQ = { type: 'vscan', vehicle: v.name, at: Date.now() }; saveState();
+  return ' ' + t.replace(/^(\S+)'s on, /, o.leave ? "$1 reads, " : "$1's on, ");
 }
 const VSCAN_YES = /^(yes|yeah|yep|yup|sure|please|go ahead|do it|read it|full check|full report|okay|ok|why not|let'?s hear it)\b/, VSCAN_NO = /^(no|nope|nah|skip|skip it|not now|no thanks|no thank you|i'?m good|im good|that'?s ok|thats ok|never mind|nevermind|don'?t)\b/;
 function vSpoken(v) {
@@ -1717,21 +1737,21 @@ async function departAnswer(q, text) {
   if (dest && q.from && dest.name === q.from) dest = null;
   if (!dest && DEPART_YES.test(t)) dest = q.from ? guessNext(placeKey(q.from)) : null;
   const named = !dest && !DEPART_YES.test(t) && t.match(/^(?:i'?m |im |we'?re )?(?:going|headed|heading|off|driving|running) (?:over )?(?:to|for|into) (?:the )?([a-z0-9' &.-]{2,40})$/); // an unsaved destination ("headed to Lowe's"): answer it here so the vehicle-check offer still follows
-  if (named) { finish(); setHeading(named[1], q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + vscanTail()); }
+  if (named) { finish(); setHeading(named[1], q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : []; return say([`Very good, sir. Headed to ${named[1]}.`, ...lv].slice(0, 2).join(' ') + await vscanTail()); }
   if (!dest && !DEPART_YES.test(t) && !CHECK_CMD.test(t) && t.split(' ').length <= 4 && t.length > 2) { // a bare unsaved place ("Lowe's", "the Camden house"): that IS the answer, remember it
     finish(); setHeading(t, q.from); const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
-    return say([`Very good, sir. Headed to ${t}.`, ...lv].slice(0, 2).join(' ') + vscanTail());
+    return say([`Very good, sir. Headed to ${t}.`, ...lv].slice(0, 2).join(' ') + await vscanTail());
   }
   if (!dest) { // leaving, destination unknown: still give the leave reminders for here
     if (!DEPART_YES.test(t)) { state.pendingQ = null; saveState(); return false; } // unrelated request: let it through
     finish();
     const lv = q.from ? eventLines('leave', q.from, Math.random, true) : [];
-    return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' ') + vscanTail());
+    return say([...lv, 'Safe travels, sir.'].slice(0, 2).join(' ') + await vscanTail());
   }
   finish(); setHeading(dest.name, q.from);
   const parts = [...(q.from ? eventLines('leave', q.from, Math.random, true) : []), bringLine(dest.name), ...eventLines('heading', dest.name, Math.random, true)].filter(Boolean);
   const tail = await tripTail(dest);
-  return say((parts.length ? parts.slice(0, 3) : [`Very good, sir. Headed ${dest.kind === 'home' ? 'home' : 'to ' + dest.name}.`]).concat(tail ? [tail] : []).join(' ') + vscanTail());
+  return say((parts.length ? parts.slice(0, 3) : [`Very good, sir. Headed ${dest.kind === 'home' ? 'home' : 'to ' + dest.name}.`]).concat(tail ? [tail] : []).join(' ') + await vscanTail());
 }
 handlers.heading_to = async ({ place }) => {
   const p = findPlace(place);
@@ -1839,7 +1859,7 @@ async function driveStart(src, mph) { // movement just began: stage 2 of the tra
   if (!asked && !qFresh && !navLive()) { // engine-start question was missed (app asleep, dongle out of range): ask it now
     state.departed = null;
     const rv = (state.vehicles || []).find(x => x.last?.rpm && now - Date.parse(x.last.at || 0) < 10 * 60e3); // truck seen running just now: the vehicle-check offer can follow the answer
-    if (rv) state.vscan = { vehicle: rv.name, at: now, offered: false };
+    if (rv) state.vscan = { vehicle: rv.name, at: now, offered: false }; else armVscan();
     deliver(vehicleDeparture({ name: rv ? rv.name : 'phone' }), 'Jarvis', true, 'depart');
   }
   saveState();
@@ -3649,7 +3669,7 @@ async function obdScan(v, why = 'auto') {
   const r = await deviceAction('obd_scan', { dongle: v.dongle, fast }, fast ? 20000 : 45000);
   let d = {}; try { d = JSON.parse(r.detail); } catch { d = { ok: false, detail: r.detail }; }
   if (!d.ok) { v.reachable = false; if (v.lastRun && !v.sawOff) { v.sawOff = true; dlog('vehicle-unreachable', { vehicle: v.name, detail: String(d.detail || d.code || '').slice(0, 100) }); } // dongle loses power with the key: counts as shutdown
-    if (why !== 'auto' || Date.now() - (v.failNote || 0) > 30 * 60e3) { v.failNote = Date.now(); console.log(`obd ${v.name}: ${d.detail || d.code || 'no answer'}`); } return { ok: false, why: d.detail || d.code || 'no answer' }; }
+    if (why !== 'auto' || Date.now() - (v.failNote || 0) > 30 * 60e3) { v.failNote = Date.now(); console.log(`obd ${v.name}: ${d.detail || d.code || 'no answer'}`); } return { ok: false, why: d.detail || d.code || 'no answer', code: d.code || '' }; }
   if (!v.reachable) dlog('dongle-seen', { vehicle: v.name, rpm: d.rpm ?? null, volts: d.volts ?? null, why }); // dongle just came into range (or first read)
   v.reachable = true; v.lastOk = Date.now();
   if (d.speedKph > 0) driveSignal('obd', d.speedKph * 0.621);
