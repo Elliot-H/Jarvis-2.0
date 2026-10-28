@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-28T13:43:09Z
-REQUEST: Fuel-range awareness: compare distance to heading_to destination against fuel left; say good, tight, or hit a gas station with miles.
+TIME: 2026-10-28T14:02:50Z
+REQUEST: Fix the fuel-range / miles-to-destination calculation (real driving distance, range from fuel, can-I-make-it verdict).
 RESULT:
-Done, Owner. While Jarvis is reading the truck and you've told him where you're headed, he now checks the miles to that destination against the fuel left. He says one short line: fuel looks good, fuel will be tight, or it doesn't look good with the miles to the nearest gas station. Tank size and mileage are assumed at 31 gallons and 15 mpg for the Suburban, adjustable in settings. The gas station and unsaved destinations need the Google Places key. It's live after the Railway deploy, no APK reinstall, but it's untested on the truck.
+Done, Owner. Jarvis now gets the real driving distance from your phone's location to the destination, turns the truck's fuel percentage into miles of range, and tells you the distance, the range, and how many miles you have to spare or are short. There is a new "can I make it" tool, and the same line is added to the vehicle scan and the departure check. Tank size and mileage can be set per vehicle by voice, otherwise 31 gallons and 15 mpg are assumed. It goes live after the Railway deploy, no APK reinstall needed. I could not test it on the truck or the live routing service from here.

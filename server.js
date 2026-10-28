@@ -3721,19 +3721,43 @@ async function placesFind(query, L, radius) {
     const p = r.ok && ((await r.json()).places || [])[0]; return p?.location ? { lat: p.location.latitude, lon: p.location.longitude } : null;
   } catch { return null; }
 }
-async function fuelRangeLine(v, d) {
-  const h = headingFresh(), L = state.location;
-  if (!h || d.fuelPct == null || !L || Date.now() - Date.parse(L.at) > 10 * 60e3) return '';
-  const pl = findPlace(h.place || h.name), dest = pl && Number.isFinite(pl.lat) ? pl : await placesFind(h.name, L, 50000);
-  if (!dest) return '';
-  const need = km(L, dest) * 0.621 * ROAD_FACTOR, usable = Math.max(0, (d.fuelPct / 100 * FUEL_TANK_GAL - FUEL_RESERVE_GAL) * FUEL_MPG);
-  if (need < 1) return '';
-  const miles = Math.round(need);
-  if (usable >= need * 1.3) return `Fuel looks good for the ${miles} miles to ${h.name}, sir.`;
-  if (usable >= need) return `Fuel will be tight for the ${miles} miles to ${h.name}, sir.`;
-  const gas = await placesFind('gas station', L, 20000);
-  return `Fuel does not look good for the ${miles} miles to ${h.name}, sir. ${gas ? `Nearest gas station is about ${Math.max(1, Math.round(km(L, gas) * 0.621 * ROAD_FACTOR))} miles away, so hit it.` : 'Hit a gas station.'}`;
+async function geocodeDest(name, L) { // saved place coords, else Google Places (if keyed), else OpenStreetMap Nominatim (no key)
+  const g = await placesFind(name, L, 50000); if (g) return g;
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ q: name, format: 'json', limit: '1', countrycodes: 'us', viewbox: [L.lon - 1, L.lat + 1, L.lon + 1, L.lat - 1].join(','), bounded: '0' }), { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'Jarvis-personal-assistant/2.0' } });
+    const p = r.ok && (await r.json())[0]; return p ? { lat: +p.lat, lon: +p.lon } : null;
+  } catch { return null; }
 }
+async function drivingMiles(a, b) { // real road distance from OSRM (no key); falls back to straight line x ROAD_FACTOR
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`, { signal: AbortSignal.timeout(7000) });
+    const m = r.ok && (await r.json()).routes?.[0]?.distance; if (m > 0) return { miles: m / 1609.34, source: 'road route' };
+  } catch {}
+  return { miles: km(a, b) * 0.621 * ROAD_FACTOR, source: 'straight-line estimate' };
+}
+// Structured calculation: {ok, why} or {ok, destName, toGoMiles, rangeMiles, marginMiles, verdict:'good'|'tight'|'short', gasMiles?, source, mpg, tankGal}.
+async function fuelRange(v, d, destName) {
+  const h = headingFresh(), L = state.location, name = destName || h?.name;
+  if (!name) return { ok: false, why: 'no destination yet (ask where he is headed)' };
+  if (d?.fuelPct == null) return { ok: false, why: 'no fuel reading from the vehicle' };
+  if (!L || Date.now() - Date.parse(L.at) > 10 * 60e3) return { ok: false, why: 'no fresh phone location' };
+  const pl = findPlace(name), dest = pl && Number.isFinite(pl.lat) ? pl : await geocodeDest(name, L);
+  if (!dest) return { ok: false, why: `could not locate ${name}` };
+  const tankGal = v.tankGal || FUEL_TANK_GAL, mpg = v.mpg || FUEL_MPG;
+  const { miles, source } = await drivingMiles(L, dest);
+  const rangeMiles = Math.max(0, (d.fuelPct / 100 * tankGal - FUEL_RESERVE_GAL) * mpg), marginMiles = rangeMiles - miles;
+  const verdict = rangeMiles >= miles * 1.3 ? 'good' : rangeMiles >= miles ? 'tight' : 'short';
+  const out = { ok: true, destName: pl?.name || name, toGoMiles: Math.round(miles), rangeMiles: Math.round(rangeMiles), marginMiles: Math.round(marginMiles), verdict, source, mpg, tankGal };
+  if (verdict === 'short') { const gas = await placesFind('gas station', L, 20000); if (gas) out.gasMiles = Math.max(1, Math.round((await drivingMiles(L, gas)).miles)); }
+  return out;
+}
+function fuelRangeText(r) {
+  const n = r.destName, go = r.toGoMiles, rg = r.rangeMiles, m = Math.abs(r.marginMiles);
+  if (r.verdict === 'good') return `Fuel looks good for the ${go} miles to ${n}, sir. About ${rg} miles of range, ${m} to spare.`;
+  if (r.verdict === 'tight') return `Fuel will be tight for the ${go} miles to ${n}, sir. About ${rg} miles of range, only ${m} to spare.`;
+  return `Fuel does not look good for the ${go} miles to ${n}, sir. About ${rg} miles of range, ${m} short. ${r.gasMiles ? `Nearest gas station is about ${r.gasMiles} miles away, so hit it.` : 'Hit a gas station.'}`;
+}
+async function fuelRangeLine(v, d) { const r = await fuelRange(v, d); return r.ok && r.toGoMiles >= 1 ? fuelRangeText(r) : ''; }
 async function obdScan(v, why = 'auto') {
   v.lastTry = Date.now(); saveState();
   // Background watch = quick engine check (new app build); a full diagnostic read only on request or every OBD_EVERY while the dongle is up. Older app builds ignore `fast`.
@@ -3827,11 +3851,24 @@ Object.assign(handlers, {
     state.vehicles.push({ name, dongle }); saveState();
     return `Saved the ${name} with OBD dongle "${dongle}". The phone will read it whenever it is in range (every ${OBD_EVERY / 60e3} min while the app runs). Ask "scan the ${name}" to try now.`;
   },
+  vehicle_specs: async ({ name, tank_gallons, mpg }) => {
+    const v = vFind(name); if (!v) return 'Which vehicle?';
+    if (tank_gallons > 0 && tank_gallons < 200) v.tankGal = tank_gallons; if (mpg > 0 && mpg < 100) v.mpg = mpg; saveState();
+    return `${v.name}: tank ${v.tankGal || FUEL_TANK_GAL} gallons, ${v.mpg || FUEL_MPG} mpg${v.tankGal && v.mpg ? '' : ' (default guess for the unset one)'}. Used for the fuel-range calculation.`;
+  },
+  fuel_range: async ({ name, destination }) => {
+    const v = vFind(name); if (!v) return state.vehicles.length ? `Which one? ${state.vehicles.map(x => x.name).join(', ')}.` : 'No vehicles set up yet.';
+    if (!isLive(v)) await obdScan(v, 'asked').catch(() => {});
+    const r = await fuelRange(v, v.last || {}, destination);
+    if (!r.ok) return `Cannot work out fuel range: ${r.why}. Say so plainly.${isLive(v) ? '' : ' The fuel figure, if any, is a stored reading, not live.'}`;
+    return `${isLive(v) ? 'LIVE' : 'STORED (not live, say so)'} fuel reading. ${fuelRangeText(r)} Basis: ${r.source}, ${r.tankGal} gal tank at ${r.mpg} mpg, 2 gal reserve held back.`;
+  },
   vehicle_remove: async ({ name }) => { const n = state.vehicles.length; state.vehicles = state.vehicles.filter(v => norm(v.name) !== norm(name)); saveState(); return n === state.vehicles.length ? 'No vehicle by that name.' : 'Removed.'; },
   vehicle_scan: async ({ name, codes }) => {
     const v = vFind(name); if (!v) return state.vehicles.length ? `Which one? ${state.vehicles.map(x => x.name).join(', ')}.` : 'No vehicles set up yet. Pair the OBD dongle with the phone, then use vehicle_add (bluetooth_paired lists the paired names).';
     const r = await obdScan(v, 'asked');
-    return r.ok ? vSummary(v, true, !!codes) + (r.news.length ? ' New: ' + r.news.join(' ') : '') + (codes ? ' He asked for the codes: state them and explain in plain words (likely causes, how urgent).' : '') : `Could not read the ${v.name}: ${unreachWhy(r)}.${v.last ? ' ' + vSummary(v, false, !!codes) : ''} Say out loud that the dongle cannot be reached and why; any numbers above are stored, never live.`;
+    const rl = r.ok && headingFresh() ? await fuelRangeLine(v, v.last || {}).catch(() => '') : '';
+    return r.ok ? vSummary(v, true, !!codes) + (rl ? ' Fuel range: ' + rl : '') + (r.news.length ? ' New: ' + r.news.join(' ') : '') + (codes ? ' He asked for the codes: state them and explain in plain words (likely causes, how urgent).' : '') : `Could not read the ${v.name}: ${unreachWhy(r)}.${v.last ? ' ' + vSummary(v, false, !!codes) : ''} Say out loud that the dongle cannot be reached and why; any numbers above are stored, never live.`;
   },
   vehicle_status: async ({ name, codes }) => { const vs = name ? [vFind(name)].filter(Boolean) : state.vehicles; return vs.length ? vs.map(v => vSummary(v, isLive(v), !!codes)).join('\n') : 'No vehicles set up yet.'; },
   vehicle_clear_codes: async ({ name }) => {
