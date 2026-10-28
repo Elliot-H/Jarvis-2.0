@@ -625,3 +625,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Trouble-code rule (2026-10-26)
 - OBD codes are withheld everywhere until the Owner says yes or explicitly asks: `vSummary(v, live, codes)` hides them, `vSpoken` and alerts (`obdScan`) use `codesAsk()` and arm a `vscan_explain` yes/no; tools `vehicle_scan`/`vehicle_status` take `codes:true` only after a yes. Persona "Vehicles" section carries the rule. Live vs stored rule unchanged.
+
+## Fuel-range awareness (2026-10-28, maintenance)
+- `fuelRangeLine(v, d)` + `placesFind` (server.js, above `obdScan`): called from `obdScan` on auto scans when `headingFresh()` and `d.fuelPct` exist; uses `state.location` (<10 min old) and the saved place coords or a Places text search. Verdict good (usable >= 1.3x need) / tight / bad (adds nearest gas station miles, replaces the generic low-fuel line). Env: `FUEL_TANK_GAL`, `FUEL_MPG`, `FUEL_RESERVE_GAL`. Server only, no APK reinstall. node --check only.

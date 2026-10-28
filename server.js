@@ -3708,6 +3708,32 @@ const OBD_EVERY = Number(process.env.OBD_EVERY_MIN || 20) * 60e3;
 const OBD_WATCH = Number(process.env.OBD_WATCH_MIN || 1) * 60e3, DEPART_GAP = Number(process.env.DEPART_GAP_MIN || 30) * 60e3; // parked + in range: look every 2 min so engine start is caught fast
 const vFind = name => state.vehicles.find(v => norm(v.name) === norm(name)) || (state.vehicles.length === 1 && !name ? state.vehicles[0] : null)
   || state.vehicles.find(v => norm(v.name).includes(norm(name || '#')) || norm(name || '#').includes(norm(v.name)));
+// Fuel-range awareness (A35): with a fresh "heading_to" destination and a live fuel reading, compare phone-GPS distance to the destination
+// against the range left (fuel % x FUEL_TANK_GAL x FUEL_MPG, minus a reserve). Straight-line miles x ROAD_FACTOR approximates road miles.
+// Needs GOOGLE_PLACES_KEY for an unsaved destination and for the nearest gas station; without it the verdict is still spoken.
+const FUEL_TANK_GAL = Number(process.env.FUEL_TANK_GAL || 31), FUEL_MPG = Number(process.env.FUEL_MPG || 15), FUEL_RESERVE_GAL = Number(process.env.FUEL_RESERVE_GAL || 2), ROAD_FACTOR = 1.25;
+async function placesFind(query, L, radius) {
+  const key = process.env.GOOGLE_PLACES_KEY; if (!key) return null;
+  try {
+    const r = await fetch('https://places.googleapis.com/v1/places:searchText', { method: 'POST', signal: AbortSignal.timeout(6000),
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.displayName,places.location' },
+      body: JSON.stringify({ textQuery: query, maxResultCount: 1, locationBias: { circle: { center: { latitude: L.lat, longitude: L.lon }, radius } } }) });
+    const p = r.ok && ((await r.json()).places || [])[0]; return p?.location ? { lat: p.location.latitude, lon: p.location.longitude } : null;
+  } catch { return null; }
+}
+async function fuelRangeLine(v, d) {
+  const h = headingFresh(), L = state.location;
+  if (!h || d.fuelPct == null || !L || Date.now() - Date.parse(L.at) > 10 * 60e3) return '';
+  const pl = findPlace(h.place || h.name), dest = pl && Number.isFinite(pl.lat) ? pl : await placesFind(h.name, L, 50000);
+  if (!dest) return '';
+  const need = km(L, dest) * 0.621 * ROAD_FACTOR, usable = Math.max(0, (d.fuelPct / 100 * FUEL_TANK_GAL - FUEL_RESERVE_GAL) * FUEL_MPG);
+  if (need < 1) return '';
+  const miles = Math.round(need);
+  if (usable >= need * 1.3) return `Fuel looks good for the ${miles} miles to ${h.name}, sir.`;
+  if (usable >= need) return `Fuel will be tight for the ${miles} miles to ${h.name}, sir.`;
+  const gas = await placesFind('gas station', L, 20000);
+  return `Fuel does not look good for the ${miles} miles to ${h.name}, sir. ${gas ? `Nearest gas station is about ${Math.max(1, Math.round(km(L, gas) * 0.621 * ROAD_FACTOR))} miles away, so hit it.` : 'Hit a gas station.'}`;
+}
 async function obdScan(v, why = 'auto') {
   v.lastTry = Date.now(); saveState();
   // Background watch = quick engine check (new app build); a full diagnostic read only on request or every OBD_EVERY while the dongle is up. Older app builds ignore `fast`.
@@ -3749,7 +3775,10 @@ async function obdScan(v, why = 'auto') {
   const freshPending = (d.pending || []).filter(c => !(prev.pending || []).includes(c) && !(d.dtcs || []).includes(c));
   if (freshPending.length) { lines.push(`Early warning on the ${v.name}, sir: ${freshPending.length > 1 ? 'there are pending codes' : 'there is a pending code'}, though the light isn't on yet. Would you like to know ${freshPending.length > 1 ? 'what they are' : 'what it is'}, or should we revisit this later?`); if (why === 'auto') armCodesAsk(v, freshPending); }
   if (off && d.volts && d.volts < Number(process.env.OBD_LOW_VOLTS || 12.2) && once('volts', 24)) lines.push(`The ${v.name}'s battery is resting at ${d.volts.toFixed(1)} volts, sir. Might be worth putting the tender on it.`);
-  if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
+  let rangeLine = ''; const hd = headingFresh(); // fuel-range check once per destination per 30 min while a live scan shows fuel
+  if (why === 'auto' && hd && d.fuelPct != null && once('range:' + norm(hd.name), 0.5)) { try { rangeLine = await fuelRangeLine(v, d); } catch (e) { console.warn('fuel range', e.message); } }
+  if (rangeLine) lines.push(rangeLine); else if (hd) delete v.alerts['range:' + norm(hd.name)]; // nothing said (no fix/destination yet): try again next scan
+  if (d.fuelPct != null && d.fuelPct <= 15 && once('fuel', 12) && !/does not look good/.test(rangeLine)) lines.push(`The ${v.name} is down to about ${d.fuelPct} percent fuel.`);
   saveState();
   if (lines.length && why === 'auto') { const dq = lines.some(l => /headed somewhere|Where are you headed/.test(l)); deliver(lines.join(' '), v.name, dq, dq ? 'depart' : ''); }
   return { ok: true, data: d, news: lines, newCodes: fresh };
