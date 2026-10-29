@@ -3421,7 +3421,7 @@ function explainFishError(status, body) {
 // Fish request with a model fallback: the chosen model (FISH_MODEL, default s1) first, then Fish's free
 // model if the first one fails for anything but a bad key. Returns { r } on success or { status, body }.
 const FISH_VOICE = () => process.env.FISH_VOICE_ID || 'b841fc010afe43efa1b9fb702832988d'; // community "JARVIS 1"
-async function fishFetch(text) {
+async function fishFetch(text, ms = 30000) {
   const models = [...new Set([process.env.FISH_MODEL || 's1', process.env.FISH_FALLBACK_MODEL || 's2.1-pro-free'])];
   let last = { status: 0, body: '' };
   for (const model of models) {
@@ -3430,7 +3430,7 @@ async function fishFetch(text) {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.FISH_API_KEY}`, 'Content-Type': 'application/json', model },
         body: JSON.stringify({ text, reference_id: FISH_VOICE(), format: 'mp3', mp3_bitrate: 128, latency: 'balanced', normalize: true }),
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(ms)
       });
       if (r.ok) { if (model !== models[0]) console.warn(`Fish ${models[0]} failed (${last.status}); spoke with ${model}`); return { r, model }; }
       last = { status: r.status, body: await r.text() };
@@ -3451,28 +3451,62 @@ function ttsAhead(text) {
   }
   return e.p.then(r => { if (r.fail) ttsCache.delete(text); return r; });
 }
-async function fishTts(text, res, prefetch) {
-  if (prefetch) { await ttsAhead(text); return res.status(204).end(); }
-  if (ttsCache.has(text)) {
-    const r = await ttsAhead(text);
-    if (r.buf) { voiceStatus = { ok: true, reason: '', model: r.model, at: new Date().toISOString() }; res.setHeader('Content-Type', 'audio/mpeg'); return res.end(r.buf); }
-  }
-  const out = await fishFetch(text);
-  if (!out.r) {
-    voiceStatus = { ok: false, reason: out.status ? explainFishError(out.status, out.body) : out.body, at: new Date().toISOString() };
-    return res.status(502).end();
-  }
-  voiceStatus = { ok: true, reason: '', model: out.model, at: new Date().toISOString() };
-  res.setHeader('Content-Type', 'audio/mpeg');
-  const reader = out.r.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    res.write(Buffer.from(value));
-  }
-  res.end();
+// Voice contingency: when Fish fails (error, timeout, empty audio) the chunk is voiced by ElevenLabs if configured, otherwise the
+// app uses the phone voice. The first backup chunk carries a spoken explanation; Fish is probed in the background and, once back,
+// the next primary chunk carries a one-line "restored". Clients get {type:'voice', mode} for the HUD chip.
+const voiceDown = { since: 0, nextProbe: 0, said: false, restored: false };
+const BACKUP_SAY = 'Sir, my primary voice service is down. I am switching to my backup voice.';
+const RESTORED_SAY = 'Sir, my primary voice is restored.';
+function voiceMode(m, reason) { broadcast({ type: 'voice', mode: m, reason: reason || '' }); }
+function markFishDown(reason) {
+  if (!voiceDown.since) { voiceDown.since = Date.now(); voiceDown.said = false; voiceDown.restored = false; voiceMode('backup', reason); }
+  voiceDown.nextProbe = Date.now() + 45e3;
 }
-
+async function probeFish() {
+  voiceDown.nextProbe = Date.now() + 45e3;
+  const o = await fishFetch('Check.', 8000).catch(() => ({}));
+  if (o.r) { await o.r.arrayBuffer().catch(() => {}); voiceDown.since = 0; voiceDown.restored = true; voiceStatus = { ok: true, reason: '', model: o.model, at: new Date().toISOString() }; voiceMode('primary'); }
+}
+async function fishBuf(text) {
+  const o = await fishFetch(text, 15000);
+  if (!o.r) return { fail: o.status ? explainFishError(o.status, o.body) : o.body };
+  const buf = Buffer.from(await o.r.arrayBuffer());
+  if (buf.length < 800) return { fail: 'Fish Audio returned empty audio.' };
+  return { buf, model: o.model };
+}
+async function elBuf(text) {
+  const key = process.env.ELEVENLABS_API_KEY; if (!key) return null;
+  try {
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'}?output_format=mp3_44100_128`, {
+      method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+      body: JSON.stringify({ text, model_id: process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5', voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.15 } }),
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!r.ok) { console.error('ElevenLabs backup error', r.status, (await r.text()).slice(0, 200)); return null; }
+    const buf = Buffer.from(await r.arrayBuffer());
+    return buf.length < 800 ? null : buf;
+  } catch (e) { console.error('ElevenLabs backup failed', String(e.message || e)); return null; }
+}
+app.get('/api/voice-announce', (_req, res) => { const first = voiceDown.since && !voiceDown.said; if (first) voiceDown.said = true; res.json({ down: !!voiceDown.since, say: first ? BACKUP_SAY : '' }); });
+async function fishTts(text, res, prefetch) {
+  const down = () => voiceDown.since && Date.now() < voiceDown.nextProbe;
+  if (prefetch) { if (!down()) await ttsAhead(text); return res.status(204).end(); }
+  const send = (buf, m, model) => { voiceStatus = { ok: m === 'primary', reason: m === 'primary' ? '' : (voiceStatus.reason || ''), model, at: new Date().toISOString() }; res.setHeader('Content-Type', 'audio/mpeg'); res.setHeader('X-Voice', m); return res.end(buf); };
+  if (voiceDown.since && Date.now() >= voiceDown.nextProbe) probeFish().catch(() => {});
+  if (!down()) {
+    let r = null;
+    if (!voiceDown.restored && ttsCache.has(text)) { const c = await ttsAhead(text); if (c.buf) r = c; }
+    if (!r) { const say = voiceDown.restored; r = await fishBuf(say ? RESTORED_SAY + ' ' + text : text); if (r.buf && say) voiceDown.restored = false; }
+    if (r.buf) { if (voiceDown.since) { voiceDown.since = 0; voiceMode('primary'); } return send(r.buf, 'primary', r.model); }
+    voiceStatus = { ok: false, reason: r.fail, at: new Date().toISOString() };
+    markFishDown(r.fail);
+  }
+  // Primary is down: back up this chunk with ElevenLabs; the first one explains the switch out loud.
+  const lead = !voiceDown.said ? BACKUP_SAY + ' ' : '';
+  const b = await elBuf((lead + text).slice(0, 2500));
+  if (b) { if (lead) voiceDown.said = true; return send(b, 'backup', 'elevenlabs'); }
+  res.status(502).end();   // the app voices this chunk and the rest of the reply with the phone's own speech
+}
 // Jarvis's own voice check: a real 1-word Fish request, so he can say exactly why the voice is off.
 handlers.voice_check = async () => {
   if (!process.env.FISH_API_KEY) return 'FISH_API_KEY is missing from Railway Variables, so the phone voice is used. Only the user can add it (fish.audio/app/api-keys, then Railway Variables).';

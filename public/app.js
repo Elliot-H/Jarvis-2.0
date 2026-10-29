@@ -148,6 +148,11 @@
         if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
         window.__silent = silent;
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
+      case 'voice':   // server switched between the Fish voice and its backup
+        voiceBackup = m.mode === 'backup';
+        if (!silent) chip('#chipVoice', voiceBackup ? 'warn' : 'ok', voiceBackup ? 'BACKUP VOICE' : (cfg.voiceProvider || 'ELEVENLABS'));
+        if (voiceBackup && m.reason) addActivity('Voice: ' + m.reason); else if (!voiceBackup) addActivity('Primary voice restored.');
+        break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
         if (!m.__rel) { if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
@@ -454,7 +459,7 @@
         if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
         a.onended = () => playChunk(i + 1);
         let fell = false;
-        const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); browserSpeak(chunks.slice(i).join(' '), done); };
+        const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); phoneVoiceNotice().then(n => browserSpeak(n + chunks.slice(i).join(' '), done)); };
         a.onerror = () => fallback('error');
         a.play().catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
       };
@@ -484,7 +489,11 @@
     }, 400);
     const cap = setTimeout(finish, Math.max(5000, text.length * 110));
   }
-  let fakeLevel = false, curUtt = null, voiceWarned = false;
+  let fakeLevel = false, curUtt = null, voiceWarned = false, voiceBackup = false;
+  // Phone-voice last resort: say once per outage why the voice changed (the server marks it said, so the backup voice never repeats it).
+  async function phoneVoiceNotice() {
+    try { const a = await (await fetch('/api/voice-announce')).json(); return a.say ? a.say + ' ' : ''; } catch { return ''; }
+  }
   async function voiceProblem() {
     try {
       const v = await (await fetch('/api/voice-status')).json();
