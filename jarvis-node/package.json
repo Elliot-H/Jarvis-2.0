@@ -1,0 +1,11 @@
+{
+  "name": "jarvis-node",
+  "version": "1.0.0",
+  "description": "Jarvis Node: room lights (Shelly / zigbee2mqtt) and a clapper on a Raspberry Pi, linked out to Jarvis",
+  "type": "module",
+  "main": "agent.js",
+  "scripts": { "start": "node agent.js", "calibrate": "node agent.js --calibrate", "mics": "node agent.js --mics" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "ws": "^8.22.0" },
+  "optionalDependencies": { "mqtt": "^5.10.0" }
+}

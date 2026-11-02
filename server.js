@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS, LIGHT_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as social from './social.js';
 import * as media from './media.js';
@@ -31,6 +31,7 @@ import * as chart from './chart.js';
 import { outlook } from './outlook.js';
 import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
+import * as lightsMod from './lights.js';
 import { analyzePhoto, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
@@ -83,7 +84,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -735,7 +736,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS, ...LIGHT_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -2165,7 +2166,7 @@ async function tgPoll() {
       const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the user's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
-      if (!silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+      if (!silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await lightAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
     }
   } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
   setImmediate(tgPoll);
@@ -3662,9 +3663,10 @@ app.all('/api/tts', async (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) => authed(req) });
+const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) => authed(req) || LIGHTS.isNode(req) });
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
+  if (LIGHTS.isNode(req)) return LIGHTS.attach(ws);   // Jarvis Node (Pi lights/clapper): its own protocol, never a HUD screen
   clients.add(ws);
   ws.send(JSON.stringify({ type: 'silent', on: silentActive() }));
   if (freshBoot) setTimeout(() => { if (freshBoot) { freshBoot = false; lastBackup = ''; saveState(); } }, 8000);   // no restore came: phone has no backup, start fresh
@@ -3695,7 +3697,7 @@ wss.on('connection', ws => {
       // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.
       const tx = msg.text.trim(), lim = p => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('handler timed out')), 15000))]);
       let handled = false;
-      try { handled = silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
+      try { handled = silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(lightAnswer(tx)) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
       catch (e) { console.error('answer shortcut failed, sending to the brain:', e?.stack || e); try { state.pendingQ = null; saveState(); } catch {} handled = false; }
       if (!handled) ask(tx);
     }
@@ -3733,6 +3735,10 @@ function deviceAction(action, args = {}, timeout = 20000) {
     for (const c of deviceClients) if (c.readyState === 1) c.send(JSON.stringify({ type: 'device', id, action, ...args }));
   });
 }
+// ---------- room lights + clapper through a Jarvis Node on a Pi (lights.js, jarvis-node/) ----------
+const LIGHTS = lightsMod.make({ state, saveState, broadcast, remember });
+Object.assign(handlers, LIGHTS.handlers);
+const lightAnswer = text => LIGHTS.answer(text);
 // ---------- vehicles: Bluetooth OBD dongles read by the phone when it is near (A17) ----------
 // state.vehicles [{name, dongle (paired BT name or address), last:{...scan}, lastTry, alerts:{key: time}}]. While the Jarvis app is
 // open (foreground or background), it tries each vehicle every OBD_EVERY_MIN minutes; out of range just fails quietly.

@@ -1,0 +1,21 @@
+{
+  "site": "house",
+  "jarvis_url": "https://jarvis-20-production-da28.up.railway.app",
+  "token": "SAME VALUE AS JARVIS_NODE_TOKEN IN RAILWAY",
+  "poll_seconds": 20,
+  "lights": [
+    { "name": "Bedroom light", "room": "bedroom", "kind": "shelly", "host": "192.168.1.50", "channel": 0, "dim": false },
+    { "name": "Bedroom lamp", "room": "bedroom", "kind": "z2m", "device": "bedroom_lamp_plug", "dim": false }
+  ],
+  "clapper": {
+    "enabled": true,
+    "room": "bedroom",
+    "mic": "plughw:1,0",
+    "sensitivity": 5,
+    "triple": "off:all"
+  },
+  "zigbee2mqtt": { "url": "mqtt://localhost:1883", "base_topic": "zigbee2mqtt" },
+  "buttons": [
+    { "device": "bedroom_button", "actions": { "single": "toggle:bedroom", "double": "off:all", "hold": "on:bedroom:100" } }
+  ]
+}
