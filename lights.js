@@ -30,13 +30,15 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
   const waits = new Map();                 // cmd id -> resolve
   const L = () => state.lights;
 
+  L().token ||= crypto.randomBytes(16).toString('hex');   // used when JARVIS_NODE_TOKEN is not set in Railway (no manual step)
+  const nodeToken = () => process.env.JARVIS_NODE_TOKEN || L().token;
   const isNode = req => {
-    const want = process.env.JARVIS_NODE_TOKEN, got = String(req.headers['x-jarvis-node'] || '');
+    const want = nodeToken(), got = String(req.headers['x-jarvis-node'] || '');
     if (!want || !got || want.length !== got.length) return false;
     return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(got));
   };
   const shellyTokenOk = url => {
-    const want = process.env.JARVIS_NODE_TOKEN, m = String(url || '').match(/^\/shelly\/([A-Za-z0-9_-]{8,128})\/?(\?.*)?$/);
+    const want = nodeToken(), m = String(url || '').match(/^\/shelly\/([A-Za-z0-9_-]{8,128})\/?(\?.*)?$/);
     if (!want || !m || want.length !== m[1].length) return false;
     return crypto.timingSafeEqual(Buffer.from(want), Buffer.from(m[1]));
   };
@@ -288,5 +290,5 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
     clapper_set: async ({ enabled, room, sensitivity }) => (await clapper({ ...(enabled != null ? { enabled } : {}), ...(room ? { room } : {}), ...(sensitivity ? { sensitivity: Math.max(1, Math.min(10, sensitivity)) } : {}) })).text
   };
 
-  return { isNode, shellyTokenOk, attach, attachShelly, answer, handlers, status, setLights, resolve, nodes };
+  return { isNode, nodeToken, shellyTokenOk, attach, attachShelly, answer, handlers, status, setLights, resolve, nodes };
 }
