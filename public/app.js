@@ -180,7 +180,9 @@
   }
 
   // ======================= log / activity / caption =======================
+  let lastLogged = { kind: '', k: '', t: 0 };
   function addLog(kind, text) {
+    { const k = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (kind === 'jarvis' && k && lastLogged.kind === 'jarvis' && lastLogged.k === k && Date.now() - lastLogged.t < 20000) return; lastLogged = { kind, k, t: Date.now() }; }   // same Jarvis line twice in the log: show it once
     const who = kind === 'user' ? 'YOU' : kind === 'jarvis' ? cfg.name.toUpperCase() : 'SYSTEM';
     const el = document.createElement('div');
     el.className = 'msg ' + kind;

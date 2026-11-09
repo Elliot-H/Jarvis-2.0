@@ -100,16 +100,23 @@ function pushBackup() {
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
 // Same spoken line twice in a row (two code paths answering one request) is delivered once.
-const recentSay = new Map();
-function dupSay(text) {
-  const k = String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), now = Date.now();
-  for (const [x, t] of recentSay) if (now - t > 20000) recentSay.delete(x);
-  if (!k) return false;
-  if (recentSay.has(k) && now - recentSay.get(k) < 20000) return true;
-  recentSay.set(k, now); return false;
+const recentSay = new Map();   // normalized text -> {t, raw}
+const normSay = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+// A spoken line is delivered once: exact repeats within 20 s are dropped, and for 90 s: a line wholly inside a recent one is dropped; a longer line that
+// repeats a recent one (a greeting with the same sentence folded in) loses the repeated sentence and keeps the rest.
+function dedupeSay(text) {
+  const k = normSay(text), now = Date.now();
+  for (const [x, o] of recentSay) if (now - o.t > 90000) recentSay.delete(x);
+  if (!k) return text;
+  for (const [x, o] of recentSay) {
+    if (x === k && now - o.t < 20000) return null;   // exact repeat only counts as a double delivery within 20 s (he may really ask twice)
+    if (x.length >= 40 && x !== k && x.includes(k)) return null;
+    if (k.length > x.length && x.length >= 40 && o.raw && text.includes(o.raw)) { text = text.replace(o.raw, ' ').replace(/\s+/g, ' ').trim(); if (normSay(text).length < 3) return null; }
+  }
+  recentSay.set(normSay(text), { t: now, raw: text }); return text;
 }
 function broadcast(msg) {
-  if (msg.type === 'say' && typeof msg.text === 'string' && dupSay(msg.text)) return;
+  if (msg.type === 'say' && typeof msg.text === 'string') { const d = dedupeSay(msg.text); if (d === null) { console.log('duplicate line dropped: ' + msg.text.slice(0, 60)); return; } msg = { ...msg, text: d }; }
   if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   if (msg.type === 'say' && typeof msg.text === 'string' && /\bowner\b/i.test(msg.text)) msg = { ...msg, text: msg.text.replace(/\bowner\b/gi, 'sir') };   // backstop: he is always "sir" out loud
   const s = JSON.stringify(msg);
@@ -4507,8 +4514,8 @@ function deployNoteTick() {
   m.announced = true; saveState();
   const msg = deployNoteText(txt);
   console.log('deploy-note:', msg);
-  if (clients.size) deliver(msg, 'Jarvis updated');   // spoken; deliver() only pushes when no app is connected
-  push('Jarvis updated', msg).catch(() => {});
+  if (clients.size) deliver(msg, 'Jarvis updated');   // app open: spoken once, no notification on top of it
+  else push('Jarvis updated', msg).catch(() => {});     // app closed: one phone notification
 }
 if (!process.env.JARVIS_SMOKE) { setTimeout(deployNoteTick, 20000); setInterval(deployNoteTick, 60_000); }
 // ---------- God Mode (A21): scan the room, pair a new speaker, connect it, play ----------
