@@ -2828,7 +2828,7 @@ app.post('/login', (req, res) => {
 });
 const diag = { locAt: 0, locN: 0, pollAt: 0, lock: 0, lockAt: 0 };
 const ago = t => t ? Math.round((Date.now() - t) / 1000) + 's' : 'never';
-app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN} | phoneLoc=${ago(diag.locAt)} (${diag.locN} since boot) phonePoll=${ago(diag.pollAt)} blockedPhone=${diag.lock}${diag.lockAt ? ' last ' + ago(diag.lockAt) : ''} places=${(state.places || []).length} at=${state.at || '-'} atInit=${!!state.atInit} pendingQ=${state.pendingQ ? state.pendingQ.type : '-'}`));   // read on the phone to see whether Jarvis is wedged
+app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN} | phoneLoc=${ago(diag.locAt)} (${diag.locN} since boot) phonePoll=${ago(diag.pollAt)} blockedPhone=${diag.lock}${diag.lockAt ? ' last ' + ago(diag.lockAt) : ''} data=${dataMB}MB places=${(state.places || []).length} at=${state.at || '-'} atInit=${!!state.atInit} pendingQ=${state.pendingQ ? state.pendingQ.type : '-'}`));   // read on the phone to see whether Jarvis is wedged
 // Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
 app.get('/open', (req, res) => {
   const sym = String(req.query.buy || '').toUpperCase().replace(/[^A-Z.\-]/g, '').slice(0, 12);
@@ -2936,6 +2936,24 @@ const o=document.getElementById('o');document.getElementById('b').onclick=async(
 for(const f of fs){o.textContent+='Uploading '+f.name+'...\\n';await new Promise(r=>{const x=new XMLHttpRequest();x.open('POST','/api/media?name='+encodeURIComponent(f.name)+'&label='+encodeURIComponent(document.getElementById('l').value));x.setRequestHeader('Content-Type',f.type||'application/octet-stream');x.upload.onprogress=e=>{o.textContent=o.textContent.replace(/\\d+%$/,'')+Math.round(e.loaded/e.total*100)+'%'};x.onload=()=>{o.textContent+='\\n'+(x.status==200?'Saved.':'Failed: '+x.responseText)+'\\n';r()};x.onerror=()=>{o.textContent+='\\nFailed (connection).\\n';r()};x.send(f)})}}
 </script></body>`));
 setInterval(() => { try { media.cleanup(); } catch {} }, 6 * 3600e3);
+// The data volume is small (500 MB free/trial, 5 GB Hobby). Spoken-line clips (alert-sound-*.mp3, one per unique line, thousands over time) were never deleted and filled it.
+// They are a cache: needed for seconds, so drop anything older than 12 h; fillers (reused) go after 30 days; if the volume is still over 400 MB, drop the oldest clips first.
+let dataMB = 0;
+function pruneData() {
+  try {
+    const now = Date.now(), files = [];
+    const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); try { if (e.isDirectory()) walk(p); else { const s = fs.statSync(p); files.push({ p, n: e.name, size: s.size, at: s.mtimeMs }); } } catch {} } };
+    walk(DATA_DIR);
+    let freed = 0; const rm = f => { try { fs.unlinkSync(f.p); freed += f.size; f.gone = true; } catch {} };
+    for (const f of files) if (/^alert-sound-.*\.mp3$/.test(f.n) && now - f.at > 12 * 3600e3) rm(f);
+    for (const f of files) if (/^filler-.*\.mp3$/.test(f.n) && now - f.at > 30 * 864e5) rm(f);
+    let total = files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0);
+    if (total > 400 * 1048576) for (const f of files.filter(f => !f.gone && /^(alert-sound|filler)-.*\.mp3$/.test(f.n)).sort((a, b) => a.at - b.at)) { if (total <= 300 * 1048576) break; rm(f); total -= f.size; }
+    dataMB = Math.round(files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0) / 1048576);
+    if (freed) console.log(`pruned ${Math.round(freed / 1048576)} MB of old voice clips; data volume now ${dataMB} MB`);
+  } catch (e) { console.warn('prune failed: ' + e.message); }
+}
+setTimeout(pruneData, 20_000); setInterval(pruneData, 3 * 3600e3);
 const socPage = (res, title, body, code = 200) => res.status(code).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:28px;line-height:1.45">${body}</body>`);
 const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 // The preview: a phone-style mock of each channel's post, the full caption (editable), warnings, and the Post / Skip buttons. A link preview (GET) never posts; posting is a button (POST).
