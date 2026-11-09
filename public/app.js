@@ -157,7 +157,7 @@
       case 'say':
         if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500)) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
         if (m.memo) saveMemo(m.memo);
-        { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < 20000) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
+        { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < (/\?\s*$/.test(String(m.text || '')) ? 180000 : 20000)) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (m.speak && !silent && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
@@ -935,6 +935,7 @@
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); replyDue = 0; setState('idle'); return; }
     if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
     if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
+    { const k = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && submit.last && submit.last.k === k && Date.now() - submit.last.t < 8000) { addActivity('Dropped a repeat of the same command.'); return; } submit.last = { k, t: Date.now() }; }   // the recognizer can deliver one sentence twice: send it once
     stopSpeaking(false);
     setState('thinking');
     startFillers(text);

@@ -100,6 +100,7 @@ function pushBackup() {
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
 // Same spoken line twice in a row (two code paths answering one request) is delivered once.
+let recentAsk = { k: '', t: 0 };
 const recentSay = new Map();   // normalized text -> {t, raw}
 const normSay = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 // A spoken line is delivered once: exact repeats within 20 s are dropped, and for 90 s: a line wholly inside a recent one is dropped; a longer line that
@@ -109,7 +110,7 @@ function dedupeSay(text) {
   for (const [x, o] of recentSay) if (now - o.t > 90000) recentSay.delete(x);
   if (!k) return text;
   for (const [x, o] of recentSay) {
-    if (x === k && now - o.t < 20000) return null;   // exact repeat only counts as a double delivery within 20 s (he may really ask twice)
+    if (x === k && now - o.t < (/\?\s*$/.test(o.raw) ? 180000 : 20000)) return null;   // a question he just asked is never asked again within 3 min   // exact repeat only counts as a double delivery within 20 s (he may really ask twice)
     if (x.length >= 40 && x !== k && x.includes(k)) return null;
     if (k.length > x.length && x.length >= 40 && o.raw && text.includes(o.raw)) { text = text.replace(o.raw, ' ').replace(/\s+/g, ' ').trim(); if (normSay(text).length < 3) return null; }
   }
@@ -3736,7 +3737,11 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'silent_off' && state.silent) { setSilent(false); const r = 'Silent mode off. Voice and phone alerts are back on, sir.'; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); }
     if (msg.type === 'hello' && msg.device) { deviceClients.add(ws); setTimeout(() => obdNudge().catch(() => {}), 2000); } // phone app (re)connected: look for the dongle right away
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
-    if (msg.type === 'ask' && msg.text?.trim()) {
+    if (msg.type === 'ask' && msg.text?.trim() && (() => {   // the same words twice within 8 s are one command (the phone's recognizer can send a sentence twice)
+      const k = msg.text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), now = Date.now();
+      if (k && recentAsk.k === k && now - recentAsk.t < 8000) { console.log('duplicate command dropped: ' + k.slice(0, 60)); return false; }
+      recentAsk = { k, t: now }; return true;
+    })()) {
       // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.
       const tx = msg.text.trim(), lim = p => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('handler timed out')), 15000))]);
       let handled = false;
