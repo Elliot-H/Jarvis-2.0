@@ -155,8 +155,9 @@
         break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
-        if (!m.__rel) { if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
+        if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500)) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
         if (m.memo) saveMemo(m.memo);
+        { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < 20000) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (m.speak && !silent && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
@@ -432,6 +433,7 @@
   }
   function speak(text) {
     if (silent) { caption(text); setState('idle', { echo: false }); return; }
+    if (pending || carry) { if (heldSays.length < 25) heldSays.push({ m: { type: 'say', text, speak: true, __rel: 1 }, t: Date.now() }); return; }   // never talk over a command in progress
     stopSpeaking(false);
     const clean = stripForSpeech(text || '');
     if (!clean) { setState('idle'); resumeListening(); return; }
@@ -722,7 +724,7 @@
       { const dur = Date.now() - recT0; if (mode === 'active') addActivity('Mic session ended after ' + (dur / 1000).toFixed(1) + 's' + (lastRecErr && Date.now() - lastRecErrAt < 1500 ? ' (' + lastRecErr + ')' : '') + (pending || carry ? ', words heard' : ', nothing heard') + (recWanted ? ', re-opening' : '') + '.'); }
       // The browser ends a listening session by itself after a short silence. If we still want the mic,
       // do NOT send the command yet: keep the words so far and let the pause timer decide.
-      if (pending && recWanted && !pending.wakeOnly) carry = lastHeard;
+      if (pending && !pending.wakeOnly && (recWanted || speaking || wakeAnswering)) carry = lastHeard;   // keep the words; the pause timer decides when he is done
       else if (pending) flush();
       uttStart = 0; lastLen = 0;
       // Android's recognizer refuses restarts that come too fast (error 10). Back off, then ease back down.

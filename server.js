@@ -99,7 +99,17 @@ function pushBackup() {
 
 // ---------- websocket fan-out (all screens see the same HUD) ----------
 const clients = new Set();
+// Same spoken line twice in a row (two code paths answering one request) is delivered once.
+const recentSay = new Map();
+function dupSay(text) {
+  const k = String(text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), now = Date.now();
+  for (const [x, t] of recentSay) if (now - t > 20000) recentSay.delete(x);
+  if (!k) return false;
+  if (recentSay.has(k) && now - recentSay.get(k) < 20000) return true;
+  recentSay.set(k, now); return false;
+}
 function broadcast(msg) {
+  if (msg.type === 'say' && typeof msg.text === 'string' && dupSay(msg.text)) return;
   if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   if (msg.type === 'say' && typeof msg.text === 'string' && /\bowner\b/i.test(msg.text)) msg = { ...msg, text: msg.text.replace(/\bowner\b/gi, 'sir') };   // backstop: he is always "sir" out loud
   const s = JSON.stringify(msg);
