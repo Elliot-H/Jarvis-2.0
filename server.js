@@ -3663,7 +3663,15 @@ app.all('/api/tts', async (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', verifyClient: ({ req }) => authed(req) || LIGHTS.isNode(req) });
+const wss = new WebSocketServer({ noServer: true, verifyClient: ({ req }) => authed(req) || LIGHTS.isNode(req) });
+const shellyWss = new WebSocketServer({ noServer: true });
+// One upgrade dispatcher: /ws is the HUD and the Pi node; /shelly/<JARVIS_NODE_TOKEN> is a Shelly plug connecting out (no headers possible, so the token is in the path).
+server.on('upgrade', (req, socket, head) => {
+  const p = String(req.url || '').split('?')[0];
+  if (p === '/ws') wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+  else if (p.startsWith('/shelly/') && LIGHTS.shellyTokenOk(req.url)) shellyWss.handleUpgrade(req, socket, head, ws => LIGHTS.attachShelly(ws));
+  else { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); }
+});
 
 wss.on('connection', (ws, req) => {
   if (LIGHTS.isNode(req)) return LIGHTS.attach(ws);   // Jarvis Node (Pi lights/clapper): its own protocol, never a HUD screen
