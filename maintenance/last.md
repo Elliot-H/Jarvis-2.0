@@ -1,5 +1,5 @@
 STATUS: done
-TIME: 2026-10-29T02:03:47Z
-REQUEST: Voice (Fish Audio) outage contingency: backup voice, spoken notice, auto-restore, HUD indicator.
+TIME: 2026-11-09T20:29:06Z
+REQUEST: Add "watch a movie" protocol phrase that turns the movie outlet plug on, with off and rename.
 RESULT:
-Done, Owner. If Fish Audio fails, times out or returns empty audio, Jarvis now voices that same line with the ElevenLabs backup voice, or the phone's own voice if that is not set up, so nothing is clipped or lost mid-reply. The first backup line opens by telling you the primary voice service is down and he is switching voices. He keeps testing Fish in the background and, when it answers again, says in one line that the primary voice is restored. The voice chip on the main screen turns amber and reads BACKUP VOICE while the backup is in use. It goes live after the Railway deploy, no APK reinstall needed. I tested the switch and recovery against a simulated 503, not the live Fish service.
+Done, Owner. Saying "watch a movie", "we're watching a movie", "let's watch a movie" or "movie time" now switches on the plug you name as the movie outlet, with no question first, and Jarvis confirms briefly. "Turn off the movie" or "movie's over" switches it off. Tell him "the movie outlet is the garage plug", or "call the TV plug the movie outlet", to pick or change which plug it is; if none is named he asks which one. If no plug is connected he says so plainly. It goes live after the Railway deploy, no APK reinstall needed. Tested with mock plugs only, not real hardware.

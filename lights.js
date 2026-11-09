@@ -233,6 +233,33 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
     }).join('\n');
   }
 
+
+  // ---------- movie outlet: one plug the user names as "the movie outlet" (TV / movie setup) ----------
+  function movieDevice() {
+    const all = devs(); if (!all.length) return { none: true };
+    const d = (L().movie && L().devices[L().movie]) || all.find(x => /\bmovie\b/i.test(`${x.name} ${x.room}`));
+    return d ? { d } : { ask: true, names: all.map(label) };
+  }
+  async function movieSet(on) {
+    const m = movieDevice();
+    if (m.none) return { ok: false, text: 'No plug is connected to me yet, sir, so I cannot switch the movie outlet.' };
+    if (m.ask) return { ok: false, text: `Which plug is the movie outlet, sir? I have ${m.names.join(', ')}. Say "the movie outlet is" and its name.` };
+    const r = await setLights(m.d.name || m.d.id, on);
+    if (!r.ok) return { ok: false, text: `Movie outlet: ${r.text}` };
+    return { ok: true, text: on ? 'Movie outlet on, sir. Enjoy the film.' : 'Movie outlet off, sir.' };
+  }
+  function movieName(device) {
+    const all = devs(); if (!all.length) return { ok: false, text: 'No plug is connected to me yet, sir, so there is nothing to name as the movie outlet.' };
+    const r = resolve(device);
+    const d = r.list?.length === 1 ? r.list[0] : (!norm(device) && all.length === 1 ? all[0] : null);
+    if (!d) return { ok: false, text: `Which plug, sir? I have ${all.map(label).join(', ')}.` };
+    L().movie = d.key; saveState();
+    return { ok: true, text: `Understood, sir. ${label(d)} is now the movie outlet.` };
+  }
+  const MOVIE_ON = /\b(watch(ing)? (a |the )?(movie|film)|movie (time|night)|film (time|night)|start (a |the )?(movie|film))\b/;
+  const MOVIE_OFF = /\b(movie|film)( s| is| are)? (over|done|finished|ended)|\b(turn|switch|shut|kill|cut)\b.*\b(off|out)\b.*\b(movie|film)\b|\b(turn|switch|shut|kill|cut) (off |out )?(the )?(movie|film)\b/;
+  const MOVIE_SET = /\b(?:(?:the )?(?:movie|film) (?:outlet|plug|socket)\s+(?:is|should be|will be)\s+(?:the |my )?(.+)|(?:call|name|make|set|use)\s+(?:the |my )?(.+?)\s+(?:as |to be |be |is )?(?:the |my )?(?:movie|film) (?:outlet|plug|socket)|(?:movie|film) (?:outlet|plug|socket) (?:to|as)\s+(?:the |my )?(.+))\s*$/;
+
   // ---------- voice shortcut: no AI call ----------
   // "lights off", "turn on the bedroom lights", "kill the lights", "dim the bedroom to 30", "all lights off", "clapper on/off".
   // Falls through (false) when no lights are registered, when it sounds like the LED strip (colors/effects), or when unsure.
@@ -240,7 +267,11 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
     let t = norm(text).replace(/^(hey )?jarvis /, '').replace(/\b(please|can you|could you|would you|go ahead and|for me|sir|thanks|thank you|now)\b/g, ' ').replace(/\s+/g, ' ').trim();
     if (!t || t.split(' ').length > 12 || COLOR.test(t)) return false;
     let reply;
-    if (/\bclapper\b/.test(t)) {
+    const ms = t.match(MOVIE_SET);
+    if (ms) reply = movieName(ms[1] || ms[2] || ms[3] || '').text;
+    else if (MOVIE_OFF.test(t) && !COLOR.test(t)) reply = (await movieSet(false)).text;
+    else if (MOVIE_ON.test(t)) reply = (await movieSet(true)).text;
+    else if (/\bclapper\b/.test(t)) {
       if (!Object.keys(L().sites).length) return false;
       const off = /\b(off|disable|stop|deactivate|mute)\b/.test(t), on = !off && /\b(on|enable|start|activate|arm)\b/.test(t);
       const s = t.match(/\bsensitivity (to )?(\d{1,2})\b/), room = t.match(/\bfor the ([a-z ]+?)( lights?)?$/);
@@ -286,6 +317,10 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
       if (!d) return 'I could not tell which plug you mean.';
       const cur = L().devices[d.key]; if (name) { cur.name = String(name).slice(0, 40); cur.named = true; } if (room != null) cur.room = String(room).slice(0, 30); saveState();
       return `Saved: ${cur.name}${cur.room ? ', ' + cur.room : ''}.`;
+    },
+    movie_outlet: async ({ action = 'on', device = '' }) => {
+      const r = action === 'set' ? movieName(device) : await movieSet(action !== 'off');
+      return r.text + (r.ok ? ' Confirm it to the user in a few words.' : ' Tell the user plainly.');
     },
     clapper_set: async ({ enabled, room, sensitivity }) => (await clapper({ ...(enabled != null ? { enabled } : {}), ...(room ? { room } : {}), ...(sensitivity ? { sensitivity: Math.max(1, Math.min(10, sensitivity)) } : {}) })).text
   };
