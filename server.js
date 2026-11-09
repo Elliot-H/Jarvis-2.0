@@ -3768,15 +3768,8 @@ const lightAnswer = text => LIGHTS.answer(text);
 // Plug setup page (behind the PIN): ready-made links that point a Shelly plug at Jarvis. Open it, then join the plug's own Wi-Fi and tap the links.
 app.get('/plug-setup', (req, res) => {
   const host = req.get('host'), ws = `wss://${host}/shelly/${LIGHTS.nodeToken()}`, cfg = ca => `http://192.168.33.1/rpc/Ws.SetConfig?config=${encodeURIComponent(JSON.stringify({ enable: true, server: ws, ssl_ca: ca }))}`;
-  const a = (h, t) => `<p><a href="${h}" target="_blank" rel="noopener" style="display:block;padding:16px;background:#0b3a4a;color:#7ff;border:1px solid #4cf;border-radius:8px;text-decoration:none;font-size:18px">${t}</a></p>`;
-  res.type('html').send(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>Plug setup</title><body style="background:#06121a;color:#cde;font:16px system-ui;padding:16px;max-width:560px;margin:auto">
-<h2>Shelly plug setup</h2>
-<p>1. Plug the Shelly in. It makes its own Wi-Fi (name starts with Shelly). Keep this page open, join that Wi-Fi.</p>
-${a(cfg('ca.pem'), '2. Tap: point the plug at Jarvis')}
-<p>It should answer <code>restart_required</code>. If it fails later, use this instead (same thing, no certificate check):</p>
-${a(cfg('*'), '2b. Fallback link')}
-<p>3. Open <b>192.168.33.1</b> in the browser, then Settings, Wi-Fi: pick your Wi-Fi and enter its password. The plug restarts and joins. Done: the Comms Log shows "Shelly plug ... connected".</p>
-<p style="opacity:.6;font-size:13px">Server: ${ws.replace(/\/shelly\/.*/, '/shelly/…')}</p></body>`);
+  const html = fs.readFileSync(path.join(__dirname, 'config', 'plug-setup.html'), 'utf8').split('{{WS}}').join(ws).split('{{CFG_CA}}').join(cfg('ca.pem')).split('{{CFG_ANY}}').join(cfg('*'));
+  res.type('html').send(html);
 });
 // ---------- vehicles: Bluetooth OBD dongles read by the phone when it is near (A17) ----------
 // state.vehicles [{name, dongle (paired BT name or address), last:{...scan}, lastTry, alerts:{key: time}}]. While the Jarvis app is
