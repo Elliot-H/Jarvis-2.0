@@ -57,3 +57,9 @@ Status key: BUILT = on the server now. NEXT = planned. LATER = idea.
 - Confirm which kids are on iPhone vs Android.
 - Pick a vehicle tracker for the drivers.
 - Decide on the native iOS app.
+
+## Three Jarvis (BUILT 2026-11-09, phase 1)
+- Master (the Owner), the partner's (she names it, changes personality/voice/color, installs it from her own link) and the kids' (they name it). Each has its own name, memory and history and cannot see the Owner's data.
+- Lights: the TV room lamp works by voice; the partner's controls all lights, the kids' only the rooms the Owner allows.
+- Owner commands: "add Maya's Jarvis", "companion list", "limit the kids' lights to the TV room", "pause the kids' Jarvis".
+- NEXT: per-kid Jarvis, Fish voices, hands-free wake (native app), check-ins and chores in the kid Jarvis.

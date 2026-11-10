@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Jarvis</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<style>
+:root{--a:#3fe0ff;--bg:#05080f;--card:#0c1420;--ink:#e6f6ff;--mut:#7fa3b8}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #12202e}
+#orb{width:34px;height:34px;border-radius:50%;border:2px solid var(--a);box-shadow:0 0 14px var(--a),inset 0 0 10px var(--a);flex:none;transition:.2s}
+#orb.on{animation:p 1s infinite alternate;background:var(--a)}@keyframes p{to{transform:scale(1.15)}}
+h1{font-size:20px;margin:0;flex:1;letter-spacing:.04em;color:var(--a)}
+button{font:inherit;color:var(--ink);background:var(--card);border:1px solid #1b3246;border-radius:12px;padding:10px 14px}
+button.pri{background:var(--a);color:#021018;border-color:var(--a);font-weight:600}
+#log{flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:86%;padding:10px 14px;border-radius:16px;line-height:1.4;font-size:16px;white-space:pre-wrap}
+.u{align-self:flex-end;background:#12303f}.j{align-self:flex-start;background:var(--card);border:1px solid #17293a}
+#bar{display:flex;gap:8px;padding:10px 12px;border-top:1px solid #12202e}
+#t{flex:1;font:inherit;color:var(--ink);background:var(--card);border:1px solid #1b3246;border-radius:22px;padding:12px 16px;min-width:0}
+#mic{width:48px;border-radius:50%;padding:0;font-size:20px}#mic.rec{background:var(--a);color:#021018}
+#set{position:fixed;inset:0;background:rgba(2,6,10,.86);display:none;align-items:flex-end}
+#set.show{display:flex}#sp{width:100%;max-height:92%;overflow:auto;background:#0a111b;border-radius:20px 20px 0 0;padding:18px 18px 28px}
+label{display:block;margin:14px 0 6px;color:var(--mut);font-size:13px;text-transform:uppercase;letter-spacing:.08em}
+input[type=text],textarea,select{width:100%;font:inherit;color:var(--ink);background:var(--card);border:1px solid #1b3246;border-radius:10px;padding:11px}
+textarea{min-height:90px}input[type=color]{width:100%;height:44px;border:1px solid #1b3246;border-radius:10px;background:var(--card);padding:3px}
+.row{display:flex;gap:10px}.row>*{flex:1}small{color:var(--mut)}
+#hint{display:none;margin:8px 16px;padding:10px 14px;border:1px dashed #2a5d78;border-radius:12px;color:var(--mut);font-size:14px}
+</style></head><body>
+<header><div id="orb"></div><h1 id="nm">…</h1><button id="gear" aria-label="Settings">⚙︎</button></header>
+<div id="hint"></div>
+<div id="log"></div>
+<div id="bar"><button id="mic" aria-label="Talk">🎤</button><input id="t" type="text" placeholder="Type or tap the mic" enterkeyhint="send" autocomplete="off"><button class="pri" id="go">Send</button></div>
+<div id="set"><div id="sp">
+  <h2 style="margin:0 0 4px">Make it yours</h2><small id="who"></small>
+  <label>Your name</label><input type="text" id="su" maxlength="30">
+  <label>Name your Jarvis</label><input type="text" id="sn" maxlength="24" placeholder="Pick any name">
+  <label>Personality — how should it talk?</label><textarea id="ss" maxlength="400" placeholder="e.g. warm and playful, short answers, a little sarcastic"></textarea>
+  <label>Color</label><input type="color" id="sa" value="#3fe0ff">
+  <label>Voice</label><select id="sv"></select>
+  <div class="row"><div><label>Speed</label><input type="range" id="sr" min="0.7" max="1.4" step="0.05" value="1"></div><div><label>Pitch</label><input type="range" id="sp2" min="0.7" max="1.5" step="0.05" value="1"></div></div>
+  <label>Speak replies out loud</label><select id="so"><option value="1">Yes</option><option value="0">No, text only</option></select>
+  <div class="row" style="margin-top:20px"><button id="test">Test voice</button><button class="pri" id="save">Save</button></div>
+  <p><small>Lights you can control: <span id="lg">none yet</span></small></p>
+  <p style="text-align:center"><button id="close" style="background:none;border:none;color:var(--mut)">Close</button></p>
+</div></div>
+<script>
+const T = location.pathname.split('/')[2], API = '/api/j/' + T, $ = s => document.querySelector(s);
+let me = null, speakOn = localStorage.getItem('c.speak') !== '0', voices = [];
+document.querySelector('head').insertAdjacentHTML('beforeend', '<link rel="manifest" href="/j/' + T + '/manifest.webmanifest">');
+const add = (cls, txt) => { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = txt; $('#log').appendChild(d); $('#log').scrollTop = 1e9; return d; };
+function theme() { document.documentElement.style.setProperty('--a', me.accent || '#3fe0ff'); const n = me.name || 'Jarvis'; $('#nm').textContent = n; document.title = n; $('#who').textContent = 'For ' + me.user; $('#lg').textContent = me.lights.length ? me.lights.join(', ') : 'none yet (ask Dad)'; }
+async function load() {
+  const r = await fetch(API + '/me'); if (!r.ok) { document.body.innerHTML = '<p style="padding:30px">This link is no longer active.</p>'; return; }
+  me = await r.json(); theme();
+  for (const h of me.history || []) add(h.role === 'user' ? 'u' : 'j', h.content);
+  if (me.first) { add('j', `Hi ${me.user}! I'm your very own assistant. First things first: what would you like to call me? Tap ⚙︎ to pick my name, my personality and my voice, or just tell me.`); }
+  if (/iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone) { const h = $('#hint'); h.style.display = 'block'; h.textContent = 'Tip: tap Share, then "Add to Home Screen" to install me as an app.'; }
+}
+function pickVoice() { const want = me?.voice?.name; return voices.find(v => v.name === want) || voices.find(v => /en[-_]US|en[-_]GB/i.test(v.lang)) || voices[0]; }
+function say(t) {
+  if (!speakOn || !window.speechSynthesis) return; speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t), v = pickVoice(); if (v) u.voice = v; u.rate = me?.voice?.rate || 1; u.pitch = me?.voice?.pitch || 1;
+  u.onstart = () => $('#orb').classList.add('on'); u.onend = u.onerror = () => $('#orb').classList.remove('on'); speechSynthesis.speak(u);
+}
+async function send(text) {
+  text = String(text || '').trim(); if (!text) return; $('#t').value = ''; add('u', text); const w = add('j', '…');
+  try { const r = await fetch(API + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }); const j = await r.json(); w.textContent = j.text || 'No answer.'; say(j.text);
+    const m = await (await fetch(API + '/me')).json(); me = { ...me, ...m }; theme(); } catch { w.textContent = 'No connection. Try again.'; }
+}
+$('#go').onclick = () => send($('#t').value); $('#t').onkeydown = e => { if (e.key === 'Enter') send($('#t').value); };
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition; let rec = null;
+$('#mic').onclick = () => {
+  if (!SR) return add('j', 'Your browser cannot listen. Type instead, or open me in Safari or Chrome.');
+  if (rec) { rec.stop(); return; } speechSynthesis && speechSynthesis.cancel();
+  rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; $('#mic').classList.add('rec'); let fin = '';
+  rec.onresult = e => { let s = ''; for (const r of e.results) s += r[0].transcript; fin = s; $('#t').value = s; };
+  rec.onend = () => { $('#mic').classList.remove('rec'); rec = null; if (fin.trim()) send(fin); }; rec.onerror = () => { rec = null; $('#mic').classList.remove('rec'); }; rec.start();
+};
+function fillVoices() { voices = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang)); const s = $('#sv'); s.innerHTML = voices.map(v => `<option value="${v.name.replace(/"/g, '')}">${v.name}</option>`).join(''); if (me?.voice?.name) s.value = me.voice.name; }
+if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = fillVoices; fillVoices(); }
+$('#gear').onclick = () => { $('#su').value = me.user || ''; $('#sn').value = me.name || ''; $('#ss').value = me.style || ''; $('#sa').value = me.accent || '#3fe0ff'; $('#sr').value = me.voice?.rate || 1; $('#sp2').value = me.voice?.pitch || 1; $('#so').value = speakOn ? '1' : '0'; fillVoices(); $('#set').classList.add('show'); };
+$('#close').onclick = () => $('#set').classList.remove('show');
+$('#test').onclick = () => { me.voice = { name: $('#sv').value, rate: +$('#sr').value, pitch: +$('#sp2').value }; const o = speakOn; speakOn = true; say(`Hi ${me.user}, this is how I sound.`); speakOn = o; };
+$('#save').onclick = async () => {
+  speakOn = $('#so').value === '1'; localStorage.setItem('c.speak', speakOn ? '1' : '0');
+  const r = await fetch(API + '/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: $('#su').value, name: $('#sn').value, style: $('#ss').value, accent: $('#sa').value, voice: { name: $('#sv').value, rate: +$('#sr').value, pitch: +$('#sp2').value } }) });
+  if (r.ok) { me = { ...me, ...(await r.json()) }; theme(); $('#set').classList.remove('show'); add('j', `Saved. I'm ${me.name || 'Jarvis'}.`); }
+};
+load();
+</script></body></html>

@@ -32,6 +32,7 @@ import { outlook } from './outlook.js';
 import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
 import * as lightsMod from './lights.js';
+import * as companionsMod from './companions.js';
 import { analyzePhoto, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
@@ -84,7 +85,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights'];
+const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights', 'companions'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -754,7 +755,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS, ...LIGHT_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS, ...LIGHT_TOOLS, ...companionsMod.COMPANION_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -3087,6 +3088,10 @@ app.all('/api/outbox/:id/sent', (req, res) => {
 // picked up but never confirmed within 2 hours: put it back so the next run retries
 setInterval(() => { let c = false; for (const f of state.followups) if (f.status === 'sending' && Date.now() - f.pickedAt > 2 * 3600e3) { f.status = 'approved'; c = true; } if (c) saveState(); }, 10 * 60_000);
 const PUBLIC_FILES = /^\/(manifest\.webmanifest|sw\.js|icons\/[\w.-]+\.png|m\/[\w-]{8,40}\.(jpg|mp4))$/;
+// ---------- Companion Jarvis (partner + kids): own name, personality and lights; private link, no PIN (see companions.js) ----------
+const COMPANIONS = companionsMod.make({ state, saveState, app, express, talk, cfg: TALK, model: () => talkModel(), addSpend, overBudget, lights: () => LIGHTS, push: (...a) => push(...a), base: () => publicBase(), publicDir: path.join(__dirname, 'public') });
+Object.assign(handlers, COMPANIONS.handlers);
+setTimeout(() => COMPANIONS.seed().catch(e => console.warn('companion seed failed: ' + e.message)), 20000);   // after the push channels are ready
 // ---------- Family locations (Jarvis mini, phase 1) ----------
 // Each family member runs OwnTracks (free iPhone/Android app, HTTP mode) pointed at /api/ot?k=<their token>. No PIN cookie on that route (the phone app has none):
 // the per-person token is the key. Fixes land in state.family.kids[id]; a saved place entered/left for 2 fixes in a row pings the Owner (title "Family: ...").
