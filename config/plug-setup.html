@@ -4,6 +4,7 @@
 <p>Plug the Shelly in (the lamp can wait). Your phone stays on its normal internet; this page talks to the plug over Bluetooth. Use Chrome.</p>
 <p><label>Wi-Fi name<br><input id=ssid autocapitalize=off autocomplete=off style="width:100%;padding:12px;font-size:17px;background:#0b2230;color:#cde;border:1px solid #4cf;border-radius:8px"></label></p>
 <p><label>Wi-Fi password<br><input id=pass type=password autocomplete=off style="width:100%;padding:12px;font-size:17px;background:#0b2230;color:#cde;border:1px solid #4cf;border-radius:8px"></label></p>
+<p><label>Name for this plug (optional), e.g. TV room lamp<br><input id=pname autocomplete=off style="width:100%;padding:12px;font-size:17px;background:#0b2230;color:#cde;border:1px solid #4cf;border-radius:8px"></label></p>
 <p><button id=go style="width:100%;padding:16px;font-size:18px;background:#0b3a4a;color:#7ff;border:1px solid #4cf;border-radius:8px">Set up the plug over Bluetooth</button></p>
 <pre id=log style="white-space:pre-wrap;background:#0b1a24;padding:12px;border-radius:8px;min-height:80px;font-size:14px"></pre>
 <p style="opacity:.6;font-size:13px">The Wi-Fi password goes only from this page to the plug over Bluetooth. Jarvis's server never sees it.</p>
@@ -42,7 +43,9 @@ $('go').onclick = async () => {
     const chars = { data: await svc.getCharacteristic(DATA), tx: await svc.getCharacteristic(TX), rx: await svc.getCharacteristic(RX) };
     let r = await rpc(chars, 1, 'Ws.SetConfig', { config: { enable: true, server: WS, ssl_ca: 'ca.pem' } }); log('Jarvis link: ' + JSON.stringify(r.result || r.error));
     r = await rpc(chars, 2, 'Wifi.SetConfig', { config: { sta: { ssid, pass, is_open: !pass, enable: true } } }); log('Wi-Fi: ' + JSON.stringify(r.result || r.error));
-    try { await rpc(chars, 3, 'Shelly.Reboot', {}); } catch {}
+    const pn = $('pname').value.trim();
+    if (pn) { r = await rpc(chars, 3, 'Sys.SetConfig', { config: { device: { name: pn } } }); log('Name "' + pn + '": ' + JSON.stringify(r.result || r.error)); }
+    try { await rpc(chars, 4, 'Shelly.Reboot', {}); } catch {}
     log('Done. The plug is restarting and joining your Wi-Fi. In about 30 seconds the Comms Log on the Jarvis HUD should say the plug connected.');
   } catch (e) { log('Problem: ' + (e && e.message || e) + (/cancel|chosen/i.test(String(e && e.message)) ? '' : '\nIf no Shelly appears: the plug must be freshly plugged in and within a few feet.')); }
 };

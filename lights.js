@@ -103,7 +103,7 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
         shellyApply(src, m.params, 'connect');
         // pick up the name set on the plug itself, if any (only when we have not named it in Jarvis)
         const nm = sys.device?.name || (await shellyRpc(src, 'Sys.GetConfig', {}))?.result?.device?.name;
-        if (nm) for (const k of Object.keys(L().devices)) { const d = L().devices[k]; if (d.shelly === src && !d.named) { d.name = nm; } }
+        if (nm) for (const k of Object.keys(L().devices)) { const d = L().devices[k]; if (d.shelly === src && !d.named) { d.name = nm; d.named = true; if (!d.room) d.room = nm.replace(/\b(lamp|light|lights)\b/gi, '').replace(/\s+/g, ' ').trim(); } }   // a name typed on the setup page lives on the plug itself and wins
         L().sites.home = { ...(L().sites.home || {}), seen: Date.now() };
         saveState(); broadcast({ type: 'log', role: 'system', text: `Shelly plug ${src} connected.` });
       } else if (m.method === 'NotifyStatus') {
