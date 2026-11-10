@@ -102,6 +102,7 @@ function pushBackup() {
 const clients = new Set();
 // Same spoken line twice in a row (two code paths answering one request) is delivered once.
 let recentAsk = { k: '', t: 0 };
+const seenRid = new Map();   // ask ids already handled (a resend after a dropped link carries the same id)
 const recentSay = new Map();   // normalized text -> {t, raw}
 const normSay = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 // A spoken line is delivered once: exact repeats within 20 s are dropped, and for 90 s: a line wholly inside a recent one is dropped; a longer line that
@@ -3730,6 +3731,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.type === 'ping') { try { ws.send('{"type":"pong"}'); } catch {} return; }
     if (msg.type === 'restore' && msg.data && (freshBoot || Number(msg.data.stamp) > (state.backupStamp || 0))) {
       freshBoot = false;
       const keep = { watchlist: state.watchlist || [], sigWatch: state.sigWatch || [], coinIds: state.coinIds || {} };   // adds made on the server since the phone last synced (alert taps while the app was closed)
@@ -3746,7 +3748,8 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'device_result' && devWait.has(msg.id)) { const f = devWait.get(msg.id); devWait.delete(msg.id); f({ ok: !!msg.ok, detail: String(msg.detail || '') }); }
     if (msg.type === 'ask' && msg.text?.trim() && (() => {   // the same words twice within 8 s are one command (the phone's recognizer can send a sentence twice)
       const k = msg.text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), now = Date.now();
-      if (k && recentAsk.k === k && now - recentAsk.t < 8000) { console.log('duplicate command dropped: ' + k.slice(0, 60)); return false; }
+      if (msg.rid) { seenRid.forEach((t, r) => now - t > 120000 && seenRid.delete(r)); if (seenRid.has(msg.rid)) { console.log('resent command already handled: ' + msg.rid); return false; } seenRid.set(msg.rid, now); }
+      if (k && recentAsk.k === k && now - recentAsk.t < 8000 && !msg.rid) { console.log('duplicate command dropped: ' + k.slice(0, 60)); return false; }
       recentAsk = { k, t: now }; return true;
     })()) {
       // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.

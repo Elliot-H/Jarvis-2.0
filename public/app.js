@@ -89,12 +89,14 @@
     if (ws && ws.readyState <= 1) return;
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
     const me = ws;
-    ws.onopen = () => { try { drainOutbox(); } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
+    ws.onopen = () => { lastRx = Date.now(); try { drainOutbox(); } catch {} try { if (lostMidRequest && inflight && Date.now() - inflight.t < 60000) { ws.send(JSON.stringify(inflight.o)); lostMidRequest = false; addActivity('Link dropped mid-command; re-sent it automatically.'); inflight = null; } } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
     ws.onclose = () => { if (ws !== me) return; if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 2000); };
-    ws.onmessage = e => { if (ws !== me) return; handle(JSON.parse(e.data)); };
+    ws.onmessage = e => { if (ws !== me) return; lastRx = Date.now(); const d = JSON.parse(e.data); if (d.type === 'pong') return; if (d.type === 'say' || d.type === 'log' || d.type === 'thinking' || d.type === 'reply') inflight = null; handle(d); };
   }
   // Spoken commands must never be lost to a dropped link: hold them (up to 90s) and deliver the moment the socket is back.
-  const outbox = [];
+  const outbox = []; let inflight = null, lastRx = Date.now();
+  // Heartbeat: a socket that died silently (cell handoff, sleep) looks open, so commands vanished. Ping every 10 s; no traffic for 25 s = drop and reconnect.
+  setInterval(() => { try { if (ws?.readyState === 1) { if (Date.now() - lastRx > 25000) { ws.close(); return; } ws.send('{"type":"ping"}'); } } catch {} }, 10000);
   // Do-not-interrupt gate (phone side): an unprompted 'say' (alert, reminder, travel line) never plays while speech is being heard,
   // an utterance is pending, or a reply to the user is still due. It waits here and is released one at a time, 7s after the user stops and Jarvis has finished.
   let replyDue = 0, lastVoice = 0; const heldSays = []; let heldLast = 0;
@@ -107,6 +109,7 @@
   }, 1000);
   function send(o) {
     if (o && (o.type === 'ask' || o.type === 'wake')) replyDue = Date.now();
+    if (o && o.type === 'ask' && !o.rid) { o.rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); inflight = { o, t: Date.now() }; }
     if (ws?.readyState === 1) { ws.send(JSON.stringify(o)); return; }
     if (o && o.type === 'ask') {
       outbox.push({ o, t: Date.now() });
