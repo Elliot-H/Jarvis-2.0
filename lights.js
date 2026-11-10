@@ -121,16 +121,23 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
   // Lock a plug once: password on its local web/RPC, setup hotspot off, Bluetooth control off. The cloud link (outbound, TLS, secret token) is unaffected.
   // Password is kept in state.lights.secured[src]; a plug that lost its Wi-Fi/password is recovered by holding its button 10 s (factory reset) and redoing /plug-setup.
   async function secure(src) {
-    const S = (L().secured ||= {}); if (S[src]?.done) return;
+    const S = (L().secured ||= {}); if (S[src]?.done && S[src].led) return;
     const info = await shellyRpc(src, 'Shelly.GetDeviceInfo', {}); const id = info.result?.id; if (!id) return;
     const rec = (S[src] ||= { pass: crypto.randomBytes(12).toString('base64url'), steps: {} });
     if (info.result.auth_en) rec.steps.auth = 'already';
     else { const ha1 = crypto.createHash('sha256').update(`admin:${id}:${rec.pass}`).digest('hex'); const r = await shellyRpc(src, 'Shelly.SetAuth', { user: 'admin', realm: id, ha1 }); rec.steps.auth = r.error ? 'fail: ' + (r.error.message || '') : 'ok'; }
     const b = await shellyRpc(src, 'Ble.SetConfig', { config: { rpc: { enable: false } } }); rec.steps.ble = b.error ? 'fail: ' + (b.error.message || '') : 'ok';
     const a = await shellyRpc(src, 'Wifi.SetConfig', { config: { ap: { enable: false } } }); rec.steps.ap = a.error ? 'fail: ' + (a.error.message || '') : 'ok';
+    if (!rec.led) { rec.steps.led = await ledSet(src, false); rec.led = rec.steps.led === 'ok'; }
     rec.done = Object.values(rec.steps).every(v => !/^fail/.test(v)); rec.at = Date.now(); saveState();
     log(`lights: secured ${src}: ${JSON.stringify(rec.steps)}`);
     broadcast({ type: 'log', role: 'system', text: `Plug ${src} locked down: ${Object.entries(rec.steps).map(([k, v]) => k + ' ' + v).join(', ')}.` });
+  }
+  // Status LED ring on the plug: off by default (Owner: it must not glow while the plugged-in device runs). `on` = show switch state.
+  async function ledSet(src, on) {
+    let r = await shellyRpc(src, 'PLUGS_UI.SetConfig', { config: { leds: { mode: on ? 'switch' : 'off' } } });
+    if (r.error) r = await shellyRpc(src, 'PLUGS_UI.SetConfig', { config: { leds: { mode: on ? 'switch' : 'off' }, controls: {} } });
+    return r.error ? 'fail: ' + (r.error.message || '') : 'ok';
   }
   async function shellySet(d, on, bri) {
     const method = on === 'toggle' ? 'Switch.Toggle' : 'Switch.Set';
@@ -327,6 +334,12 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
       return r.text + (r.ok ? ' Confirm it to the user in a few words.' : ' Tell the user.');
     },
     lights_status: async () => status(),
+    lights_led: async ({ on, target } = {}) => {
+      const srcs = target ? [...new Set(resolve(target).list.filter(d => d.shelly).map(d => d.shelly))] : [...shellies.keys()];
+      if (!srcs.length) return 'No plugs are connected right now.';
+      const out = await Promise.all(srcs.map(async s => { const r = await ledSet(s, !!on); if (r === 'ok') (L().secured ||= {})[s] = { ...(L().secured?.[s] || {}), led: !on }; return r; })); saveState();
+      return out.every(r => r === 'ok') ? `Plug LED ${on ? 'on' : 'off'} on ${srcs.length} plug${srcs.length > 1 ? 's' : ''}.` : `LED change failed on some plugs: ${out.filter(r => r !== 'ok').join('; ')}.`;
+    },
     lights_name: async ({ device = '', name, room }) => {
       const r = resolve(device); const d = r.list?.[0] || devs().find(x => /^plug\b/i.test(x.name) && !x.named);
       if (!d) return 'I could not tell which plug you mean.';

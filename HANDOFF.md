@@ -688,3 +688,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 ## Link drops mid-command (2026-11-10 02:00)
 - Owner: HUD flips OFFLINE in the middle of commands, Jarvis never sees them. No deploy was running (last deploy 22:26). The client had no heartbeat, so a socket that died silently (cell handoff, sleep) looked open and the command vanished until the close event fired.
 - Client: ping every 10 s, no traffic for 25 s = close and reconnect (2 s). Each ask carries a `rid`; if the link drops while thinking, the ask is re-sent once on reconnect (within 60 s). Server: replies `pong` to `ping`; drops an ask whose `rid` it already handled (`seenRid`, 2 min), so a resend never runs twice.
+
+## Plug LED off (2026-11-10 02:30)
+- Owner: the plug LEDs must not be on while the fan device runs. `ledSet()` sends `PLUGS_UI.SetConfig {leds:{mode:'off'}}`; runs for every plug on connect via `secure()` (once, `secured[src].led`). Voice/tool `lights_led {on, target?}` turns it back on. If a plug answers `fail` in the HUD log, the Gen4 key name differs: check `PLUGS_UI.GetConfig` on it.
