@@ -712,7 +712,7 @@
   setInterval(() => { if (rec && recWanted && !recOn && musicHeld && !musicPlaying()) startMic(); }, 4000);
   const WAKE_VARIANTS = () => {
     const w = cfg.wakeWord;
-    return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves', 'travis', 'jarvi', 'harvis', 'jarvice', 'charvis', 'jarvie', 'jervas', 'garvis'] : [w];
+    return w === 'jarvis' ? ['jarvis', 'jervis', 'javis', 'jarvas', 'jarvus', 'jarves', 'jarvi', 'harvis', 'jarvice', 'charvis', 'jarvie', 'jervas'] : [w];
   };
   const WAKE_UP = /^(wake up|wakey|daddy'?s home|i'?m home|i'?m back|good (morning|afternoon|evening)|you (up|there|awake))\b/i;
 
@@ -781,7 +781,8 @@
   // Any question counts: a "?" anywhere in his last couple of sentences, or a phrase like "shall I" / "would you like".
   // After a normal reply the mic also stays open briefly, so you can just keep talking (?follow=0 turns that off).
   const ASKING = /(\?|\b(shall i|should i|would you like|do you want|want me to|which (one|would|do)|let me know|your call|say yes|say the word|confirm|do you need|anything (you need|to bring)|need to (bring|remember))\b)/i;
-  const FOLLOW_UP = params.get('follow') !== '0';
+  // Off by default: an open mic after every reply picked up TV and room talk. Jarvis only listens without the wake word after he asks a question. ?follow=1 turns it back on.
+  const FOLLOW_UP = params.get('follow') === '1';
   function isQuestion(text) {
     const t = String(text || '').trim();
     return ASKING.test(t.slice(-220));
@@ -875,7 +876,8 @@
     const lower = text.toLowerCase();
     for (const w of WAKE_VARIANTS()) {
       const m = lower.match(new RegExp('\\b' + w + '\\b'));
-      if (m) return { i: m.index, len: w.length };
+      // Only a call: the name must open the sentence ("Jarvis, ...", "Hey Jarvis, ..."). A name in the middle of room talk is ignored.
+      if (m && lower.slice(0, m.index).trim().split(/\s+/).filter(Boolean).length <= 2) return { i: m.index, len: w.length };
     }
     return null;
   }
