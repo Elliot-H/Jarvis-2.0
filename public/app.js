@@ -82,11 +82,16 @@
 
   // ======================= websocket =======================
   let lostMidRequest = false; // a redeploy killed the socket while a request was in flight: its answer will never come
+  let reconnectTimer = null;
   function connect() {
+    // ONE socket only: send() and onclose both used to call connect(), so a drop left two live sockets and every message arrived (and was sent) twice.
+    clearTimeout(reconnectTimer); reconnectTimer = null;
+    if (ws && ws.readyState <= 1) return;
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    const me = ws;
     ws.onopen = () => { try { drainOutbox(); } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
-    ws.onclose = () => { if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); setTimeout(connect, 2000); };
-    ws.onmessage = e => handle(JSON.parse(e.data));
+    ws.onclose = () => { if (ws !== me) return; if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 2000); };
+    ws.onmessage = e => { if (ws !== me) return; handle(JSON.parse(e.data)); };
   }
   // Spoken commands must never be lost to a dropped link: hold them (up to 90s) and deliver the moment the socket is back.
   const outbox = [];
