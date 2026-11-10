@@ -670,3 +670,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## Mic opened after almost every reply (2026-11-09 19:40)
 - Owner's video: Jarvis answered TV talk ("don't look at me like that...") and then kept offering things. Cause: `isQuestion()` matched a broad phrase list (let me know / say the word / confirm / shall i ...) in the last 220 chars, so most replies opened a 20 s active mic where ANY speech is a command. Now only a reply whose LAST sentence ends with "?" opens the mic. On-device wake threshold set to 0.6 (0.7 risked missed calls, 0.5 false triggers); tune with WAKE_THRESHOLD in Railway.
+
+## Stale app (2026-11-09 19:50)
+- Owner's screenshot at 7:36 PM still showed doubled YOU lines and ambient talk captured: the phone was running an OLD app.js (WebView cached it). Fixes: static html/js/css now `Cache-Control: no-cache`; server sends `{type:'build', id}` (Railway commit SHA) on HUD connect and the HUD reloads itself when the id changes (localStorage `jarvis.build`); `addLog` also drops an identical YOU line within 6 s.

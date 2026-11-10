@@ -132,6 +132,7 @@
         if (m.state === 'thinking') { setState('thinking', { echo: false }); ticker('Processing…'); }
         else if (DISPLAY_ONLY) setState(m.state, { echo: false });
         break;
+      case 'build': try { const k = 'jarvis.build', prev = localStorage.getItem(k); localStorage.setItem(k, m.id); if (prev && prev !== m.id && !speaking && state !== 'thinking') location.reload(); } catch {} break;   // a new version shipped: load it
       case 'log': addLog(m.role === 'user' ? 'user' : 'system', m.text); break;
       case 'activity': addActivity(m.text); ticker(m.text); break;
       case 'device':
@@ -187,7 +188,7 @@
   // ======================= log / activity / caption =======================
   let lastLogged = { kind: '', k: '', t: 0 };
   function addLog(kind, text) {
-    { const k = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (kind === 'jarvis' && k && lastLogged.kind === 'jarvis' && lastLogged.k === k && Date.now() - lastLogged.t < 20000) return; lastLogged = { kind, k, t: Date.now() }; }   // same Jarvis line twice in the log: show it once
+    { const k = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && lastLogged.kind === kind && lastLogged.k === k && Date.now() - lastLogged.t < (kind === 'jarvis' ? 20000 : 6000) && kind !== 'system') return; lastLogged = { kind, k, t: Date.now() }; }   // same Jarvis line twice in the log: show it once
     const who = kind === 'user' ? 'YOU' : kind === 'jarvis' ? cfg.name.toUpperCase() : 'SYSTEM';
     const el = document.createElement('div');
     el.className = 'msg ' + kind;

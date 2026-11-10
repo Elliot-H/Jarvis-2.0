@@ -3208,7 +3208,7 @@ app.get('/api/chart', async (req, res) => {
     res.json({ symbol: y, tf, bars: b.slice(-120), price: px, ...chart.levels(b, px) });
   } catch (e) { res.status(502).json({ error: String(e.message || e).slice(0, 200) }); }
 });
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res, p) => { if (/\.(html|js|css)$/i.test(p)) res.setHeader('Cache-Control', 'no-cache'); } }));   // always revalidate: the app must never run an old script
 
 app.get('/api/config', (_req, res) => {
   res.json({
@@ -3709,9 +3709,11 @@ server.on('upgrade', (req, socket, head) => {
   else { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); }
 });
 
+const BUILD_ID = (process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_DEPLOYMENT_ID || String(Date.now())).slice(0, 12);
 wss.on('connection', (ws, req) => {
   if (LIGHTS.isNode(req)) return LIGHTS.attach(ws);   // Jarvis Node (Pi lights/clapper): its own protocol, never a HUD screen
   clients.add(ws);
+  try { ws.send(JSON.stringify({ type: 'build', id: BUILD_ID })); } catch {}
   ws.send(JSON.stringify({ type: 'silent', on: silentActive() }));
   if (freshBoot) setTimeout(() => { if (freshBoot) { freshBoot = false; lastBackup = ''; saveState(); } }, 8000);   // no restore came: phone has no backup, start fresh
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
