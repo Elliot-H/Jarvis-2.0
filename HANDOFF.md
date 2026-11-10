@@ -680,3 +680,7 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 - Owner tools (tools.js-style specs in companions.js COMPANION_TOOLS, added to TALK_TOOLS): companion_add, companion_list, companion_set. Boot seed (20 s after start, once): creates "Princess" (partner, all lights) and "Kids" (shared kid Jarvis, lights "tv room") and pushes both links to the Owner.
 - Voice is the browser/phone voice with picker, speed, pitch (Fish JARVIS voice stays the master's). Mic is tap-to-talk (Web Speech); no always-on wake word in the web app. Next: per-kid Jarvis (companion_add each), Fish voices per person, native app for hands-free wake, kid location/chores/allowance from MINI_JARVIS.md hooked into the kid Jarvis, curfew limits.
 - Tested with a fake brain: bad token 404, kid blocked from non-allowed lights, rename/style/accent saved, manifest uses her name. Not tested live.
+
+## Plug lock-down (2026-11-09 22:40)
+- Owner asked if the Shelly plugs are reachable from anywhere and secure. Cloud path: plug dials OUT to wss://<jarvis>/shelly/<secret token> (cert checked with ca.pem), so no inbound port; control is through Jarvis (PIN). Gap found: plugs had no local password, setup hotspot on, Bluetooth RPC on.
+- `lights.js secure(src)` runs on each plug's first connect: `Shelly.SetAuth` (admin + random password in `state.lights.secured[src].pass`), `Ble.SetConfig rpc.enable=false`, `Wifi.SetConfig ap.enable=false`; result logged to the HUD. Recovery: hold the plug button 10 s, redo /plug-setup.

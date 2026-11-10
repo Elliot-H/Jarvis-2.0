@@ -106,6 +106,7 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
         if (nm) for (const k of Object.keys(L().devices)) { const d = L().devices[k]; if (d.shelly === src && !d.named) { d.name = nm; d.named = true; if (!d.room) d.room = nm.replace(/\b(lamp|light|lights)\b/gi, '').replace(/\s+/g, ' ').trim(); } }   // a name typed on the setup page lives on the plug itself and wins
         L().sites.home = { ...(L().sites.home || {}), seen: Date.now() };
         saveState(); broadcast({ type: 'log', role: 'system', text: `Shelly plug ${src} connected.` });
+        secure(src).catch(e => log('lights: secure failed ' + e.message));
       } else if (m.method === 'NotifyStatus') {
         const ch = shellyApply(src, m.params, 'switch'); L().sites.home = { ...(L().sites.home || {}), seen: Date.now() };
         if (ch.length) broadcast({ type: 'log', role: 'system', text: `${ch.map(d => `${label(d)} ${d.on ? 'on' : 'off'}`).join(', ')} (at the plug).` });
@@ -116,6 +117,20 @@ export function make({ state, saveState, broadcast, remember, log = console.log 
       shellies.delete(src); for (const d of Object.values(L().devices)) if (d.shelly === src) d.online = false; saveState();
       log(`lights: Shelly plug ${src} offline`);
     });
+  }
+  // Lock a plug once: password on its local web/RPC, setup hotspot off, Bluetooth control off. The cloud link (outbound, TLS, secret token) is unaffected.
+  // Password is kept in state.lights.secured[src]; a plug that lost its Wi-Fi/password is recovered by holding its button 10 s (factory reset) and redoing /plug-setup.
+  async function secure(src) {
+    const S = (L().secured ||= {}); if (S[src]?.done) return;
+    const info = await shellyRpc(src, 'Shelly.GetDeviceInfo', {}); const id = info.result?.id; if (!id) return;
+    const rec = (S[src] ||= { pass: crypto.randomBytes(12).toString('base64url'), steps: {} });
+    if (info.result.auth_en) rec.steps.auth = 'already';
+    else { const ha1 = crypto.createHash('sha256').update(`admin:${id}:${rec.pass}`).digest('hex'); const r = await shellyRpc(src, 'Shelly.SetAuth', { user: 'admin', realm: id, ha1 }); rec.steps.auth = r.error ? 'fail: ' + (r.error.message || '') : 'ok'; }
+    const b = await shellyRpc(src, 'Ble.SetConfig', { config: { rpc: { enable: false } } }); rec.steps.ble = b.error ? 'fail: ' + (b.error.message || '') : 'ok';
+    const a = await shellyRpc(src, 'Wifi.SetConfig', { config: { ap: { enable: false } } }); rec.steps.ap = a.error ? 'fail: ' + (a.error.message || '') : 'ok';
+    rec.done = Object.values(rec.steps).every(v => !/^fail/.test(v)); rec.at = Date.now(); saveState();
+    log(`lights: secured ${src}: ${JSON.stringify(rec.steps)}`);
+    broadcast({ type: 'log', role: 'system', text: `Plug ${src} locked down: ${Object.entries(rec.steps).map(([k, v]) => k + ' ' + v).join(', ')}.` });
   }
   async function shellySet(d, on, bri) {
     const method = on === 'toggle' ? 'Switch.Toggle' : 'Switch.Set';
