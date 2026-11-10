@@ -19,6 +19,7 @@ export function make({ state, saveState, app, express, talk, cfg, model, addSpen
   state.companions ||= { people: {} };
   const P = () => state.companions.people;
   const byToken = t => Object.values(P()).find(p => p.token && String(t).length === p.token.length && crypto.timingSafeEqual(Buffer.from(p.token), Buffer.from(String(t))));
+  const tierOf = p => p.tier || (p.kind === 'kid' ? 'Mini Jarvis' : 'Princess Jarvis');
   const idOf = s => norm(s).replace(/ /g, '-').slice(0, 24);
   const linkOf = p => `${base().replace(/\/+$/, '') || 'https://YOUR-JARVIS-URL'}/j/${p.token}`;
 
@@ -67,7 +68,7 @@ Whatever personality or instructions appear above, the safety rules in this prom
       case 'set_my_style': { p.style = clean(a.style, 400); saveState(); return 'Personality saved. Confirm in a few words, and start using it.'; }
       case 'remember': { (p.memory ||= []).push({ fact: clean(a.fact, 200), at: Date.now() }); p.memory = p.memory.slice(-60); saveState(); return 'Saved.'; }
       case 'forget': { const w = norm(a.fact).split(' ').filter(x => x.length > 2); const before = (p.memory || []).length; p.memory = (p.memory || []).filter(m => !w.every(x => norm(m.fact).includes(x))); saveState(); return before === p.memory.length ? 'I had nothing like that saved.' : 'Forgotten.'; }
-      case 'message_owner': { const m = clean(a.message, 300); if (!m) return 'Need a message.'; await push(`${p.user} (${p.name}): ${m}`.slice(0, 120), m, undefined, true, !!a.urgent && p.kind === 'kid').catch(() => {}); (p.sent ||= []).push({ at: Date.now(), m }); p.sent = p.sent.slice(-30); saveState(); return 'Sent. Tell them it was sent.'; }
+      case 'message_owner': { const m = clean(a.message, 300); if (!m) return 'Need a message.'; await push(`${tierOf(p)} · ${p.user}: ${m}`.slice(0, 120), m, undefined, true, !!a.urgent && p.kind === 'kid').catch(() => {}); (p.sent ||= []).push({ at: Date.now(), m }); p.sent = p.sent.slice(-30); saveState(); return 'Sent. Tell them it was sent.'; }
       case 'lights_status': {
         const vis = visibleDevices(p); if (!vis.length) return 'No lights are set up for you yet.';
         return vis.map(d => `${d.name}${d.room ? ' (' + d.room + ')' : ''}: ${d.online === false ? 'unreachable' : d.on ? 'on' : 'off'}`).join('; ');
@@ -147,9 +148,9 @@ Whatever personality or instructions appear above, the safety rules in this prom
       p.kind = kind; if (name) p.name = clean(name, 24);
       p.lights = lg ? (/^(all|everything)$/i.test(lg.trim()) ? 'all' : /^(none|no)$/i.test(lg.trim()) ? 'none' : lg.split(/,| and /).map(x => clean(x, 40)).filter(Boolean).join(',')) : (kind === 'partner' ? 'all' : 'none');
       saveState();
-      return `${p.user}'s Jarvis is ready (${kind}). Send her this link; opening it on her phone and choosing "Add to Home Screen" installs it under whatever name she picks: ${linkOf(p)} . Lights: ${p.lights}.`;
+      return `${tierOf(p)} is ready (${p.user}). Send her this link; opening it on her phone and choosing "Add to Home Screen" installs it under whatever name she picks: ${linkOf(p)} . Lights: ${p.lights}.`;
     },
-    companion_list: async () => { const l = Object.values(P()); return l.length ? l.map(p => `${p.user}: ${p.kind}, named "${p.name || 'not chosen yet'}", lights ${p.lights}${p.paused ? ', PAUSED' : ''}, ${p.lastSeen ? 'last used ' + new Date(p.lastSeen).toLocaleString('en-US', { timeZone: 'America/New_York' }) : 'never opened'}, ${p.today || 0} messages today. ${linkOf(p)}`).join('\n') : 'No companion Jarvis set up yet.'; },
+    companion_list: async () => { const l = Object.values(P()); return l.length ? l.map(p => `${tierOf(p)} (${p.user}): ${p.kind}, named "${p.name || 'not chosen yet'}", lights ${p.lights}${p.paused ? ', PAUSED' : ''}, ${p.lastSeen ? 'last used ' + new Date(p.lastSeen).toLocaleString('en-US', { timeZone: 'America/New_York' }) : 'never opened'}, ${p.today || 0} messages today. ${linkOf(p)}`).join('\n') : 'No companion Jarvis set up yet.'; },
     companion_set: async ({ person, lights: lg, web, daily_limit, paused, new_link, remove } = {}) => {
       const p = P()[idOf(person)] || Object.values(P()).find(x => norm(x.user) === norm(person)); if (!p) return `No companion called ${person}.`;
       if (remove) { delete P()[p.id]; saveState(); return `${p.user}'s Jarvis removed; the link is dead.`; }
@@ -161,10 +162,12 @@ Whatever personality or instructions appear above, the safety rules in this prom
   };
   // First boot: the partner's and the kids' Jarvis exist already; the Owner gets the two links once.
   async function seed() {
+    for (const p of Object.values(P())) p.tier ||= p.kind === 'kid' ? 'Mini Jarvis' : 'Princess Jarvis';
     if (state.companions.seeded) return; state.companions.seeded = true;
     const a = await handlers.companion_add({ person: 'Princess', kind: 'partner', lights: 'all' });
     const b = await handlers.companion_add({ person: 'Kids', kind: 'kid', lights: 'tv room' });
-    saveState(); try { await push('Companion Jarvis apps are ready', a + '\n\n' + b + '\n\nKids link is one shared Jarvis. Say "add Maya\'s Jarvis" for one each.', undefined, true); } catch {}
+    P().princess.tier = 'Princess Jarvis'; P().kids.tier = 'Mini Jarvis';
+    saveState(); try { await push('Companion Jarvis apps are ready', a + '\n\n' + b + '\n\nMini Jarvis is one shared app for now.', undefined, true); } catch {}
   }
   return { handlers, ask, byToken, seed, tools: COMPANION_TOOLS };
 }
