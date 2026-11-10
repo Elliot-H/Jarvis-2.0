@@ -789,8 +789,11 @@
   // Off by default: an open mic after every reply picked up TV and room talk. Jarvis only listens without the wake word after he asks a question. ?follow=1 turns it back on.
   const FOLLOW_UP = params.get('follow') === '1';
   function isQuestion(text) {
+    // Only a real question opens the mic: his LAST sentence must end with "?". The old phrase list ("let me know", "say the word", "confirm"...)
+    // matched most replies, so the mic opened after nearly everything and picked up TV and room talk as commands.
     const t = String(text || '').trim();
-    return ASKING.test(t.slice(-220));
+    const last = t.split(/(?<=[.!?])\s+/).filter(Boolean).pop() || '';
+    return /\?["')\]]*\s*$/.test(last);
   }
   // A spoken question must keep the mic open for the answer, even on the wake-up briefing (wake engine still releasing the mic, a late 'thinking' state, a blip).
   // Watchdog: for 25 s after the question, if nothing has been heard and the mic is not on, open it again.

@@ -667,3 +667,6 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## ROOT CAUSE of the doubled lines (2026-11-09 19:20)
 - public/app.js `connect()` was called from BOTH `send()` (when the socket was down) and `ws.onclose` (2 s timer) and never checked for a live socket, so after a drop the HUD held TWO sockets and every server broadcast (user log, say) arrived twice and `resume`/`hello` went out twice. Typed text showed it (not the recognizer). Fix: single-flight `connect()` (returns if CONNECTING/OPEN, clears the reconnect timer), handlers ignore events from a stale socket. The earlier dedupe layers stay as a safety net. Server verified to send one broadcast per socket.
+
+## Mic opened after almost every reply (2026-11-09 19:40)
+- Owner's video: Jarvis answered TV talk ("don't look at me like that...") and then kept offering things. Cause: `isQuestion()` matched a broad phrase list (let me know / say the word / confirm / shall i ...) in the last 220 chars, so most replies opened a 20 s active mic where ANY speech is a command. Now only a reply whose LAST sentence ends with "?" opens the mic. On-device wake threshold set to 0.6 (0.7 risked missed calls, 0.5 false triggers); tune with WAKE_THRESHOLD in Railway.

@@ -3215,7 +3215,7 @@ app.get('/api/config', (_req, res) => {
     name: process.env.JARVIS_NAME || 'JARVIS',
     wakeWord: (process.env.WAKE_WORD || 'jarvis').toLowerCase(),
     userTitle: process.env.USER_TITLE || 'sir',
-    wakeThreshold: process.env.WAKE_THRESHOLD || '0.7',   // on-device "Hey Jarvis" score needed while music plays (Android app only)
+    wakeThreshold: process.env.WAKE_THRESHOLD || '0.6',   // on-device "Hey Jarvis" score needed while music plays (Android app only)
     elevenlabs: Boolean(process.env.FISH_API_KEY || process.env.ELEVENLABS_API_KEY),
     voiceProvider: process.env.FISH_API_KEY ? 'FISH AUDIO' : 'ELEVENLABS'
   });
