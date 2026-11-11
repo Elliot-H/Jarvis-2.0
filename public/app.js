@@ -47,7 +47,9 @@
   let ws, state = 'idle', level = 0, targetLevel = 0;
   let audioCtx, ttsAnalyser, micAnalyser, freq = new Uint8Array(128);
   let speaking = false, currentAudio = null;
-  let silentMuted = false;   // the mic is muted because of silent mode (restored when it ends)
+  let silentMuted = false, silentUntil = 0;   // the mic is muted because of silent mode (restored when it ends); kept across reloads
+  try { silentMuted = localStorage.getItem('jarvis.silentMuted') === '1'; silentUntil = Number(localStorage.getItem('jarvis.silentUntil')) || 0; } catch {}
+  const markSilentMute = (on, until) => { silentMuted = !!on; silentUntil = on ? (Number(until) || silentUntil || Date.now() + 8 * 3600e3) : 0; try { if (on) { localStorage.setItem('jarvis.silentMuted', '1'); localStorage.setItem('jarvis.silentUntil', String(silentUntil)); } else { localStorage.removeItem('jarvis.silentMuted'); localStorage.removeItem('jarvis.silentUntil'); } } catch {} };
   let silent = false;   // silent / text-only mode (server-owned): no speech, no filler clips
   let muted = false; try { if (!localStorage.getItem('jarvis.muteFix1')) { localStorage.setItem('jarvis.muteFix1', '1'); localStorage.removeItem('jarvis.muted'); } muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}   // one-time: clear a mute left on by the old full-silence build of silent mode
 
@@ -89,7 +91,7 @@
     if (ws && ws.readyState <= 1) return;
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
     const me = ws;
-    ws.onopen = () => { lastRx = Date.now(); try { drainOutbox(); } catch {} try { if (lostMidRequest && inflight && Date.now() - inflight.t < 60000) { ws.send(JSON.stringify(inflight.o)); lostMidRequest = false; addActivity('Link dropped mid-command; re-sent it automatically.'); inflight = null; } } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
+    ws.onopen = () => { lastRx = Date.now(); try { if (outSilent) { ws.send(JSON.stringify(outSilent)); outSilent = null; } } catch {} try { drainOutbox(); } catch {} try { if (lostMidRequest && inflight && Date.now() - inflight.t < 60000) { ws.send(JSON.stringify(inflight.o)); lostMidRequest = false; addActivity('Link dropped mid-command; re-sent it automatically.'); inflight = null; } } catch {} try { if (booted && document.visibilityState === 'visible') setTimeout(() => send({ type: 'resume' }), 300); } catch {} if (window.AndroidDevice) ws.send(JSON.stringify({ type: 'hello', device: true })); try { const b = JSON.parse(localStorage.getItem('jarvis.backup') || 'null'); if (b) ws.send(JSON.stringify({ type: 'restore', data: b })); } catch {} chip('#chipLink', 'ok', 'LINK'); try { window.__micKick && window.__micKick(); } catch {} if (state === 'offline') setState('idle', { echo: false }); if (lostMidRequest) { lostMidRequest = false; stopFillers(); addLog('system', 'Connection dropped while I was working on that (server restarting). Please say it again.'); } };
     ws.onclose = () => { if (ws !== me) return; if (state === 'thinking') lostMidRequest = true; chip('#chipLink', 'bad', 'LINK'); setState('offline', { echo: false }); clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 2000); };
     ws.onmessage = e => { if (ws !== me) return; lastRx = Date.now(); const d = JSON.parse(e.data); if (d.type === 'pong') return; if (d.type === 'say' || d.type === 'log' || d.type === 'thinking' || d.type === 'reply') inflight = null; handle(d); };
   }
@@ -107,7 +109,9 @@
     const h = heldSays.shift(); if (Date.now() - h.t > 2 * 3600e3) return;
     heldLast = Date.now(); handle(h.m);
   }, 1000);
+  let outSilent = null;   // a silent-mode on/off made while the link was down: sent on reconnect, so the server does not switch it back
   function send(o) {
+    if (o && (o.type === 'silent_on' || o.type === 'silent_off')) { if (ws?.readyState === 1) { outSilent = null; ws.send(JSON.stringify(o)); } else { outSilent = o; if (!ws || ws.readyState > 1) { try { connect(); } catch {} } } return; }
     if (o && (o.type === 'ask' || o.type === 'wake')) replyDue = Date.now();
     if (o && o.type === 'ask' && !o.rid) { o.rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); inflight = { o, t: Date.now() }; }
     if (ws?.readyState === 1) { ws.send(JSON.stringify(o)); return; }
@@ -153,8 +157,9 @@
         break;
       case 'backup': try { localStorage.setItem('jarvis.backup', JSON.stringify(m.data)); } catch {} break;
       case 'silent': silent = !!m.on; if (silent) { stopFillers(); stopSpeaking(true); }
-        // the mic stays on in silent mode so "silent mode off" works by voice; undo a mute left by the older full-silence build
-        if (!silent && silentMuted) { silentMuted = false; if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
+        // Silent mode = really quiet: mic, recognizer and wake word engine shut (muteMic). Ends by typing "silent mode off", tapping TEXT ONLY or the mic, or after 8 h.
+        if (silent) { if (!muted) { if (booted) muteMic(false); else { muted = true; try { localStorage.setItem('jarvis.muted', '1'); } catch {} paintMute(); } } markSilentMute(true, m.until); }
+        else if (silentMuted) { markSilentMute(false); if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
         window.__silent = silent;
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
       case 'voice':   // server switched between the Fish voice and its backup
@@ -661,6 +666,7 @@
     if (speak) send({ type: 'mic_muted' });
   }
   function unmuteMic() {
+    if (silentMuted) { markSilentMute(false); send({ type: 'silent_off' }); }   // waking the mic by hand also ends silent mode
     muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {}
     paintMute(); chip('#chipMic', 'ok', 'MIC'); setState('idle'); addActivity('Microphone on.');
     micNotBefore = 0; recBackoff = 0; startMicMeter(); if (rec) { recWanted = true; manualMicUntil = Date.now() + 15000; goActive(); }
@@ -945,7 +951,7 @@
   function submit(text, raw) {
     clearTimeout(activeTimer); mode = 'passive';
     if (!text) return;
-    if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); if (/no mic/i.test(text) && /no talk/i.test(text)) send({ type: 'ask', text }); muteMic(!/no mic/i.test(text)); return; }
+    if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); muteMic(false); markSilentMute(true); send({ type: 'silent_on', text }); return; }   // "stop listening" = silent mode: mic + wake word off, text only, 8 h cap
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); replyDue = 0; setState('idle'); return; }
     if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
     if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
@@ -1342,5 +1348,7 @@
     resize(); connect(); requestAnimationFrame(frame);
     if ('speechSynthesis' in window) speechSynthesis.getVoices();
   })();
-  try { document.querySelector('#chipVoice').addEventListener('click', () => { if (silent) send({ type: 'silent_off' }); }); } catch {}   // tap TEXT ONLY to end silent mode
+  try { document.querySelector('#chipVoice').addEventListener('click', () => { if (!silent && !silentMuted) return; if (muted) unmuteMic(); if (silent) send({ type: 'silent_off' }); }); } catch {}   // tap TEXT ONLY to end silent mode (mic and wake word come back)
+  // Phone-side safety net for the 8-hour cap (server also ends it): if the link is down when it expires, the mic still comes back.
+  setInterval(() => { if (silentMuted && silentUntil && Date.now() > silentUntil) { addActivity('Silent mode reached its 8-hour limit: microphone back on.'); if (muted) unmuteMic(); else markSilentMute(false); } }, 60e3);
 })();
