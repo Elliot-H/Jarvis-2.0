@@ -931,6 +931,7 @@ function notLeftAnswer(q, text) {
 }
 async function bucketAnswer(text) {
   const q = state.pendingQ; if (!q || Date.now() - q.at > 10 * 60e3) return false;
+  if (['dest', 'checklist', 'depart', 'stay', 'stay_music'].includes(q.type)) state.leaveAnsweredAt = Date.now(); // answering a leaving question never starts music for 10 min without an explicit music word
   if (['dest', 'checklist', 'depart'].includes(q.type) && notLeftAnswer(q, text)) return true;
   if (['dest', 'checklist', 'depart'].includes(q.type) && await arrivalStatement(q, text)) return true; // "no, I'm at the Camden house now" is an ARRIVAL, never a departure answer
   if (q.type === 'where') return whereAnswer(q, text);
@@ -4242,25 +4243,20 @@ function shutdownFire() {
   shutdownEnd();
   dlog('shutdown-timeout', { round: sd.round, dongleSeen: !!sd.dongleSeen });
   state.pendingQ = { type: 'stay', round: sd.round, at: Date.now() }; saveState();
-  deliver(sd.round > 1 ? 'Still no sign of the truck, sir. Are you still leaving, or staying at the shop? If you are staying, shall I put the shop music back on?' : 'Five minutes and no engine start, sir. Do you still plan on leaving, or are you staying at the shop? If you are staying, I can put the music back on.', 'Jarvis', true);
+  deliver(sd.round > 1 ? 'Still no sign of the truck, sir. Are you still leaving, or staying at the shop?' : 'Five minutes and no engine start, sir. Do you still plan on leaving, or are you staying at the shop?', 'Jarvis', true);
 }
 async function stayAnswer(q, text) {
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   const say = reply => { broadcast({ type: 'log', role: 'user', text }); remember('user', text); remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: true }); return true; };
   if (Date.now() - q.at > 10 * 60e3 || t.split(' ').length > 12) { state.pendingQ = null; saveState(); return false; }
   const NO = /^(no|nope|nah|not now|no thanks|leave it)\b/, YES = /^(yes|yeah|yep|yup|sure|please|do it|go ahead|ok|okay)\b/;
-  // The user just said yes to the music offer, so the "did he ask for music" guard is satisfied.
-  const startMusic = async () => { turn = { id: turn.id, text: 'turn the shop music back on', origin: 'user' }; const r = await handlers.music_control({ action: 'start' }); return /FAILED|Could not|Refused/i.test(String(r)) ? `I could not start the music, sir. ${String(r).slice(0, 160)}` : 'Music is back on, sir.'; };
-  if (q.type === 'stay_music') {
-    state.pendingQ = null; saveState();
-    if (NO.test(t)) return say('Very good, sir. Quiet shop.');
-    if (YES.test(t) || /\b(music|tunes)\b/.test(t)) return say(await startMusic());
-    return false;
-  }
+  // Answering the leaving/staying question NEVER starts music (Owner, Nov 16). Music only on an explicit music request, through the normal music gate.
+  state.leaveAnsweredAt = Date.now();
+  if (q.type === 'stay_music') { state.pendingQ = null; saveState(); return false; } // legacy question from an older build: no auto-start, the brain handles it
+  if (/\b(music|tunes|spotify|playlist)\b/.test(t)) { state.pendingQ = null; saveState(); return false; } // he named music himself: the brain + music gate decide
   if (/\b(staying|stay|not leaving|stay put|here)\b/.test(t) || NO.test(t)) {
-    if (/\b(music|tunes)\b/.test(t)) { state.pendingQ = null; saveState(); return say(await startMusic()); }
-    state.pendingQ = { type: 'stay_music', at: Date.now() }; saveState();
-    return say('Understood, sir. Shall I turn the shop music back on?');
+    state.pendingQ = null; saveState();
+    return say('Understood, sir. Staying at the shop.');
   }
   if (DEPART_YES.test(t) || YES.test(t) || /\bleaving\b/.test(t)) { // still leaving: keep hunting for another window
     const round = (q.round || 1) + 1; state.pendingQ = null;
@@ -4688,7 +4684,7 @@ handlers.music_control = async ({ action, query, kind, volume, speaker }) => {
     const starts = ['start', 'play', 'resume', 'resume_last'].includes(a?.action);
     if (starts) {
       const said = turn?.text || '';
-      const inTrip = tripOn() || !!headingFresh() || ['depart', 'checklist', 'dest', 'vscan'].includes(state.pendingQ?.type) || (state.corrected && Date.now() - state.corrected < 10 * 60e3);   // replying to a departure question never starts media (Oct 23)
+      const inTrip = tripOn() || !!headingFresh() || ['depart', 'checklist', 'dest', 'vscan', 'stay', 'stay_music'].includes(state.pendingQ?.type) || (state.leaveAnsweredAt && Date.now() - state.leaveAnsweredAt < 10 * 60e3) || (state.corrected && Date.now() - state.corrected < 10 * 60e3);   // replying to a departure question never starts media (Oct 23)
       if (turn?.origin !== 'user' || !WANTS_MUSIC.test(said) || (inTrip && !MUSIC_WORD.test(said))) {
         broadcast({ type: 'activity', text: `Blocked music ${a.action}: you did not ask for music (heard: "${said.slice(0, 60)}")` });
         console.log(`music ${a.action} BLOCKED, origin=${turn?.origin}, text="${said.slice(0, 80)}"`);
