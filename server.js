@@ -2307,7 +2307,7 @@ async function localGreeting(memo) {
 }
 async function briefing(reason = 'scheduled', memo) {
   if (reason === 'wake') {   // silent mode stays on (text only) until the user ends it explicitly
-  const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); return; }
+  const text = await localGreeting(memo); remember('jarvis', text); broadcast({ type: 'say', text, speak: true, memo: { greetedDay: state.greetedDay, wx: state.weather } }); if (nowCtx().h >= 4 && nowCtx().h < 12) perfectMorning(); return; }
   const b = readText('briefing.md');
   if (!b.trim()) return;
   ask(`[${reason} briefing] ${b}`, { spoken: reason !== 'scheduled', origin: 'system', label: reason === 'wake' ? 'Wake-up briefing' : 'Scheduled briefing' });
@@ -2569,6 +2569,45 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
     return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each, in this order: symbol, price, trend/structure, where it sits (support, resistance, demand zone, VWAP), the weekly/daily/entry alignment and whether the 5-minute entry trigger says go or wait, then the stop, the invalidation level, risk % and dollars at risk (sizing), the target, and the probability line from history (say plainly when samples are few). Mention exitWarning if present. Never call a setup certain or guaranteed: frame it as odds with a stop. Only tradeable symbols inside his limits are listed (skippedNotTradeable says what was dropped). Keep the spoken reply short; offer to watch it. Say once it is not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the user plainly.`; }
 };
+// Perfect-only morning list (2026-11-17, maintenance): only tickers scoring a flat 100/100 on the screening rules
+// (every block earned, nothing missing, no gate, stop not too wide, no exit warning). Top five go straight on the HUD
+// (panel "perfect_setups"); near-misses are never shown or spoken. None = panel cleared and a plain "nothing worth noting".
+// The 5-minute entry trigger is NOT required: a perfect daily/weekly setup counts even if the entry is days out.
+const PERFECT_NONE = 'Nothing worth noting this morning, sir. No ticker scores a perfect one hundred.';
+const isPerfect = ev => ev && ev.score === 100 && !(ev.missing || []).length && !ev.exitWarning;
+let perfectBusy = null;
+async function perfectSetups() {
+  if (perfectBusy) return perfectBusy;
+  perfectBusy = (async () => {
+    const list = new Set(wlRows().map(w => String(w.symbol).toUpperCase()));
+    if (trade.configured()) { try { (await trade.trending(25)).all.forEach(x => list.add(x)); } catch {} }
+    if (!list.size) return { error: 'Alpaca keys are not set and the watch list is empty, so there is nothing to scan.' };
+    const r = await sig.scan([...list], list.size, { budget: sigBudget(), onlyTradeable: true });
+    const hits = (r.top || []).filter(isPerfect)
+      .sort((a, b) => (b.history?.winRatePct || 0) - (a.history?.winRatePct || 0) || (b.history?.avgR || 0) - (a.history?.avgR || 0)).slice(0, 5);
+    if (!hits.length) { delete state.panels.perfect_setups; delete heldPanels.perfect_setups; saveState(); broadcast({ type: 'panels', panels: state.panels }); return { scanned: r.scanned, hits: [] }; }
+    const body = hits.map(h => `${h.symbol}  $${h.price}  100/100  stop ${h.stop ?? 'n/a'}  target ${h.target ?? 'n/a'}${h.entryTrigger?.trigger ? '  entry: ' + h.entryTrigger.trigger : ''}${h.history?.samples >= 5 ? `  history ${h.history.winRatePct}% of ${h.history.samples}` : ''}`).join('\n') + '\n\nPerfect 100/100 only. Odds, not a guarantee; not advice.';
+    state.panels.perfect_setups = { id: 'perfect_setups', title: 'Perfect setups (100/100)', body, updatedAt: new Date().toISOString() };
+    saveState(); broadcast({ type: 'panels', panels: state.panels });
+    return { scanned: r.scanned, hits };
+  })();
+  try { return await perfectBusy; } finally { perfectBusy = null; }
+}
+const perfectLine = res => res.error ? `I couldn't run the perfect-setup scan, sir. ${res.error}`
+  : !res.hits.length ? PERFECT_NONE
+  : `${res.hits.length === 1 ? 'One ticker scores' : res.hits.length + ' tickers score'} a perfect one hundred, sir: ${res.hits.map(h => h.symbol.split('').join(' ')).join(', ')}. They're on the HUD.`;
+handlers.perfect_setups = async () => {
+  try {
+    const res = await perfectSetups();
+    return JSON.stringify({ say: perfectLine(res), symbols: (res.hits || []).map(h => ({ symbol: h.symbol, price: h.price, stop: h.stop, target: h.target, entry: h.entryTrigger?.trigger, history: h.history })), guide: 'Already on the HUD (do not call show_panel). Say the "say" line. Name ONLY these symbols; never mention near-misses, partial scores or anything "close". If none, say plainly there is nothing worth noting. Not advice.' });
+  } catch (e) { return `Perfect-setup scan failed: ${e.message} Tell the user plainly.`; }
+};
+// Morning wake-up: once per day before noon, unless financial notes are on hold.
+async function perfectMorning() {
+  if (finHoldActive() || state.perfectDay === state.greetedDay) return;
+  state.perfectDay = state.greetedDay; saveState();
+  try { deliver(perfectLine(await perfectSetups()), 'Perfect setups'); } catch (e) { console.log('perfect setups:', e.message); }
+}
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
 // Written call for a watch row: action word (BUY/HOLD/SELL/WATCH/AVOID), trend/bias, confidence and the reasoning in plain English.
 // A row with an entry price is treated as a position he holds (HOLD/SELL); otherwise BUY/WATCH/AVOID.
