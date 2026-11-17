@@ -1185,7 +1185,7 @@ const MUTE_ON = /\b(go(ing)? silent|go mute|be silent|silent mode|mute mode|mute
 const MUTE_OFF = /\b(silent( mode)? (is )?off|mute( mode)? (is )?off|(turn|switch|take) (it |the )?(silent|mute)( mode)? off|(end|stop|exit|leave|cancel) (the )?(silent|mute)( mode)?|unmute|un mute|i m back|i am back|come back|you can (talk|speak) again)\b/;
 const MUTE_RECORD = /\b(remind|reminder|remember|make a note|note (that|this|to)|write (that|this) down|add .{1,40} to (my |the )?list|heading to|headed to|on my way|i m leaving|i am leaving)\b/;
 const MUTE_DROP = new Set(['panels', 'open_url', 'listen', 'social_preview', 'vscan_explain', 'checklist']);
-const muteActive = () => !!state.mute?.on;
+const muteActive = () => { if (state.mute?.on && Date.now() - (state.mute.at || 0) > 8 * 3600e3) { console.log('mute mode: auto-ended after 8 h'); setMute(false); } return !!state.mute?.on; };   // 8 h safety: a forgotten mute must never leave Jarvis deaf for days
 function setMute(on) {
   state.mute = on ? { on: true, at: Date.now(), heard: 0 } : { on: false }; saveState();
   broadcast({ type: 'mute', on: !!on });
@@ -3943,6 +3943,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });
   ws.on('message', async raw => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.type === 'mute_off' && muteActive()) { const n = state.mute.heard || 0; setMute(false); const r = `I'm back, sir.${n ? ` I logged ${n} message${n === 1 ? '' : 's'} while silent.` : ''}`; remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true }); return; }   // the Owner tapped the mic: that always ends mute mode
     if (msg.type === 'ping') { try { ws.send('{"type":"pong"}'); } catch {} return; }
     if (msg.type === 'restore' && msg.data && (freshBoot || Number(msg.data.stamp) > (state.backupStamp || 0))) {
       freshBoot = false;

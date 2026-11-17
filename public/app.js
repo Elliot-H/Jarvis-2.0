@@ -184,7 +184,7 @@
           if (filler.cur && cfg.elevenlabs) { try { const c0 = speechChunks(stripForSpeech(m.text || ''))[0]; if (c0) fetch('/api/tts?prefetch=1&text=' + encodeURIComponent(c0.trim())).catch(() => {}); } catch {} }
           afterFiller(() => speak(m.text));
         }
-        else { stopFillers(); if (!hush) caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
+        else { stopFillers(); if (!hush) caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted && !hush) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
@@ -1123,6 +1123,7 @@
   });
   $('#micBtn').onclick = () => {
     if (!booted) return boot();
+    if (hush) { send({ type: 'mute_off' }); return; }   // tapping the mic always ends mute mode
     if (muted) return unmuteMic();
     // Only a mic that is really open counts as "on"; a stale listening state must not turn the tap into a stop.
     if ((pending && !pending.wakeOnly) || carry) {   // push-to-talk: tapping again sends what was heard right now
@@ -1133,7 +1134,7 @@
     if (state === 'listening' && recOn) { mode = 'passive'; manualMicUntil = 0; clearTimeout(activeTimer); try { rec && rec.abort(); } catch {} setState('idle'); }
     else { micNotBefore = 0; recBackoff = 0; manualMicUntil = Date.now() + 15000; goActive(); }
   };
-  $('#reactor').onclick = () => { if (!booted) return boot(); if (muted) return unmuteMic(); if (speaking) stopSpeaking(); else goActive(); };
+  $('#reactor').onclick = () => { if (!booted) return boot(); if (hush) { send({ type: 'mute_off' }); return; } if (muted) return unmuteMic(); if (speaking) stopSpeaking(); else goActive(); };
   $('#newSess').onclick = () => { send({ type: 'new_session' }); $('#log').innerHTML = ''; };
   document.addEventListener('keydown', e => {
     if (e.code !== 'Space' || document.activeElement === $('#cmdInput')) return;
