@@ -51,6 +51,7 @@
   try { silentMuted = localStorage.getItem('jarvis.silentMuted') === '1'; silentUntil = Number(localStorage.getItem('jarvis.silentUntil')) || 0; } catch {}
   const markSilentMute = (on, until) => { silentMuted = !!on; silentUntil = on ? (Number(until) || silentUntil || Date.now() + 8 * 3600e3) : 0; try { if (on) { localStorage.setItem('jarvis.silentMuted', '1'); localStorage.setItem('jarvis.silentUntil', String(silentUntil)); } else { localStorage.removeItem('jarvis.silentMuted'); localStorage.removeItem('jarvis.silentUntil'); } } catch {} };
   let silent = false;   // silent / text-only mode (server-owned): no speech, no filler clips
+  let hush = false;   // mute mode (server-owned): no speech, acks or fillers; the mic stays on so "I'm back" can be heard
   let muted = false; try { if (!localStorage.getItem('jarvis.muteFix1')) { localStorage.setItem('jarvis.muteFix1', '1'); localStorage.removeItem('jarvis.muted'); } muted = localStorage.getItem('jarvis.muted') === '1'; } catch {}   // one-time: clear a mute left on by the old full-silence build of silent mode
 
   // ======================= state =======================
@@ -162,9 +163,12 @@
         else if (silentMuted) { markSilentMute(false); if (booted) unmuteMic(); else { muted = false; try { localStorage.removeItem('jarvis.muted'); } catch {} paintMute(); } }
         window.__silent = silent;
         chip('#chipVoice', silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE')); break;
+      case 'mute': hush = !!m.on; window.__hush = hush; if (hush) { stopFillers(); stopSpeaking(true); caption(''); }
+        chip('#chipVoice', hush ? 'bad' : silent ? 'warn' : (cfg.elevenlabs ? 'ok' : 'warn'), hush ? 'SILENT' : silent ? 'TEXT ONLY' : (cfg.elevenlabs ? (cfg.voiceProvider || 'ELEVENLABS') : 'BASIC VOICE'));
+        addActivity(hush ? 'Mute mode on. Say "I\'m back" or "silent off" to end it.' : 'Mute mode off.'); break;
       case 'voice':   // server switched between the Fish voice and its backup
         voiceBackup = m.mode === 'backup';
-        if (!silent) chip('#chipVoice', voiceBackup ? 'warn' : 'ok', voiceBackup ? 'BACKUP VOICE' : (cfg.voiceProvider || 'ELEVENLABS'));
+        if (!silent && !hush) chip('#chipVoice', voiceBackup ? 'warn' : 'ok', voiceBackup ? 'BACKUP VOICE' : (cfg.voiceProvider || 'ELEVENLABS'));
         if (voiceBackup && m.reason) addActivity('Voice: ' + m.reason); else if (!voiceBackup) addActivity('Primary voice restored.');
         break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
@@ -175,12 +179,12 @@
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (!lat.done && !lat.reply) lat.reply = Date.now();
-        if (m.speak && !silent && !DISPLAY_ONLY && booted) {
+        if (m.speak && !silent && !hush && !DISPLAY_ONLY && booted) {
           // An acknowledgement is still playing: have the server make the reply's first voice chunk now, so it is ready when the ack ends.
           if (filler.cur && cfg.elevenlabs) { try { const c0 = speechChunks(stripForSpeech(m.text || ''))[0]; if (c0) fetch('/api/tts?prefetch=1&text=' + encodeURIComponent(c0.trim())).catch(() => {}); } catch {} }
           afterFiller(() => speak(m.text));
         }
-        else { stopFillers(); caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
+        else { stopFillers(); if (!hush) caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
@@ -471,7 +475,7 @@
     try { if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'latency', ...o })); } catch {}
   }
   function speak(text) {
-    if (silent) { caption(text); setState('idle', { echo: false }); return; }
+    if (silent || hush) { if (!hush) caption(text); setState('idle', { echo: false }); return; }
     if (pending || carry) { if (heldSays.length < 25) heldSays.push({ m: { type: 'say', text, speak: true, __rel: 1 }, t: Date.now() }); return; }   // never talk over a command in progress
     stopSpeaking(false);
     const clean = stripForSpeech(text || '');
@@ -599,7 +603,7 @@
     filler.lastIdx[key] = i; return l[i];
   }
   function playFiller(kind, group) {
-    if (silent || DISPLAY_ONLY || !booted || speaking) return;
+    if (silent || hush || DISPLAY_ONLY || !booted || speaking) return;
     if (filler.cur) { if (Date.now() - filler.curAt < 6000) return; filler.cur = null; }   // a clip the phone paused must never block the next one
     const url = pickFiller(kind, group); if (!url) return;
     const a = newClip(url); filler.cur = a; filler.curAt = Date.now();
@@ -635,7 +639,7 @@
     stopFillers();
     const g = fillerTopic(text);
     const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
-    const wantAck = !silent && !DISPLAY_ONLY && booted && (g || (REQUEST.test(text) || (words > 3 && !CHAT.test(text))));
+    const wantAck = !silent && !hush && !DISPLAY_ONLY && booted && (g || (REQUEST.test(text) || (words > 3 && !CHAT.test(text))));
     addActivity('Ack: ' + (wantAck ? 'echoing your request' : 'none (chit-chat)'));
     if (wantAck) playAck(text, g);
     if (!g) return;                                   // no topic: no progress lines either
@@ -669,7 +673,7 @@
   // ======================= speech in (wake word) =======================
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   // Hard mute: "stop listening" shuts the recognizer, the wake engine and the mic meter. Only a manual tap (mic button, core, SPACE) lifts it; kept across reloads.
-  const MUTE_RE = /\b(no mic,? no talk(ing)?|no talk(ing)?,? no mic|stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|mute (yourself|jarvis)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|deaf mode|(go|enter|turn on|activate) deaf( mode)?|mic(rophone)? (off|mute|muted)|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
+  const MUTE_RE = /\b(no mic,? no talk(ing)?|no talk(ing)?,? no mic|stop listening|stop the mic(rophone)?|mute (the |my |your )?(mic(rophone)?|listening)|turn (off|the) (the )?mic(rophone)?( off)?|go deaf|deaf mode|(go|enter|turn on|activate) deaf( mode)?|mic(rophone)? (off|mute|muted)|stop hearing( me)?|(please )?don'?t listen|shut (off|down) (the )?mic(rophone)?)\b/i;
   function paintMute() {
     document.body.dataset.muted = muted ? '1' : '';
     if (muted) { chip('#chipMic', 'bad', 'MIC MUTED'); $('#coreState').textContent = 'MUTED'; $('#coreHint').textContent = 'Mic is off. Tap the mic button to wake ' + cfg.userTitle; }

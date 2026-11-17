@@ -85,7 +85,7 @@ let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's b
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
 const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
-const BACKUP_KEYS = ['speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights', 'companions'];
+const BACKUP_KEYS = ['mute', 'speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights', 'companions'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
 let lastBackup = null;
 function pushBackup() {
@@ -120,6 +120,7 @@ function dedupeSay(text) {
 }
 function broadcast(msg) {
   if (msg.type === 'say' && typeof msg.text === 'string') { const d = dedupeSay(msg.text); if (d === null) { console.log('duplicate line dropped: ' + msg.text.slice(0, 60)); return; } msg = { ...msg, text: d }; }
+  if (muteActive()) { if (msg.type === 'say') { if (!msg.text) return; console.log('mute mode: kept quiet: ' + String(msg.text).slice(0, 80)); msg = { type: 'log', role: 'jarvis', text: msg.text }; } else if (MUTE_DROP.has(msg.type)) return; }   // mute mode: no voice, caption or panels; replies only land in the log
   if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   if (msg.type === 'say' && typeof msg.text === 'string' && /\bowner\b/i.test(msg.text)) msg = { ...msg, text: msg.text.replace(/\bowner\b/gi, 'sir') };   // backstop: he is always "sir" out loud
   const s = JSON.stringify(msg);
@@ -1147,7 +1148,7 @@ async function shopDay(going) {
 const SHOP_YES = /^(yes|yeah|yea|yep|yup|ya|sure|correct|affirmative|of course|absolutely|definitely|indeed|i am|i m headed|headed|heading|on my way|omw|going in|i will|we are|we will|it is)\b/;
 const SHOP_NO = /^(no|nope|nah|negative|not today|i m not|im not|not going|nope not|staying home|day off|taking the day|we re not|it s not|it is not|i won t|i will not|won t be)\b/;
 // Silent / text-only mode: toggled by voice, free and instant (no AI call), remembered in state (phone-backed up).
-const SILENT_ON = /\b(go silent|be silent|stop listening|mute everything|mute it all|go deaf|deaf mode|stop hearing( me)?|don ?t listen|(mute|turn off|shut off|stop) (the |my |your )?mic(rophone)?|mic(rophone)? (off|mute|muted)|silent mode|death mode|text only|text-only|no mic,? no talk(ing)?|no talk(ing)? no mic|no more (talking|voice)|mute (your )?voice|(i )?need a minute|(give|gimme) me a (minute|moment|sec(ond)?)|need a minute (please|here)?)\b/;
+const SILENT_ON = /\b(stop listening|mute everything|mute it all|go deaf|deaf mode|stop hearing( me)?|don ?t listen|(mute|turn off|shut off|stop) (the |my |your )?mic(rophone)?|mic(rophone)? (off|mute|muted)|death mode|go silent text only|text only|text-only|no mic,? no talk(ing)?|no talk(ing)? no mic|no more (talking|voice)|mute (your )?voice|(i )?need a minute|(give|gimme) me a (minute|moment|sec(ond)?)|need a minute (please|here)?)\b/;
 const SILENT_OFF = /\b(silent (mode )?(is )?off|death mode (is )?off|(turn|switch|take) (it |the |your )?(silent|death) mode off|(end|stop|cancel|disable|exit|leave) (the |your )?(silent|death) ?(mode)?|(turn|switch|take) off (the |your )?(silent|death) mode|you can (talk|speak) again|start (talking|speaking)|talk to me again|voice (back )?on|unmute (your )?voice|end silent mode|silent mode off|(turn|switch) (the |your )?voice on|speak again|talk again|unmute|un mute|voice back|start listening|listen again|(turn|switch) on (the |your )?mic(rophone)?|mic(rophone)? (back )?on)\b/;
 // Silent mode ends by itself after SILENT_MAX_HOURS (default 8) so it can never get stuck on.
 function silentActive() {
@@ -1172,6 +1173,49 @@ function silentAnswer(text) {
   remember('jarvis', reply); broadcast({ type: 'say', text: reply, speak: !on });
   return true;
 }
+// Mute mode ("go silent", "silent mode", "mute", "I'm going into a store"): Jarvis goes completely quiet until the Owner says
+// "silent off", "I'm back", "unmute" or "come back". No voice, no caption or panels on the HUD, no phone alerts of any kind
+// (market, trade, crypto, reminders, comings and goings). Only a HELP / "Get Dad" emergency still gets through. No time cap.
+// The mic stays on so the off phrase can be spoken; every other message is logged, never answered. Presence and heading keep
+// recording on their own; a reminder or note he dictates goes to the brain with its reply swallowed. Separate from finance hold
+// (investment notes only) and from text-only silent mode (state.silent). State is phone-backed up (BACKUP_KEYS 'mute').
+const MUTE_ON = /\b(go(ing)? silent|go mute|be silent|silent mode|mute mode|mute (yourself|jarvis)|(going|heading|walking|stepping) (in ?to|in) (a |the )?(store|meeting|church|appointment))\b|^(ok |okay |please |jarvis |hey )*mute( please| now| for now)?$/;
+const MUTE_OFF = /\b(silent( mode)? (is )?off|mute( mode)? (is )?off|(turn|switch|take) (it |the )?(silent|mute)( mode)? off|(end|stop|exit|leave|cancel) (the )?(silent|mute)( mode)?|unmute|un mute|i m back|i am back|come back|you can (talk|speak) again)\b/;
+const MUTE_RECORD = /\b(remind|reminder|remember|make a note|note (that|this|to)|write (that|this) down|add .{1,40} to (my |the )?list|heading to|headed to|on my way|i m leaving|i am leaving)\b/;
+const MUTE_DROP = new Set(['panels', 'open_url', 'listen', 'social_preview', 'vscan_explain', 'checklist']);
+const muteActive = () => !!state.mute?.on;
+function setMute(on) {
+  state.mute = on ? { on: true, at: Date.now(), heard: 0 } : { on: false }; saveState();
+  broadcast({ type: 'mute', on: !!on });
+  if (!on) broadcast({ type: 'panels', panels: state.panels });   // panels changed while muted: show them again
+}
+function muteAnswer(text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  if (muteActive()) {
+    if (t.split(' ').length <= 12 && MUTE_OFF.test(t)) {
+      const n = state.mute.heard || 0; setMute(false);
+      broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+      const r = `I'm back, sir.${n ? ` I logged ${n} message${n === 1 ? '' : 's'} while silent.` : ''}`;
+      remember('jarvis', r); broadcast({ type: 'say', text: r, speak: true });
+      return true;
+    }
+    state.mute.heard = (state.mute.heard || 0) + 1; saveState();
+    if (MUTE_RECORD.test(t)) { ask(`[MUTE MODE: the Owner has Jarvis silenced. Only record what he asks (reminder, note, heading) with your tools. Take no other action; the reply will not be shown or spoken.] ${text}`, { label: text }).catch(() => {}); }
+    else { broadcast({ type: 'log', role: 'user', text }); remember('user', text); console.log(`mute mode: logged, not answered: ${String(text).slice(0, 80)}`); }
+    return true;
+  }
+  if (t.split(' ').length > 16 || MUTE_OFF.test(t) || /\btext ?only\b/.test(t) || /\bmute (the |my |your )?(mic|microphone|voice|alerts?|notifications?|listening)\b/.test(t) || !MUTE_ON.test(t)) return false;
+  setMute(true);
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text);
+  const r = 'Silent. Say "I\'m back" or "silent off" to bring me back.';
+  remember('jarvis', r); broadcast({ type: 'log', role: 'jarvis', text: r });
+  return true;
+}
+handlers.mute_mode = async ({ action } = {}) => {
+  if (action === 'off') { if (muteActive()) setMute(false); return 'Mute mode off. Tell the user you are back.'; }
+  if (action === 'status') return muteActive() ? `Mute mode on since ${new Date(state.mute.at).toLocaleString('en-US', { timeZone: 'America/New_York' })}.` : 'Mute mode off.';
+  setMute(true); return 'Mute mode is on: you are now completely silent until he says "I\'m back" or "silent off". Do not reply.';
+};
 // Quiet ("not now") mode: no unprompted output (phone pushes, spoken remarks, nudges, co-pilot, briefs) while on. Direct replies to the user still work.
 // Critical alerts (stop hit, kill switch) still go through unless he asked for absolute silence. Optional duration; auto-resumes; capped at QUIET_MAX_HOURS (24) so it can never stick.
 const QUIET_ON = /^(?:(?:ok|okay|please|jarvis|hey) )*(not (?:right )?now|quiet|quiet mode|go quiet|be quiet|hold off|hold off for now|do not disturb|dont disturb|don t disturb|don t disturb me|dnd|mute|mute (?:yourself|alerts|notifications|the alerts)|silence|not now please)(?: (.+))?$/;
@@ -1443,6 +1487,7 @@ function queueSpoken(text, title, ask = false) {
 }
 let lastQ = { k: '', at: 0 };
 function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
+  if (muteActive()) { const t = String(text || '').replace(/\s+/g, ' ').trim(); if (t) { remember('jarvis', t); console.log(`mute mode: not said: ${t.slice(0, 80)}`); } return; }   // mute mode: recorded, never spoken or pushed
   if (deferTalk(() => deliverNow(text, title, question, vary), text)) return;
   text = tripDedupe(text.replace(/\s+/g, ' ').trim());
   if (question && text) { const k = text.toLowerCase(), now = Date.now(); if ((lastQ.k === k && now - lastQ.at < 10 * 60e3) || now - lastQ.at < 90e3) return; lastQ = { k, at: now }; }   // no back-to-back duplicate questions
@@ -1468,7 +1513,7 @@ function deliverNow(text, title = 'Jarvis', question = false, vary = '') {
 }
 // Jarvis actually saying the line: Fish JARVIS voice clip (cached by text) sent as a Telegram audio message. Needs FISH_API_KEY + Telegram; otherwise silent no-op.
 async function sendVoiceClip(title, text) {
-  if (silentActive()) return;   // silent mode mutes phone alerts too
+  if (silentActive() || muteActive()) return;   // silent / mute mode mutes phone alerts too
   if (!process.env.FISH_API_KEY || !process.env.TELEGRAM_BOT_TOKEN) return;
   const chat = await tgChatId(); if (!chat) return;
   const file = alertFile(text);
@@ -2191,7 +2236,7 @@ async function tgPoll() {
       const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the user's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
-      if (!silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await lightAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+      if (!muteAnswer(t) && !silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await lightAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
     }
   } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
   setImmediate(tgPoll);
@@ -2262,6 +2307,7 @@ function rememberRec(link, title, body) {
 }
 async function push(title, body, link, force = false, emergency = false) {
   if (emergency) { const e1 = await pushPushover(title, body, link, '', '', true).catch(e => String(e.message || e)); if (process.env.TELEGRAM_BOT_TOKEN) pushTelegram(title, body, link).catch(() => {}); return process.env.PUSHOVER_APP_TOKEN ? e1 : pushNtfy(title, body, link); }   // a HELP alert ignores silent / quiet / finance hold
+  if (muteActive()) { console.log(`mute mode: held back phone alert "${title}"`); return null; }   // mute mode: every phone alert, even forced ones
   if (!force && deferTalk(() => push(title, body, link, force), title)) return null;
   if (silentActive()) { console.log(`silent mode: held back phone alert "${title}"`); return null; }   // silent mode mutes every phone alert (Pushover/Telegram/ntfy), even forced ones; they resume when it ends
   if (finHoldBlocks(title, link)) { console.log(`finance hold: held back "${title}"`); return null; }   // before 'force': a hold silences even forced finance pushes
@@ -3696,7 +3742,7 @@ app.get('/api/ack-clip/:id.mp3', (req, res) => { const b = ackClips.get(req.para
 
 app.all('/api/tts', async (req, res) => {
   const key = process.env.ELEVENLABS_API_KEY;
-  const text = silentActive() ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
+  const text = silentActive() || muteActive() ? '' : String(req.body?.text || req.query?.text || '').slice(0, 2500);
   if (process.env.FISH_API_KEY && text) return fishTts(text, res, req.query?.prefetch === '1');
   if (!key || !text) return res.status(204).end();
   const voice = process.env.ELEVENLABS_VOICE_ID || 'onwK4e9ZLuTAKqWW03F9'; // "Daniel" – calm, polished British male
@@ -3749,6 +3795,7 @@ wss.on('connection', (ws, req) => {
   clients.add(ws);
   try { ws.send(JSON.stringify({ type: 'build', id: BUILD_ID })); } catch {}
   ws.send(JSON.stringify({ type: 'silent', on: silentActive(), until: silentUntil() }));
+  ws.send(JSON.stringify({ type: 'mute', on: muteActive() }));
   if (freshBoot) setTimeout(() => { if (freshBoot) { freshBoot = false; lastBackup = ''; saveState(); } }, 8000);   // no restore came: phone has no backup, start fresh
   if (state.backupStamp) ws.send(JSON.stringify({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } }));
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
@@ -3788,7 +3835,7 @@ wss.on('connection', (ws, req) => {
       // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.
       const tx = msg.text.trim(), lim = p => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('handler timed out')), 15000))]);
       let handled = false;
-      try { handled = silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(lightAnswer(tx)) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
+      try { handled = muteAnswer(tx) || silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(lightAnswer(tx)) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
       catch (e) { console.error('answer shortcut failed, sending to the brain:', e?.stack || e); try { state.pendingQ = null; saveState(); } catch {} handled = false; }
       if (!handled) ask(tx);
     }
