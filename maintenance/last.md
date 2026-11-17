@@ -1,10 +1,8 @@
 STATUS: done
-TIME: 2026-11-17T00:29:32Z
-REQUEST: Add a road co-pilot / drive plan protocol: food, stores and deals along the route corridor, nothing backwards.
+TIME: 2026-11-17T23:48:09Z
+REQUEST: Stop Jarvis cutting the Owner off mid-sentence, and replace the stock screening rules with a professional chart-reading method limited to tradeable stocks within his limits.
 RESULT:
-Jarvis now has a drive plan: tell him "I'm driving from home to the Camden house", or ask "what's on my route" or "anything worth stopping for on the way".
-He maps the route, lists the towns on it, and only picks places within a mile and a half of the road and still ahead of you.
-Food follows your rules: Chick-fil-A for lunch or dinner only, no Chick-fil-A or Wawa on the shop commute, and breakfast is only a pick-up on the way to the shop, McDonald's or Hardee's from home and Wawa only from the Camden house.
-He also checks stores for what you're working on, like Lowe's with today's hours, plus current sales. You get two or three sentences out loud, and the full list goes on the screen when you say "show me".
-While you drive somewhere five or more miles away, he offers it once per trip; say "turn route offers off" to stop that.
-It's live once Railway redeploys, with no APK reinstall. Results are better with the Google Places key set, and it hasn't been tested on a real drive yet.
+Jarvis now listens to the sound of your voice as well as the words, so he won't end your turn or start a reply while you're still talking. He waits until he's heard no voice for about one and a half seconds, and background noise needs to be louder before it counts as speech. Short commands still go through quickly.
+The old screening rules are gone. Scans now check trend and structure first, then support and resistance zones, the 20, 50 and 200 day averages, momentum, volume, an ATR-based stop, and the weekly, daily and five-minute charts lining up.
+Every setup comes with a stop, the price that would cancel it, and the dollars at risk. It's framed as odds based on how that setup has done on that stock before, never as a sure thing. Scans only list stocks you can actually buy on Alpaca within your per-order and daily limits.
+The screening change is live once Railway redeploys. The voice fix works on the web now, but the phone needs the new app version, so reinstall Jarvis once the build finishes.
