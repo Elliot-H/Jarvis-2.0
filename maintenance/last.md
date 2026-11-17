@@ -1,9 +1,9 @@
 STATUS: done
-TIME: 2026-11-17T00:21:54Z
-REQUEST: Deep dive on the delay between the end of your sentence and Jarvis's spoken reply, and speed it up.
+TIME: 2026-11-17T00:28:11Z
+REQUEST: Build a separate "go silent" mute mode that stays on until the Owner says "I'm back", independent of the finance hold.
 RESULT:
-The biggest delay was me waiting 3.3 seconds of silence after you stopped talking; that is now 2 seconds, a little longer if you trail off on "and" or "so".
-My voice now streams to the phone as it is made, and the first spoken piece is shorter, so I start talking sooner.
-A slow acknowledgement can no longer hold up the real answer, and the answer's first line is prepared while the acknowledgement plays.
-Every command now logs pause, brain and voice times in the activity log, so the next pass can target the slowest part.
-It's live once Railway redeploys. No app reinstall needed. If I start cutting you off mid-sentence, tell me and I'll lengthen the pause.
+Mute mode is built. Say "go silent", "silent mode", "mute", or "I'm going into a store", and Jarvis goes fully quiet: no voice, no panels, no phone alerts of any kind.
+He stays silent for every message until you say "silent off", "I'm back", "unmute", or "come back". There is no time limit.
+He still logs your messages, saves any reminder or note you dictate, and keeps recording presence and heading, all without speaking.
+It is separate from the investment-note hold, and "go silent" no longer triggers that hold. Only a Get Dad emergency alert still gets through.
+It goes live once Railway finishes the redeploy. No APK reinstall needed, and it has not been tested live yet.
