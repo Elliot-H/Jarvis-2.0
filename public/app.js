@@ -174,7 +174,12 @@
         { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < (/\?\s*$/.test(String(m.text || '')) ? 180000 : 20000)) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
         ticker('');
         if (m.text) addLog('jarvis', m.text);
-        if (m.speak && !silent && !DISPLAY_ONLY && booted) afterFiller(() => speak(m.text));
+        if (!lat.done && !lat.reply) lat.reply = Date.now();
+        if (m.speak && !silent && !DISPLAY_ONLY && booted) {
+          // An acknowledgement is still playing: have the server make the reply's first voice chunk now, so it is ready when the ack ends.
+          if (filler.cur && cfg.elevenlabs) { try { const c0 = speechChunks(stripForSpeech(m.text || ''))[0]; if (c0) fetch('/api/tts?prefetch=1&text=' + encodeURIComponent(c0.trim())).catch(() => {}); } catch {} }
+          afterFiller(() => speak(m.text));
+        }
         else { stopFillers(); caption(m.text); setState('idle', { echo: false }); if (!DISPLAY_ONLY && booted) afterReply(m.text); }
         break;
       case 'stats': renderStats(m.stats); break;
@@ -447,6 +452,24 @@
   function stripForSpeech(t) {
     return t.replace(/```[\s\S]*?```/g, ' ').replace(/[*_#`>]/g, '').replace(/https?:\/\/\S+/g, 'the link').replace(/\n+/g, '. ').trim();
   }
+  // Long replies are voiced in short sentence chunks played back to back: short request URLs, audio starts fast, nothing is cut off.
+  function speechChunks(clean) {
+    const chunks = [];
+    for (const piece of clean.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [clean]) {
+      const last = chunks.length - 1;
+      if (last >= 0 && chunks[last].length + piece.length <= (last === 0 ? 110 : 350)) chunks[last] += piece; else chunks.push(piece);   // short first chunk: voice starts sooner
+    }
+    return chunks;
+  }
+  // Latency trace for one command: end of speech -> sent -> reply text -> voice starts. Shown in Activity and logged on the server.
+  const lat = { end: 0, sent: 0, reply: 0, done: true };
+  function latVoice() {
+    if (lat.done || !lat.sent) return; lat.done = true;
+    const now = Date.now(), s = ms => (ms / 1000).toFixed(1) + 's';
+    const o = { wait: lat.end ? lat.sent - lat.end : 0, brain: lat.reply ? lat.reply - lat.sent : 0, voice: lat.reply ? now - lat.reply : 0, total: now - (lat.end || lat.sent) };
+    addActivity(`Latency: pause ${s(o.wait)} · brain ${s(o.brain)} · voice ${s(o.voice)} · total ${s(o.total)}`);
+    try { if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'latency', ...o })); } catch {}
+  }
   function speak(text) {
     if (silent) { caption(text); setState('idle', { echo: false }); return; }
     if (pending || carry) { if (heldSays.length < 25) heldSays.push({ m: { type: 'say', text, speak: true, __rel: 1 }, t: Date.now() }); return; }   // never talk over a command in progress
@@ -457,12 +480,7 @@
     caption(clean);
     const done = () => { if (!speaking) return; speaking = false; currentAudio = null; fakeLevel = false; setState('idle'); afterReply(clean); };
 
-    // Long replies are voiced in short sentence chunks played back to back: short request URLs, audio starts fast, nothing is cut off.
-    const chunks = [];
-    for (const piece of clean.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) || [clean]) {
-      const last = chunks.length - 1;
-      if (last >= 0 && chunks[last].length + piece.length <= (last === 0 ? 170 : 350)) chunks[last] += piece; else chunks.push(piece);   // short first chunk: voice starts sooner
-    }
+    const chunks = speechChunks(clean);
     if (cfg.elevenlabs) {
       ensureAudio();
       const ahead = new Set();
@@ -476,10 +494,11 @@
         currentAudio = a;
         if (a.phone) fakeLevel = true; else { try { audioCtx.createMediaElementSource(a).connect(ttsAnalyser); } catch {} }
         a.onended = () => playChunk(i + 1);
+        if (i === 0) a.onplaying = latVoice;
         let fell = false;
         const fallback = why => { if (fell) return; fell = true; if (currentAudio === a) currentAudio = null; if (why === 'error') voiceProblem(); phoneVoiceNotice().then(n => browserSpeak(n + chunks.slice(i).join(' '), done)); };
         a.onerror = () => fallback('error');
-        a.play().catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
+        a.play().then(() => { if (i === 0 && a.phone) latVoice(); }).catch(e => fallback(e?.name === 'NotAllowedError' ? 'blocked' : 'error'));
       };
       playChunk(0);
     } else browserSpeak(clean, done);
@@ -595,7 +614,7 @@
     const my = ++ackSeq;
     const fallback = () => { if (my === ackSeq && state === 'thinking' && group) playFiller('ack', group); };
     try {
-      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 3500);
+      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 2200);   // a late ack only delays the real answer (it waits for the ack to finish)
       const r = await fetch('/api/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: ctl.signal });
       clearTimeout(to);
       if (r.status !== 200) return fallback();
@@ -872,10 +891,10 @@
     const v = Number(params.get('pause'));
     if (v >= 600 && v <= 8000) { try { localStorage.setItem('jarvisPause', String(v)); } catch {} return v; }
     try { const k = Number(localStorage.getItem('jarvisPause')); if (k >= 600 && k <= 8000) return k; } catch {}
-    return 3300;   // he talks in long stretches: wait for a real pause before acting
+    return 2000;   // latency fix 2026-11-17: was 3300 (the biggest single delay). A trailing "and/so/to..." still waits +1.5 s
   })();
   const MID_THOUGHT = /(,|\b(and|but|so|then|also|or|to|the|a|an|for|with|of|in|on|that|which|because|if|when|my|your|is|are|i|it)|\.\.\.?)\s*$/i;
-  const silenceFor = text => PAUSE_MS + (MID_THOUGHT.test(text || '') ? 1300 : 0);
+  const silenceFor = text => PAUSE_MS + (MID_THOUGHT.test(text || '') ? 1500 : 0);
   let uttStart = 0, lastLen = 0, uttTimer = null, pending = null, carry = '', lastHeard = '';
   function joinResults(results, from) {
     const parts = [];
@@ -958,6 +977,7 @@
     { const k = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && submit.last && submit.last.k === k && Date.now() - submit.last.t < 8000) { addActivity('Dropped a repeat of the same command.'); return; } submit.last = { k, t: Date.now() }; }   // the recognizer can deliver one sentence twice: send it once
     stopSpeaking(false);
     setState('thinking');
+    Object.assign(lat, { end: !raw && Date.now() - lastVoice < 15000 ? lastVoice : 0, sent: Date.now(), reply: 0, done: false });
     startFillers(text);
     send({ type: 'ask', text }); sendLocation(); // ask right away; the position follows (server uses the last one it has)
   }

@@ -3522,6 +3522,25 @@ async function fishBuf(text) {
   if (buf.length < 800) return { fail: 'Fish Audio returned empty audio.' };
   return { buf, model: o.model };
 }
+// Streams Fish audio to the client as it is made. Holds back until 800 bytes arrive so an empty/failed clip can still fall back to the backup voice.
+async function fishStream(text, res) {
+  const o = await fishFetch(text, 15000);
+  if (!o.r) return { fail: o.status ? explainFishError(o.status, o.body) : o.body };
+  const rd = o.r.body.getReader(), head = []; let n = 0;
+  try {
+    while (n < 800) { const { done, value } = await rd.read(); if (done) break; head.push(value); n += value.length; }
+    if (n < 800) return { fail: 'Fish Audio returned empty audio.' };
+    res.setHeader('Content-Type', 'audio/mpeg'); res.setHeader('X-Voice', 'primary');
+    for (const c of head) res.write(c);
+    for (;;) { const { done, value } = await rd.read(); if (done) break; if (!res.write(value)) await new Promise(r => res.once('drain', r)); }
+    res.end();
+    return { streamed: true, model: o.model };
+  } catch (e) {
+    try { rd.cancel(); } catch {}
+    if (res.headersSent) { try { res.end(); } catch {} return { streamed: true, model: o.model }; }   // cut off mid-clip: end what was sent
+    return { fail: 'Fish Audio stream failed: ' + String(e.message || e).slice(0, 120) };
+  }
+}
 async function elBuf(text) {
   const key = process.env.ELEVENLABS_API_KEY; if (!key) return null;
   try {
@@ -3544,7 +3563,11 @@ async function fishTts(text, res, prefetch) {
   if (!down()) {
     let r = null;
     if (!voiceDown.restored && ttsCache.has(text)) { const c = await ttsAhead(text); if (c.buf) r = c; }
-    if (!r) { const say = voiceDown.restored; r = await fishBuf(say ? RESTORED_SAY + ' ' + text : text); if (r.buf && say) voiceDown.restored = false; }
+    if (!r) {   // not made ahead: stream it, so the phone starts playing on the first audio instead of waiting for the whole clip
+      const say = voiceDown.restored; r = await fishStream(say ? RESTORED_SAY + ' ' + text : text, res);
+      if (r.streamed) { if (say) voiceDown.restored = false; if (voiceDown.since) { voiceDown.since = 0; voiceMode('primary'); } voiceStatus = { ok: true, reason: '', model: r.model, at: new Date().toISOString() }; return; }
+      if (res.headersSent) return res.end();
+    }
     if (r.buf) { if (voiceDown.since) { voiceDown.since = 0; voiceMode('primary'); } return send(r.buf, 'primary', r.model); }
     voiceStatus = { ok: false, reason: r.fail, at: new Date().toISOString() };
     markFishDown(r.fail);
@@ -3786,6 +3809,7 @@ wss.on('connection', (ws, req) => {
     }
     if (msg.type === 'voice_activity') uiState.voiceAt = Date.now();
     if (msg.type === 'state') { uiState.s = String(msg.state); uiState.at = Date.now(); } if (msg.type === 'state') broadcast({ type: 'state', state: msg.state }); // listening/speaking echoed to all screens
+    if (msg.type === 'latency') console.log(`latency: pause ${msg.wait} ms · brain ${msg.brain} ms · voice ${msg.voice} ms · total ${msg.total} ms`);
     if (msg.type === 'client_error') console.warn('screen:', String(msg.text || '').slice(0, 1000));
   });
 });
