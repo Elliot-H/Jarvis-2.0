@@ -1,9 +1,10 @@
 STATUS: done
-TIME: 2026-11-17T00:28:11Z
-REQUEST: Build a separate "go silent" mute mode that stays on until the Owner says "I'm back", independent of the finance hold.
+TIME: 2026-11-17T00:29:32Z
+REQUEST: Add a road co-pilot / drive plan protocol: food, stores and deals along the route corridor, nothing backwards.
 RESULT:
-Mute mode is built. Say "go silent", "silent mode", "mute", or "I'm going into a store", and Jarvis goes fully quiet: no voice, no panels, no phone alerts of any kind.
-He stays silent for every message until you say "silent off", "I'm back", "unmute", or "come back". There is no time limit.
-He still logs your messages, saves any reminder or note you dictate, and keeps recording presence and heading, all without speaking.
-It is separate from the investment-note hold, and "go silent" no longer triggers that hold. Only a Get Dad emergency alert still gets through.
-It goes live once Railway finishes the redeploy. No APK reinstall needed, and it has not been tested live yet.
+Jarvis now has a drive plan: tell him "I'm driving from home to the Camden house", or ask "what's on my route" or "anything worth stopping for on the way".
+He maps the route, lists the towns on it, and only picks places within a mile and a half of the road and still ahead of you.
+Food follows your rules: Chick-fil-A for lunch or dinner only, no Chick-fil-A or Wawa on the shop commute, and breakfast is only a pick-up on the way to the shop, McDonald's or Hardee's from home and Wawa only from the Camden house.
+He also checks stores for what you're working on, like Lowe's with today's hours, plus current sales. You get two or three sentences out loud, and the full list goes on the screen when you say "show me".
+While you drive somewhere five or more miles away, he offers it once per trip; say "turn route offers off" to stop that.
+It's live once Railway redeploys, with no APK reinstall. Results are better with the Google Places key set, and it hasn't been tested on a real drive yet.
