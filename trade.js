@@ -64,6 +64,16 @@ export async function assetName(symbol) {
   const s = normSymbol(symbol); if (!s) return null;
   try { const a = await api(BASE, '/v2/assets/' + encodeURIComponent(s)); return a.name || null; } catch { return null; }
 }
+// Alpaca asset flags (tradable, fractionable, status), cached 6 h: the screener only surfaces what Alpaca can actually fill.
+const assetCache = new Map();
+export async function assetInfo(symbol) {
+  const s = normSymbol(symbol); if (!s) return null;
+  const c = assetCache.get(s); if (c && Date.now() - c.at < 6 * 3600e3) return c.v;
+  let v = null;
+  try { const a = await api(BASE, '/v2/assets/' + encodeURIComponent(s)); v = { symbol: a.symbol, tradable: !!a.tradable, fractionable: !!a.fractionable, status: a.status, name: a.name }; }
+  catch (e) { if (!/ 404/.test(e.message)) throw e; }
+  assetCache.set(s, { at: Date.now(), v }); return v;
+}
 export async function orders() {
   const o = await api(BASE, '/v2/orders?status=open&limit=100');
   return o.map(x => ({ id: x.id, symbol: x.symbol, side: x.side, type: x.type, notional: x.notional, qty: x.qty, stopPrice: x.stop_price ? +x.stop_price : undefined, limitPrice: x.limit_price ? +x.limit_price : undefined, trailPercent: x.trail_percent ? +x.trail_percent : undefined, trailPrice: x.trail_price ? +x.trail_price : undefined, hwm: x.hwm ? +x.hwm : undefined, status: x.status }));

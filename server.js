@@ -2554,7 +2554,9 @@ function cryptoDefaults(id, symbol, price) {
 // The HUD watch list holds only what he added with signal_watch; holdings are never auto-added, and a held symbol is not shown in it.
 const wlAuto = () => [];
 const wlRows = () => state.sigWatch.filter(w => !(watch.holdings?.positions || []).some(p => wlKey(p.symbol) === wlKey(w.symbol)));
-const SIG_NOTE = 'Rule-based signals from candles, not financial advice; no setup is certain. Trades only through trade_propose and his confirm.';
+const SIG_NOTE = 'Probability read from the chart (structure, location, EMAs, momentum, volume, ATR stop, weekly/daily/5-minute alignment), not a guarantee and not financial advice; every setup has a stop and can fail. Trades only through trade_propose and his confirm.';
+// Screening budget: his per-order and remaining daily buy limit; scans only surface what Alpaca can fill inside it.
+const sigBudget = () => ({ perOrder: trade.MAX_ORDER, dayLeft: Math.max(0, trade.MAX_DAY - spentToday()) });
 handlers.signal_scan = async ({ symbols, top } = {}) => {
   try {
     let list = (symbols || []).map(x => String(x).toUpperCase().replace(/[^A-Z.\-]/g, '')).filter(Boolean);
@@ -2563,8 +2565,8 @@ handlers.signal_scan = async ({ symbols, top } = {}) => {
       if (!trade.configured()) return 'Alpaca keys are not set, so I cannot pull the trending list. Ask him for tickers to scan, or add ALPACA_KEY_ID and ALPACA_SECRET in Railway.';
       const t = await trade.trending(15); list = t.all.slice(0, 25); src = `Alpaca's top gainers and most active (${list.length} tickers)`;
     }
-    const r = await sig.scan(list, Math.min(8, Math.max(1, top || 5)));
-    return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each: symbol, price, score out of 100, label, the stop-loss and risk %, the target, and the back-test line (samples and win rate; say plainly when samples are few). Mention exitWarning if present. Keep the spoken reply short; offer to watch it. Say once it is rule-based and not advice. ' + news.AUTO_NEWS });
+    const r = await sig.scan(list, Math.min(8, Math.max(1, top || 5)), { budget: sigBudget(), onlyTradeable: src !== 'the symbols he named' });
+    return JSON.stringify({ source: src, ...r, note: SIG_NOTE, guide: 'Lead with the best one or two by score. For each, in this order: symbol, price, trend/structure, where it sits (support, resistance, demand zone, VWAP), the weekly/daily/entry alignment and whether the 5-minute entry trigger says go or wait, then the stop, the invalidation level, risk % and dollars at risk (sizing), the target, and the probability line from history (say plainly when samples are few). Mention exitWarning if present. Never call a setup certain or guaranteed: frame it as odds with a stop. Only tradeable symbols inside his limits are listed (skippedNotTradeable says what was dropped). Keep the spoken reply short; offer to watch it. Say once it is not advice. ' + news.AUTO_NEWS });
   } catch (e) { return `Signal scan failed: ${e.message} Tell the user plainly.`; }
 };
 const wlEval = new Map(); // symbol -> { at, verdict, target, stop, busy }
@@ -2832,7 +2834,7 @@ async function sweepTick() {
     const snaps = await trade.snapshots(pool);
     const first = new Set(t.all);
     const cand = snaps.filter(x => x.price >= 2 && x.changePct > 0).sort((a, b) => (first.has(b.symbol) - first.has(a.symbol)) || b.changePct - a.changePct).slice(0, Math.max(5, C.sweepSize));
-    const r = await sig.scan(cand.map(x => x.symbol), 8), dustK = dustKeys();
+    const r = await sig.scan(cand.map(x => x.symbol), 8, { budget: sigBudget(), onlyTradeable: true }), dustK = dustKeys();
     state.sweep = { at: now, pool: pool.length, candidates: cand.length, top: r.top.map(x => `${x.symbol} ${x.score}`) }; const day = new Date().toDateString(); state.sweepCount = { day, n: (state.sweepCount?.day === day ? state.sweepCount.n : 0) + 1 };
     for (const x of r.top) if (x.score >= C.newSignalScore && x.stop && !dustK.has(wlKey(x.symbol))) {
       const body = `${x.symbol}: BUY-WATCH, market sweep found a new uptick setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;
@@ -2879,7 +2881,7 @@ async function slowAlertTick() {   // new signal (fresh setup with a stop) + new
     try {
       const list = new Set(state.sigWatch.map(w => w.symbol));
       if (trade.configured()) for (const s of (await trade.trending(10)).all || []) list.add(s);
-      const r = await sig.scan([...list].slice(0, 20), 8);
+      const r = await sig.scan([...list].slice(0, 20), 8, { budget: sigBudget(), onlyTradeable: true });
       const dustK = dustKeys();
       for (const x of r.top) if (x.score >= C.newSignalScore && x.stop && !dustK.has(wlKey(x.symbol))) {
         const body = `${x.symbol}: BUY-WATCH, new setup scored ${x.score}/100 (${x.label}). Price ${fmtP(x.price)}, level: stop ${fmtP(x.stop)}, target ${fmtP(x.target)}, risk ${x.riskPct}%. Quote: daily-candle scan, up to ${C.newSignalEveryMin} min old. I would look at entering near ${fmtP(x.price)} with the stop at ${fmtP(x.stop)}.`;

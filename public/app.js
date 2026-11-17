@@ -22,6 +22,7 @@
     window.__stt = {
       ev: function (t, d) {
         if (t === 'diag') { window.__sttDiag && window.__sttDiag(d); return; }
+        if (t === 'level') { window.__sttLevel && window.__sttLevel(parseFloat(d), 'rms'); return; }   // mic loudness from the phone recognizer (voice gate)
         const r = cur; if (!r) return;
         r._t = Date.now();
         if (t === 'start') r.onstart && r.onstart({});
@@ -103,13 +104,34 @@
   // Do-not-interrupt gate (phone side): an unprompted 'say' (alert, reminder, travel line) never plays while speech is being heard,
   // an utterance is pending, or a reply to the user is still due. It waits here and is released one at a time, 7s after the user stops and Jarvis has finished.
   let replyDue = 0, lastVoice = 0; const heldSays = []; let heldLast = 0;
+  // ---- Voice gate (turn-taking, 2026-11-17): acoustic voice detection on top of the recognizer's words. ----
+  // Jarvis does not end the turn, and does not start a reply, while the mic still hears the user's voice.
+  // Loud = above an adaptive noise floor by a margin AND above a fixed minimum (raised so room noise and breathing pauses do not count).
+  // Sources: the phone recognizer's levels (Android app, dB-ish: silence about -2, talking 5+) or the desktop mic meter (0..1).
+  const VAD_HANG_MS = 1400;     // this long with no voice = he has finished (end-of-speech silence)
+  const VAD_MAX_HOLD_MS = 6000; // never wait more than this extra for the voice to stop (steady noise must not hang a command)
+  const vad = { floor: null, lastLoud: 0, lastSample: 0, run: 0 };
+  function vadSample(v, kind) {
+    if (!Number.isFinite(v)) return;
+    const now = Date.now(); vad.lastSample = now;
+    if (vad.floor == null || vad.kind !== kind) { vad.floor = v; vad.kind = kind; }
+    vad.floor = v < vad.floor ? vad.floor * 0.6 + v * 0.4 : vad.floor + (v - vad.floor) * 0.01;   // falls fast, rises slowly: tracks room noise, not speech
+    const loud = kind === 'rms' ? v >= Math.max(4.5, vad.floor + 3) : v >= Math.max(0.16, vad.floor * 2 + 0.05);
+    vad.run = loud ? vad.run + 1 : 0;
+    if (vad.run >= 2) vad.lastLoud = now;   // two loud samples in a row: a click or bump is not a voice
+  }
+  window.__sttLevel = vadSample;
+  const voiceActive = () => Date.now() - vad.lastSample < 1000 && Date.now() - vad.lastLoud < VAD_HANG_MS;
   const HOLD_MS = 7000;
   const userBusy = () => Date.now() - lastVoice < HOLD_MS || !!pending || !!carry || speaking || (replyDue && Date.now() - replyDue < 4 * 60e3);
   setInterval(() => {
-    if (!heldSays.length || userBusy() || Date.now() - heldLast < 6000) return;
+    if (!heldSays.length) return;
+    const h0 = heldSays[0], replyOk = h0.reply && !pending && !carry && !speaking && !voiceActive() && Date.now() - lastVoice > 1200;   // a held answer to HIS question goes as soon as he stops
+    if (!replyOk && (userBusy() || Date.now() - heldLast < 6000)) return;
     const h = heldSays.shift(); if (Date.now() - h.t > 2 * 3600e3) return;
+    if (h.reply) replyDue = 0;
     heldLast = Date.now(); handle(h.m);
-  }, 1000);
+  }, 250);
   let outSilent = null;   // a silent-mode on/off made while the link was down: sent on reconnect, so the server does not switch it back
   function send(o) {
     if (o && (o.type === 'silent_on' || o.type === 'silent_off')) { if (ws?.readyState === 1) { outSilent = null; ws.send(JSON.stringify(o)); } else { outSilent = o; if (!ws || ws.readyState > 1) { try { connect(); } catch {} } } return; }
@@ -173,7 +195,7 @@
         break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
-        if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500)) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
+        if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500 || voiceActive())) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now(), reply: !!replyDue }); break; } if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
         if (m.memo) saveMemo(m.memo);
         { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < (/\?\s*$/.test(String(m.text || '')) ? 180000 : 20000)) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
         ticker('');
@@ -396,6 +418,7 @@
       const src = audioCtx.createMediaStreamSource(stream);
       micAnalyser = audioCtx.createAnalyser(); micAnalyser.fftSize = 256; micAnalyser.smoothingTimeConstant = .8;
       src.connect(micAnalyser);
+      { const fq = new Uint8Array(micAnalyser.frequencyBinCount), an = micAnalyser; const iv = setInterval(() => { if (micAnalyser !== an) return clearInterval(iv); an.getByteFrequencyData(fq); let s = 0; for (let i = 2; i < 60; i++) s += fq[i]; vadSample(Math.min(1, s / (58 * 150)), 'meter'); }, 100); }
       chip('#chipMic', 'ok', 'MIC');
       return true;
     } catch (e) { chip('#chipMic', 'bad', 'MIC DENIED'); return false; }
@@ -765,7 +788,7 @@
       // The browser ends a listening session by itself after a short silence. If we still want the mic,
       // do NOT send the command yet: keep the words so far and let the pause timer decide.
       if (pending && !pending.wakeOnly && (recWanted || speaking || wakeAnswering)) carry = lastHeard;   // keep the words; the pause timer decides when he is done
-      else if (pending) flush();
+      else if (pending) endOfTurn();
       uttStart = 0; lastLen = 0;
       // Android's recognizer refuses restarts that come too fast (error 10). Back off, then ease back down.
       if (!recThrottled && recBackoff) recBackoff = recBackoff < 1000 ? 0 : Math.round(recBackoff / 2);
@@ -922,6 +945,16 @@
     }
     return null;
   }
+  // End of turn: the recognizer has been quiet for silenceFor(); also wait until the mic has heard no voice for VAD_HANG_MS
+  // (he may still be talking while the recognizer lags), capped at VAD_MAX_HOLD_MS. New words replace `pending`, which resets the cap.
+  function endOfTurn() {
+    const p = pending; if (!p) return flush();
+    if (!p.wakeOnly) {
+      p.holdT ||= Date.now();
+      if (voiceActive() && Date.now() - p.holdT < VAD_MAX_HOLD_MS) { clearTimeout(uttTimer); uttTimer = setTimeout(endOfTurn, 200); return; }
+    }
+    flush();
+  }
   function flush() {
     clearTimeout(uttTimer); uttTimer = null;
     const p = pending; pending = null;
@@ -965,7 +998,7 @@
       pending = after.trim() ? { text: after, fromWake: true } : { wakeOnly: true };
     }
     clearTimeout(uttTimer);
-    uttTimer = setTimeout(flush, pending?.wakeOnly ? 1100 : silenceFor(pending?.text));
+    uttTimer = setTimeout(endOfTurn, pending?.wakeOnly ? 1100 : silenceFor(pending?.text));
   }
 
   // Alert "Buy" button lands here as /?buy=SYM: hand it to Jarvis once connected; he proposes and waits for the user's spoken confirm.

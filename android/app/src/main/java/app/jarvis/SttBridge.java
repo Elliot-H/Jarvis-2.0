@@ -37,7 +37,7 @@ public class SttBridge {
   private boolean ready = false;        // recognizer said it is actually hearing audio
   private float maxRms = -100f;         // loudest sound level the recognizer heard this session (silence is about -2, talking 5+)
   private long lastQuietDiag = 0;
-  private long readyAt = 0, lastRms = 0, lastDeadReset = 0; private int rmsCount = 0;
+  private long readyAt = 0, lastRms = 0, lastDeadReset = 0, lastLevelEmit = 0; private int rmsCount = 0;
   private boolean firstStart = true;
   private boolean levelsEver = false, coldTried = false;   // this phone has reported audio levels at least once / the one cold-start reset was used
   /** A session that says "ready" but never delivers audio levels is a dead mic (another app or the wake engine holds it): the page shows
@@ -253,7 +253,10 @@ public class SttBridge {
       ready = true; readyAt = System.currentTimeMillis(); lastRms = readyAt; rmsCount = 0; ui.removeCallbacks(deadCheck); ui.postDelayed(deadCheck, 2500); ui.removeCallbacks(stall); ui.postDelayed(stall, 60000);   // a live session never runs this long
       emit("start", ""); hush(600); }   // re-arm: a slow start must not leave the ready beep audible
     @Override public void onBeginningOfSpeech() {}
-    @Override public void onRmsChanged(float v) { if (v > maxRms) maxRms = v; lastRms = System.currentTimeMillis(); rmsCount++; levelsEver = true; }
+    @Override public void onRmsChanged(float v) {
+      if (v > maxRms) maxRms = v; lastRms = System.currentTimeMillis(); rmsCount++; levelsEver = true;
+      if (lastRms - lastLevelEmit >= 150) { lastLevelEmit = lastRms; emit("level", String.valueOf(Math.round(v * 10) / 10f)); }   // voice gate in app.js: no end-of-turn or reply while he is still talking
+    }
     @Override public void onBufferReceived(byte[] b) {}
     @Override public void onEndOfSpeech() { hush(1500); }
     @Override public void onError(int code) {
