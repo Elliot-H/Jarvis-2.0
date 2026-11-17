@@ -9,6 +9,7 @@ import { WebSocketServer } from 'ws';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { incidentsAhead, sayLine as roadSay, hasFeed as hasRoadFeed, bearing } from './roadwatch.js';
+import * as dp from './driveplan.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -944,6 +945,7 @@ async function bucketAnswer(text) {
   if (q.type === 'stay' || q.type === 'stay_music') return stayAnswer(q, text);
   if (q.type === 'meal') return mealAnswer(q, text);
   if (q.type === 'copilot') return copilotAnswer(q, text);
+  if (q.type === 'driveplan') return drivePlanAnswer(q, text);
   const r = state.reminders.find(x => x.id === q.id);
   const t = norm(text).replace(/^(hey )?jarvis /, '');
   if (!r || t.split(' ').length > 6) { state.pendingQ = null; saveState(); return false; }
@@ -2071,6 +2073,141 @@ async function roadTick() {
 }
 if (!process.env.JARVIS_SMOKE) setInterval(() => roadTick().catch(() => {}), 60_000);
 handlers.road_alerts = async ({ on }) => { state.roadAlerts = !!on; saveState(); return !on ? 'Road alerts off.' : hasRoadFeed() ? 'Road alerts on. I will warn you while you drive.' : 'Road alerts on, but no traffic feed is connected yet (TOMTOM_KEY or HERE_API_KEY).'; };
+// ---------- Road co-pilot / drive plan (2026-11-17) ----------
+// Start (named place, or where he is) -> destination (named, or heading_to / Maps). driveplan.js lays out the OSRM route corridor and finds what
+// is ON it and AHEAD (within DRIVEPLAN_CORRIDOR_MI of the line, never behind him). Food follows his rules (dpFood); stores = what he needs or is
+// working on (args from the brain, else a cheap extraction from memory + recent talk + bring list); deals = one web-searched talk call.
+// Spoken: 2-3 sentences. Full list (addresses, hours, prices) goes to the HUD only when he asks (held panel "drive_plan", or show:true).
+// Offer: while driving to a known destination >= DRIVEPLAN_MIN_MI away, once per destination per 2 h: "Want me to check what's worth stopping for...?"
+const DP_MIN_MI = Number(process.env.DRIVEPLAN_MIN_MI || 5);
+let dpLast = null; const dpOffered = new Map(), dpGeo = new Map();
+const homePlace = () => state.places.find(p => p.kind === 'home') || findPlace('home');
+async function dpPoint(name, L) {
+  const p = findPlace(name);
+  if (p && Number.isFinite(p.lat)) return { name: p.name, key: placeKey(p.name), kind: p.kind || '', lat: p.lat, lon: p.lon };
+  const bias = L || homePlace() || state.places.find(x => Number.isFinite(x.lat)); if (!bias) return null;
+  const k = placeKey(name); let g = dpGeo.get(k);
+  if (!g) { g = await geocodeDest(name, bias); if (g) dpGeo.set(k, g); }
+  return g ? { name: String(name).trim(), key: k, kind: '', ...g } : null;
+}
+// His food rules, applied strictly: Chick-fil-A lunch/dinner only, never breakfast; no Chick-fil-A or Wawa on the home -> shop commute;
+// breakfast is never eaten on the road: only on a trip TO the shop, as a pick-up for after he gets there (~10:00): McDonald's/Hardee's bacon,
+// egg and cheese from home, Wawa breakfast burritos only from the Camden house. Any other trip in breakfast hours: no food stop.
+function dpFood(from, to, slot) {
+  const hk = placeKey(homePlace()?.name || 'home');
+  const fromHome = !!from && (from.kind === 'home' || from.key === hk), toShop = !!to && (to.key === 'shop' || to.key === placeKey(shopPlace()?.name || 'shop')), fromCamden = /camden/i.test(from?.name || '');
+  const commute = fromHome && toShop, c = nowCtx();
+  if (!slot) return { chains: [] };
+  if (state.copilot?.day === c.day && (state.copilot.ate || []).includes(slot)) return { chains: [], note: `You've had ${slot}.` };
+  if (slot === 'breakfast') {
+    if (!toShop) return { chains: [], note: 'No breakfast stop on the road.' };
+    return fromCamden ? { chains: ['Wawa'], food: 'Wawa breakfast burritos', later: true } : { chains: ["McDonald's", "Hardee's"], food: "a bacon, egg and cheese", later: true };
+  }
+  let pref = foodPref(slot) || { food: 'chicken sandwiches', chain: 'Chick-fil-A' };   // Chick-fil-A (lunch AND dinner) by default, or a stored lunch/dinner preference
+  if (pref && (commute ? /chick|wawa/i : /wawa/i).test(`${pref.chain} ${pref.food}`)) pref = null;
+  return pref?.chain ? { chains: [pref.chain], food: pref.food } : { chains: [], note: commute ? 'No Chick-fil-A or Wawa on the shop run.' : '' };
+}
+const dpJson = s => { try { const m = String(s || '').match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch { return null; } };
+async function dpInterests() {   // what he needs / is working on / has been researching, from memory + recent talk + bring list
+  if (!TALK.apiKey || BRAIN !== 'openrouter' || overBudget('talk')) return { stores: [], topics: [] };
+  const mem = (state.memory || []).slice(-40).map(m => m.fact).join(' | ');
+  const hist = (state.history || []).slice(-12).map(h => `${h.role === 'user' ? 'User' : 'Jarvis'}: ${h.text}`).join('\n');
+  const bring = state.reminders.filter(r => r.kind === 'bring').map(r => `${r.text} (to ${r.place})`).join(', ');
+  const r = await talk({ cfg: { ...TALK, model: talkModel(), reasoning: 'none' }, tools: [], webSearch: false, maxRounds: 1, maxTokens: 200, budgetUsd: 0.01, signal: AbortSignal.timeout(8000),
+    system: 'From what is known about the user, list (a) "stores": up to 3 store chains or store types he plausibly needs to stop at on a drive for something he needs or a project he is working on right now (e.g. "Lowe\'s" for a home project, "AutoZone" for truck parts), only when clearly supported by the notes; (b) "topics": up to 3 products or topics he has been searching or researching lately. Reply ONLY with JSON {"stores":[],"topics":[]}.',
+    prompt: `Memory: ${mem || '(none)'}\nBring list: ${bring || '(none)'}\nRecent conversation:\n${hist || '(none)'}` }).catch(() => null);
+  if (r) addSpend(r.cost, 'talk');
+  const j = dpJson(r?.text) || {};
+  return { stores: (j.stores || []).map(String).filter(Boolean).slice(0, 3), topics: (j.topics || []).map(String).filter(Boolean).slice(0, 3) };
+}
+async function dpDeals(stores, topics) {   // current sales at the stores on the route + deals on what he has been researching (web search)
+  if ((!stores.length && !topics.length) || !TALK.apiKey || BRAIN !== 'openrouter' || overBudget('talk')) return [];
+  const c = nowCtx();
+  const r = await talk({ cfg: { ...TALK, model: talkModel(), reasoning: 'none' }, tools: [], webSearch: true, maxRounds: 3, maxTokens: 500, budgetUsd: 0.05, signal: AbortSignal.timeout(35000),
+    system: `Today is ${c.wd} ${new Date().toISOString().slice(0, 10)}. Search the web for sales and promotions running NOW (this week) at the given stores, and current deals on the given topics. Report only real offers you found in search results that are valid today; never invent one. Reply ONLY with up to 6 lines, each "- <store or topic>: <deal, with the price if given> (<valid through, or the source site>)". If you find nothing current, reply exactly "none".`,
+    prompt: `Stores on his route: ${stores.join(', ') || '(none)'}\nTopics he has been researching: ${topics.join(', ') || '(none)'}` }).catch(() => null);
+  if (r) addSpend(r.cost, 'talk');
+  const t = String(r?.text || '').trim(); if (!t || /^none\b/i.test(t) || r?.error) return [];
+  return t.split('\n').map(l => l.replace(/^[-*•\s]+/, '').replace(/[*_`#]/g, '').trim()).filter(l => l.length > 5).slice(0, 6);
+}
+const dpMi = m => m < 1 ? 'under a mile' : m < 1.5 ? 'about a mile' : `about ${Math.round(m)} miles`;
+const dpTown = p => { const a = String(p.address || '').split(',').map(s => s.trim()); return a.length > 1 ? a[1].replace(/\s+[A-Z]{2}(\s+\d{5})?$/, '') : ''; };
+const dpHoursShort = h => { const m = String(h || '').match(/[–-]\s*([0-9:]+\s*[AP]M)\s*$/i); return /open 24/i.test(h) ? 'open 24 hours' : /closed/i.test(h) ? 'closed today' : m ? `open till ${m[1].replace(/:00/, '')}` : ''; };
+async function drivePlan({ from, to, needs, topics } = {}) {
+  const L = state.location && Date.now() - Date.parse(state.location.at) < 10 * 60e3 ? state.location : null;
+  const destName = to || headingFresh()?.name || (navLive() && state.nav.dest) || '';
+  if (!destName) return { error: 'Where are you headed, sir?' };
+  const here = hereNow(), startName = from || '';
+  const dest = await dpPoint(destName, L);
+  let start = startName ? await dpPoint(startName, L) : L ? { name: here?.name || headingFresh()?.from || 'your location', key: placeKey(here?.name || headingFresh()?.from || ''), kind: here?.kind || (headingFresh()?.from ? findPlace(headingFresh().from)?.kind || '' : ''), lat: L.lat, lon: L.lon } : null;
+  if (!start && here && Number.isFinite(here.lat)) start = { name: here.name, key: placeKey(here.name), kind: here.kind || '', lat: here.lat, lon: here.lon };
+  if (!dest) return { error: `I couldn't place ${destName} on the map, sir.` };
+  if (!start) return { error: 'I have no fresh location for you, sir. Tell me where you are starting from.' };
+  const rt = await dp.route(start, dest); if (!rt) return { error: 'The route service did not answer, sir. Try again in a minute.' };
+  let along = 0; if (L && startName && isDriving()) { const pr = dp.project(rt, L); if (pr.off < 1) along = pr.along; }   // already driving this route: only what is still ahead
+  const slot = mealSlot((minsNow() + Math.round(rt.minutes / 2)) % 1440) || mealSlot((minsNow() + Math.round(rt.minutes)) % 1440);
+  const food = dpFood(start, dest, slot);
+  const want = { stores: (needs || []).filter(Boolean), topics: (topics || []).filter(Boolean) };
+  if (!want.stores.length && !want.topics.length) Object.assign(want, await dpInterests());
+  const townsP = dp.corridorTowns(rt, along);
+  const foodHits = (await Promise.all(food.chains.map(ch => dp.alongRoute(ch, rt, along, 2)))).flat().sort((a, b) => a.along - b.along);
+  const storeHits = (await Promise.all(want.stores.map(s => dp.alongRoute(s, rt, along, 3)))).flat().sort((a, b) => a.along - b.along);
+  const [towns, deals] = await Promise.all([townsP, dpDeals([...new Set(storeHits.map(s => s.name))].concat(want.stores.filter(s => !storeHits.some(h => h.query === s))).slice(0, 4), want.topics)]);
+  const dn = dest.kind === 'home' ? 'home' : dest.name;
+  const s = [`${Math.round(rt.miles - along)} miles to ${dn}, about ${Math.round(rt.minutes * (rt.miles - along) / (rt.miles || 1))} minutes${towns.length ? `, through ${listJoin(towns.slice(0, 4))}` : ''}.`];
+  const f = foodHits[0];
+  if (food.later) s.push(f ? `Breakfast waits for the shop around ten; ${f.name}${dpTown(f) ? ' in ' + dpTown(f) : ''} is on the way to grab ${food.food} for then.` : 'Breakfast waits for the shop around ten.');
+  else if (f) s.push(`For ${slot}, ${f.name}${dpTown(f) ? ' in ' + dpTown(f) : ''} is right on the route, ${dpMi(f.ahead)} ahead.`);
+  else if (food.chains.length) s.push(`No ${food.chains.join(' or ')} on the route.`);
+  const st = storeHits[0];
+  if (st) s.push(`${st.name}${dpTown(st) ? ' in ' + dpTown(st) : ''} is on the way${dpHoursShort(st.hours) ? ', ' + dpHoursShort(st.hours) : ''}${deals.length ? `, and I found ${deals.length === 1 ? 'a deal' : deals.length + ' deals'} worth a look` : ''}.`);
+  else if (deals.length) s.push(`I found ${deals.length === 1 ? 'a deal' : deals.length + ' deals'} on what you've been looking at.`);
+  const spoken = s.slice(0, 3).join(' ');
+  const row = p => `- ${p.name}${p.address ? ' · ' + p.address : ''} · ${p.ahead} mi ahead, ${p.off} mi off route${p.hours ? ' · ' + p.hours : ''}`;
+  const body = [`${start.name} → ${dest.name}: ${Math.round(rt.miles)} mi, ~${Math.round(rt.minutes)} min. Corridor: ${towns.join(' → ') || 'n/a'}.`,
+    `Food (${slot || 'no meal due'}): ${food.note || (food.later ? `breakfast at the shop ~10:00, pick up ${food.food}` : food.food || '')}`, ...foodHits.map(row),
+    `Stores${want.stores.length ? ' (' + want.stores.join(', ') + ')' : ''}:`, ...(storeHits.length ? storeHits.map(row) : ['- none on the corridor']),
+    'Deals:', ...(deals.length ? deals.map(d => '- ' + d) : ['- none found']), `Source: ${dp.source()}, within ${dp.CORRIDOR_MI} mi of the route.`].filter(Boolean).join('\n');
+  dpLast = { key: dest.key, at: Date.now(), spoken, panel: { title: `On the way to ${dest.name}`, body } };
+  if (food.chains.length && slot) { const cp = state.copilot; if (cp?.day === nowCtx().day) (cp.topics ||= []).push('meal'); }   // the meal nudge does not repeat what the plan said
+  dlog('drive-plan', { from: start.name, to: dest.name, miles: Math.round(rt.miles), slot, food: foodHits.length, stores: storeHits.length, deals: deals.length });
+  return dpLast;
+}
+function dpShow() { if (!dpLast) return; state.panels.drive_plan = { id: 'drive_plan', ...dpLast.panel, updatedAt: new Date().toISOString() }; saveState(); broadcast({ type: 'panels', panels: state.panels }); }
+handlers.drive_plan = async ({ from, to, needs, topics, show, refresh, offers }) => {
+  if (offers != null) { state.drivePlanOffers = !!offers; saveState(); if (!from && !to && !show) return offers ? 'Say this: Route offers on, sir.' : 'Say this: Route offers off, sir.'; }
+  const destKey = placeKey(to || headingFresh()?.name || (navLive() && state.nav.dest) || '');
+  if (!dpLast || refresh || Date.now() - dpLast.at > 15 * 60e3 || (destKey && destKey !== dpLast.key) || from || needs?.length || topics?.length) {
+    const r = await drivePlan({ from, to, needs, topics }); if (r.error) return `Say this: ${r.error}`;
+  }
+  if (show) { dpShow(); return `Say this: ${dpLast.spoken} It's on screen, sir.`; }
+  holdPanel('drive_plan', dpLast.panel);
+  return `Say this, word for word, and nothing more (he is driving): ${dpLast.spoken} The full list with addresses, hours and prices is held; it goes on screen only if he asks (he says "show me" / "show the list").`;
+};
+async function drivePlanTick() {
+  if (state.drivePlanOffers === false || !isDriving() || quietNow() || busy || state.pendingQ) return;
+  const now = Date.now(), dr = state.drive, L = state.location;
+  if (!L || now - Date.parse(L.at) > 5 * 60e3 || (dr?.moving && now - (dr.since || now) < 2 * 60e3)) return;
+  const name = headingFresh()?.name || (navLive() && state.nav.dest) || ''; if (!name) return;
+  const k = placeKey(name); if (now - (dpOffered.get(k) || 0) < 2 * 3600e3) return;
+  if (now - (state.copilot?.lastAt || 0) < 5 * 60e3) return;   // a meal nudge just went out
+  dpOffered.set(k, now);
+  const d = await dpPoint(name, L); if (!d || dp.miles(L, d) < DP_MIN_MI) return;
+  state.pendingQ = { type: 'driveplan', dest: name, at: now }; saveState();
+  deliver(`Want me to check what's worth stopping for on the way to ${placeKey(name) === placeKey(homePlace()?.name) ? 'home' : name}, sir?`, 'Jarvis', true);
+}
+async function drivePlanAnswer(q, text) {
+  const t = norm(text).replace(/^(hey )?jarvis /, '');
+  state.pendingQ = null; saveState();
+  if (t.split(' ').length > 8) return false;
+  const say = r => { broadcast({ type: 'say', text: r, speak: true }); remember('jarvis', r); };
+  if (DEPART_NO.test(t) || SHOP_NO.test(t) || /^(not now|maybe later|i m good|im good|no thanks|no thank you|pass|nah)\b/.test(t)) { broadcast({ type: 'log', role: 'user', text }); remember('user', text); say('Very good, sir.'); return true; }
+  if (!(SHOP_YES.test(t) || /^(ok|okay|go ahead|do it|please|sure|yes please|what s there|check)\b/.test(t))) return false;
+  broadcast({ type: 'log', role: 'user', text }); remember('user', text); say('Checking the route, sir.');
+  drivePlan({ to: q.dest }).then(r => { if (r.error) return say(r.error); holdPanel('drive_plan', r.panel); say(r.spoken); }).catch(e => say('The route check failed, sir: ' + String(e.message || e).slice(0, 80)));
+  return true;
+}
+if (!process.env.JARVIS_SMOKE) setInterval(() => drivePlanTick().catch(e => console.warn('driveplan', e.message)), 60_000);
 handlers.bring_add = async ({ place, item }) => {
   const p = findPlace(place);
   state.reminders.push(cleanItem({ kind: 'bring', text: item, place: p ? p.name : place }));
