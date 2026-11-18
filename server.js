@@ -120,7 +120,7 @@ function dedupeSay(text) {
   recentSay.set(normSay(text), { t: now, raw: text }); return text;
 }
 function broadcast(msg) {
-  if (msg.type === 'say' && typeof msg.text === 'string') { const d = dedupeSay(msg.text); if (d === null) { console.log('duplicate line dropped: ' + msg.text.slice(0, 60)); return; } msg = { ...msg, text: d }; }
+  if (msg.type === 'say' && typeof msg.text === 'string' && !msg.fresh) { const d = dedupeSay(msg.text); if (d === null) { console.log('duplicate line dropped: ' + msg.text.slice(0, 60)); return; } msg = { ...msg, text: d }; }
   if (muteActive()) { if (msg.type === 'say') { if (!msg.text) return; console.log('mute mode: kept quiet: ' + String(msg.text).slice(0, 80)); msg = { type: 'log', role: 'jarvis', text: msg.text }; } else if (MUTE_DROP.has(msg.type)) return; }   // mute mode: no voice, caption or panels; replies only land in the log
   if (silentActive() && msg.type === 'say' && msg.speak) msg = { ...msg, speak: false };   // silent / text-only mode: text on the HUD, never voice
   if (msg.type === 'say' && typeof msg.text === 'string' && /\bowner\b/i.test(msg.text)) msg = { ...msg, text: msg.text.replace(/\bowner\b/gi, 'sir') };   // backstop: he is always "sir" out loud
@@ -378,7 +378,7 @@ async function run(text, { spoken = true, origin = 'user', label, forceMode } = 
   const blocked = overBudget(mode);
   if (blocked) {
     busy = false;
-    broadcast({ type: 'say', text: blocked, speak: spoken });
+    broadcast({ type: 'say', text: blocked, speak: spoken, fresh: true });
     return blocked;
   }
   broadcast({ type: 'state', state: 'thinking' });
@@ -799,7 +799,7 @@ async function runTalk({ text, promptWithContext, chatPrompt, spoken, origin, la
   let finalText = r.text || (r.error ? 'I ran into a problem finishing that, sir. Check the log.' : 'I did not get an answer back from my brain on that one, sir. Please ask me again.');
   if (r.error && r.error !== 'aborted') { console.warn(`  talk error: ${r.error}`); if (origin === 'user') recordFailure(text, r.error); }
   if (origin === 'user') { remember('user', text); remember('jarvis', finalText); }
-  broadcast({ type: 'say', text: finalText, speak: spoken });
+  broadcast({ type: 'say', text: finalText, speak: spoken, fresh: origin === 'user' || r.error || !r.text });   // an answer to his own command is never dropped as a repeat
   return finalText;
 }
 

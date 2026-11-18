@@ -127,7 +127,9 @@
   setInterval(() => {
     if (!heldSays.length) return;
     const h0 = heldSays[0], replyOk = h0.reply && !pending && !carry && !speaking && !voiceActive() && Date.now() - lastVoice > 1200;   // a held answer to HIS question goes as soon as he stops
-    if (!replyOk && (userBusy() || Date.now() - heldLast < 6000)) return;
+    // Never hold an answer for long: a mic that keeps re-opening (words stuck in pending/carry, steady noise) left replies held forever = Jarvis "not responding" (2026-11-17).
+    const overdue = Date.now() - h0.t > (h0.reply ? 4000 : 20000);
+    if (!replyOk && !overdue && (userBusy() || Date.now() - heldLast < 6000)) return;
     const h = heldSays.shift(); if (Date.now() - h.t > 2 * 3600e3) return;
     if (h.reply) replyDue = 0;
     heldLast = Date.now(); handle(h.m);
@@ -195,9 +197,9 @@
         break;
       case 'listen': if (!muted && !speaking) { manualMicUntil = Date.now() + 20000; goActive({ ms: 20000 }); } break;   // the question was already spoken by the phone service: just open the mic for the answer
       case 'say':
-        if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500 || voiceActive())) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now(), reply: !!replyDue }); break; } if (replyDue) replyDue = 0; else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
+        if (!m.__rel) { if (!DISPLAY_ONLY && (pending || carry || Date.now() - lastVoice < 2500 || voiceActive())) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1, __reply: !!replyDue }, t: Date.now(), reply: !!replyDue }); break; } if (replyDue) { replyDue = 0; m.__reply = true; } else if (!DISPLAY_ONLY && userBusy()) { if (heldSays.length < 25) heldSays.push({ m: { ...m, __rel: 1 }, t: Date.now() }); break; } }
         if (m.memo) saveMemo(m.memo);
-        { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < (/\?\s*$/.test(String(m.text || '')) ? 180000 : 20000)) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
+        { const k = String(m.text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && !m.__reply && handle.lastSay && handle.lastSay.k === k && Date.now() - handle.lastSay.t < (/\?\s*$/.test(String(m.text || '')) ? 180000 : 20000)) { addActivity('Dropped a duplicate reply.'); break; } handle.lastSay = { k, t: Date.now() }; }
         ticker('');
         if (m.text) addLog('jarvis', m.text);
         if (!lat.done && !lat.reply) lat.reply = Date.now();
