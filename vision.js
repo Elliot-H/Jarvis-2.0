@@ -91,49 +91,58 @@ export async function locateSubject({ image, target, cfg = visionConfig(), fetch
   return { x, y };
 }
 
-// Upload-and-analyze button: one file per call (a photo/screenshot, or a video as frames + its sound). Same JSON reply shape as analyzePhoto.
-const UPLOAD_SYSTEM = `You are Jarvis. The user picked a file on his phone and wants you to tell him what it is without him asking anything else. Reply as JSON only: {"spoken": string, "title": string, "details": string}.
-"spoken": two to five short sentences, dry and direct, no markdown, headline first: what it is, what he is looking at, what is going on. A screenshot of an email or message: who it is from, the subject, the key points and any date, amount, deadline or action he needs to take. A document, receipt or bill: what it is, totals and due dates. A video: what happens in it and the gist of anything said or heard (speech, music, engine or alarm sounds). Read out important text exactly.
-"title": 2 to 5 words naming what the file is.
-"details": the key facts as lines starting with "- " (exact text read, names, numbers, dates, what is said in the audio). Say plainly if something is unreadable or unsure. Never invent text or speech you cannot see or hear.`;
-
-export async function analyzeUpload({ images = [], audio = null, kind = 'photo', name = '', duration = 0, question = '', cfg = visionConfig(), fetchImpl = fetch }) {
+// ---------- Batch upload analysis (batch.js): one file at a time, its own answer ----------
+// One chat call with the primary model, one retry on the fallback model after a timeout / network error / 5xx.
+async function chatJson({ messages, cfg, maxTokens = 1400, ms = 60000, fetchImpl = fetch, model }) {
   if (!cfg.apiKey) throw new Error('The vision brain has no key yet. Add OPENROUTER_API_KEY in Railway.');
-  const imgs = images.filter(i => { const p = parseDataUrl(i); return p && p.bytes <= MAX_IMAGE_BYTES; }).slice(0, 6);
-  if (!imgs.length && !audio) throw new Error('I could not read anything out of that file.');
-  const intro = kind === 'video'
-    ? `This is a video${name ? ` named "${String(name).slice(0, 80)}"` : ''}${duration ? `, about ${Math.round(duration)} seconds long` : ''}. ${imgs.length ? `Here are ${imgs.length} frames from it in time order` : 'No frames could be taken from it'}${audio ? ', followed by its sound track' + (duration > 120 ? ' (first two minutes)' : '') : ', and it has no sound I could extract'}.`
-    : `This is an image${name ? ` named "${String(name).slice(0, 80)}"` : ''} (photo or screenshot).`;
-  const t0 = Date.now();
-  const build = withAudio => [
-    { type: 'text', text: intro + (question ? ` The user also says: "${String(question).slice(0, 400)}".` : ' Analyze all of it.') },
-    ...imgs.map(u => ({ type: 'image_url', image_url: { url: u } })),
-    ...(withAudio && audio ? [{ type: 'input_audio', input_audio: { data: audio, format: 'mp3' } }] : [])
-  ];
-  const ask = (model, withAudio) => fetchImpl(cfg.baseUrl + '/chat/completions', {
-    method: 'POST', headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(kind === 'video' ? 75000 : 40000),
-    body: JSON.stringify({ model, max_tokens: 1400, usage: { include: true }, reasoning: { effort: 'low', exclude: true }, response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: UPLOAD_SYSTEM }, { role: 'user', content: build(withAudio) }] })
+  const ask = m => fetchImpl(cfg.baseUrl + '/chat/completions', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + cfg.apiKey, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(ms),
+    body: JSON.stringify({ model: m, max_tokens: maxTokens, usage: { include: true }, reasoning: { effort: 'low', exclude: true }, response_format: { type: 'json_object' }, messages })
   });
-  const fb = cfg.fallbackModel && cfg.fallbackModel !== cfg.model;
-  let res, noAudio = false;
+  const first = model || cfg.model, fb = cfg.fallbackModel && cfg.fallbackModel !== first;
+  let res;
   try {
-    try { res = await ask(cfg.model, true); if (res.status >= 500 && fb) res = await ask(cfg.fallbackModel, true); }
-    catch (e) { if (!fb) throw e; res = await ask(cfg.fallbackModel, true); }
-    // A model that cannot take sound rejects the request: try the sound-capable fallback, then frames only.
-    if (audio && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 402 && res.status !== 429) {
-      if (fb) res = await ask(cfg.fallbackModel, true);
-      if (!res.ok && imgs.length) { res = await ask(cfg.model, false); noAudio = true; }
-    }
-  } catch (e) { throw new Error(`I could not reach the vision model: ${e.message}`); }
+    try { res = await ask(first); if (res.status >= 500 && fb) res = await ask(cfg.fallbackModel); }
+    catch (e) { if (!fb) throw e; res = await ask(cfg.fallbackModel); }
+  } catch (e) { throw new Error(`could not reach the model (${e.name === 'TimeoutError' ? 'timed out' : e.message})`); }
   const raw = await res.text();
   if (!res.ok) throw new Error(explain(res.status, raw));
-  let j; try { j = JSON.parse(raw); } catch { throw new Error('The vision model sent back something unreadable.'); }
+  let j; try { j = JSON.parse(raw); } catch { throw new Error('the model sent back something unreadable'); }
   const content = String(j.choices?.[0]?.message?.content || '').trim();
-  if (!content) throw new Error('The vision model gave no answer for that file.');
-  let out; try { out = JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { out = { spoken: content.slice(0, 700), title: 'File analysis', details: content }; }
-  let spoken = String(out.spoken || out.summary || out.details || '').trim().slice(0, 900);
-  if (!spoken) throw new Error('The vision model answered but with nothing readable.');
-  if (noAudio) spoken += ' I could not listen to the sound on this one, only the picture.';
-  return { spoken, title: String(out.title || 'File analysis').slice(0, 60), details: String(out.details || '').trim(), cost: Number(j.usage?.cost) || 0, ms: Date.now() - t0 };
+  if (!content) throw new Error(`the model gave no answer (${j.choices?.[0]?.finish_reason || 'unknown reason'})`);
+  let out; try { out = JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { out = { answer: content.slice(0, 1500) }; }
+  return { out, cost: Number(j.usage?.cost) || 0 };
+}
+
+// Speech + sound in a clip's audio track (mono mp3, base64). TRANSCRIBE_MODEL must accept audio (default Gemini Flash via OpenRouter).
+export async function transcribeAudio({ b64, format = 'mp3', cfg = visionConfig(), fetchImpl }) {
+  const model = process.env.TRANSCRIBE_MODEL || 'google/gemini-2.5-flash';
+  const { out, cost } = await chatJson({ cfg, fetchImpl, model, maxTokens: 3000, ms: 90000, messages: [
+    { role: 'system', content: 'You transcribe audio. Reply as JSON only: {"speech": string, "sounds": string}. "speech" = a faithful word-for-word transcript of everything said (empty string if nobody speaks); add [m:ss] stamps at each new sentence or speaker. "sounds" = one short line on music, engine, alarms or other non-speech sound (empty if silent). Never invent words you cannot hear; mark unclear parts [inaudible].' },
+    { role: 'user', content: [{ type: 'text', text: 'Transcribe this audio track.' }, { type: 'input_audio', input_audio: { data: b64, format } }] }
+  ] });
+  return { speech: String(out.speech || out.transcript || out.answer || '').trim(), sounds: String(out.sounds || '').trim(), cost };
+}
+
+const BATCH_SYS = `You are Jarvis reviewing ONE file from a batch the user uploaded (a photo, a screenshot, or frames sampled across a video / screen recording, plus its audio transcript when there is one). Reply as JSON only: {"answer": string, "title": string, "details": string}.
+"answer": 2 to 5 plain sentences that directly answer what the user asked about THIS file (his request for this file first, then the overall instruction). No markdown. If he asked nothing specific, say what it is and what matters in it.
+"title": 2 to 6 words naming what the file is.
+"details": key facts as lines starting with "- ": text you can read on it (exact wording, numbers, errors, prices, names of apps/screens), what it shows, and for a video what happens over time (use the frame times) and what is said (from the transcript). Say plainly when something is unreadable or you are unsure. Never invent text you cannot see or words you cannot hear.`;
+
+// images = [{ url: dataUrl, label }]; transcript = { speech, sounds } or null; notes = facts about the file (length, what was skipped).
+export async function analyzeBatchItem({ name, kind, images, question = '', instruction = '', transcript = null, notes = [], cfg = visionConfig(), fetchImpl }) {
+  const ask = [
+    `File: ${String(name).slice(0, 120)} (${kind}).`,
+    question ? `His request for this file: "${String(question).slice(0, 600)}"` : '',
+    instruction ? `His overall instruction for every file: "${String(instruction).slice(0, 800)}"` : '',
+    !question && !instruction ? 'He gave no specific request: describe and analyze it, read any text.' : '',
+    notes.length ? 'Notes: ' + notes.join(' ') : '',
+    kind === 'video' ? (transcript ? `Audio transcript:\n${transcript.speech || '(no speech)'}${transcript.sounds ? '\nOther sound: ' + transcript.sounds : ''}` : 'No audio transcript (silent clip or audio unavailable).') : ''
+  ].filter(Boolean).join('\n');
+  const content = [{ type: 'text', text: ask }];
+  for (const im of images) { if (im.label) content.push({ type: 'text', text: im.label }); content.push({ type: 'image_url', image_url: { url: im.url } }); }
+  const { out, cost } = await chatJson({ cfg, fetchImpl, maxTokens: 1500, ms: 75000, messages: [{ role: 'system', content: BATCH_SYS }, { role: 'user', content }] });
+  const answer = String(out.answer || out.spoken || out.summary || '').trim();
+  if (!answer) throw new Error('the model answered with nothing readable');
+  return { answer: answer.slice(0, 1200), title: String(out.title || name).slice(0, 60), details: String(out.details || '').trim().slice(0, 2500), cost };
 }

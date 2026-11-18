@@ -65,35 +65,6 @@ export async function frameOf(file, at = 1.2) {
   await run(FFMPEG, ['-y', '-ss', String(at), '-i', path.join(RAW, path.basename(file)), '-map', '0:v:0', '-an', '-sn', '-frames:v', '1', '-vf', 'scale=1024:-2', out], 60e3);
   const b = fs.readFileSync(out); try { fs.unlinkSync(out); } catch {} return b;
 }
-// Upload-and-analyze button: files go to a temp folder (never the social library) and are deleted after the read.
-export const TMP = path.join(base, 'media', 'analyze'); fs.mkdirSync(TMP, { recursive: true });
-export const saveTempStream = (req, ext, maxBytes = 200 * 1024 * 1024) => new Promise((res, rej) => {
-  const full = path.join(TMP, Date.now().toString(36) + crypto.randomBytes(3).toString('hex') + ext), out = fs.createWriteStream(full);
-  let n = 0, dead = false;
-  const fail = e => { if (dead) return; dead = true; try { out.destroy(); fs.unlinkSync(full); } catch {} rej(e); };
-  req.on('data', c => { n += c.length; if (n > maxBytes) { fail(new Error('File is too large (limit 200 MB).')); req.destroy(); } });
-  req.on('error', fail); req.on('aborted', () => fail(new Error('Upload was cut off.'))); out.on('error', fail);
-  out.on('finish', () => { if (dead) return; if (!n) return fail(new Error('Empty upload.')); res(full); });
-  req.pipe(out);
-});
-// Analysis inputs from a file at a full path: a small JPEG of a photo, N frames spread over a video, and its sound as mono mp3 (first `sec` seconds).
-export async function photoSmallAt(full) { const S = await sharp(); return 'data:image/jpeg;base64,' + (await S(full).rotate().resize(1280, 1280, { fit: 'inside' }).jpeg({ quality: 82 }).toBuffer()).toString('base64'); }
-export async function framesAt(full, n = 4) {
-  const d = await durationOf(full), out = [];
-  const times = d > 1 ? Array.from({ length: n }, (_, i) => +(d * (i + 0.5) / n).toFixed(2)) : [0];
-  for (const t of times) {
-    const f = path.join(os.tmpdir(), `fr-${crypto.randomBytes(4).toString('hex')}.jpg`);
-    try { await run(FFMPEG, ['-y', '-ss', String(t), '-i', full, '-map', '0:v:0', '-an', '-sn', '-frames:v', '1', '-vf', 'scale=768:-2', f], 60e3); out.push('data:image/jpeg;base64,' + fs.readFileSync(f).toString('base64')); } catch {}
-    try { fs.unlinkSync(f); } catch {}
-  }
-  return { frames: out, duration: d };
-}
-export async function audioAt(full, sec = 120) {
-  if (!(await hasAudio(full))) return null;
-  const f = path.join(os.tmpdir(), `au-${crypto.randomBytes(4).toString('hex')}.mp3`);
-  try { await run(FFMPEG, ['-y', '-i', full, '-map', '0:a:0', '-vn', '-t', String(sec), '-ac', '1', '-ar', '16000', '-b:a', '32k', f], 90e3); return fs.readFileSync(f).toString('base64'); }
-  catch { return null; } finally { try { fs.unlinkSync(f); } catch {} }
-}
 const probe = (file, args) => new Promise(res => { const p = spawn(FFPROBE, ['-v', 'error', ...args, file], { stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; p.stdout.on('data', d => { o += d; }); p.on('error', () => res('')); p.on('close', () => res(o.trim())); });
 export const hasAudio = async f => (await probe(f, ['-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0'])).includes('audio');
 export const durationOf = async f => Number(await probe(f, ['-show_entries', 'format=duration', '-of', 'csv=p=0'])) || 0;
@@ -218,3 +189,8 @@ async function prepareVideoNow(file, { shape = 'story', headline = '', start = 0
   try { await run(FFMPEG, args, 15 * 60e3); } finally { if (ovPng) try { fs.unlinkSync(ovPng); } catch {} }
   return { name, kind: 'video', shape, music: track };
 }
+
+// For the batch analysis (batch.js): ffmpeg with the same build fallbacks, sharp, and the one-heavy-job-at-a-time queue, on any file path.
+export const ffmpegRun = (args, ms = 120e3) => run(FFMPEG, args, ms);
+export const sharpLib = () => sharp();
+export const heavyJob = (label, fn) => oneAtATime(label, fn);

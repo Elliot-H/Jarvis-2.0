@@ -20,6 +20,7 @@ import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE
 import * as news from './news.js';
 import * as social from './social.js';
 import * as media from './media.js';
+import * as batch from './batch.js';
 import * as cal from './calendar.js';
 import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
@@ -34,7 +35,7 @@ import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
 import * as lightsMod from './lights.js';
 import * as companionsMod from './companions.js';
-import { analyzePhoto, analyzeUpload, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
+import { analyzePhoto, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -2373,7 +2374,7 @@ async function tgPoll() {
       const m = u.message; if (!m?.text || !chat || String(m.chat.id) !== String(chat)) continue; // only the user's own chat
       const t = m.text.trim(); if (!t || t.startsWith('/')) continue;
       tgReplyUntil = Date.now() + 90e3; broadcast({ type: 'log', role: 'user', text: t });
-      if (!muteAnswer(t) && !silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await lightAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t))) await ask(t, { spoken: false });
+      if (!muteAnswer(t) && !silentAnswer(t) && !(await panelAnswer(t)) && !holdAnswer(t) && !quietAnswer(t) && !(await lightAnswer(t)) && !(await shopAnswer(t)) && !(await bucketAnswer(t)) && !(await batchAnswer(t))) await ask(t, { spoken: false });
     }
   } catch (e) { await new Promise(r => setTimeout(r, 15000)); }
   setImmediate(tgPoll);
@@ -3488,38 +3489,90 @@ app.post('/api/photo', express.json({ limit: '12mb' }), async (req, res) => {
     fail(502, /^[A-Z]/.test(e.message) ? e.message.replace(/\.?$/, ', sir.') : 'The photo analysis failed, sir.');
   }
 });
-// Upload-and-analyze button (HUD #anaBtn): the phone sends each picked file here one at a time (raw body, ?name=&i=&n=&q=).
-// Each file gets its own answer (returned for the phone to speak in order, logged, and added as its own block in the "upload_analysis" panel).
-// Files go to media/analyze (not the social library) and are deleted right after.
-app.post('/api/analyze-file', async (req, res) => {
-  const name = String(req.query.name || '').slice(0, 120), i = Math.max(1, Number(req.query.i) || 1), n = Math.max(i, Number(req.query.n) || 1), q = String(req.query.q || '').trim().slice(0, 400);
-  const tag = n > 1 ? `File ${i} of ${n}` : 'Your file';
-  const ext = media.extFor(req.headers['content-type'], name), kind = media.kindOf('x' + ext);
-  const fail = (code, msg) => { recordFailure(`analyze upload ${name}`, msg); broadcast({ type: 'log', role: 'system', text: `${tag} (${name || 'file'}): ${msg}` }); if (!res.headersSent) res.status(code).json({ error: msg, spoken: `${tag}: ${msg}` }); };
-  if (kind !== 'photo' && kind !== 'video') { req.resume(); return fail(415, 'I can only read photos, screenshots and videos.'); }
-  const block = overBudget('talk'); if (block) { req.resume(); return fail(429, block); }
-  let full = '';
-  try {
-    full = await media.saveTempStream(req, ext);
-    if (i === 1) broadcast({ type: 'state', state: 'thinking' });
-    broadcast({ type: 'log', role: 'user', text: `[upload ${i}/${n}] ${name}${q ? ' ' + q : ''}` });
-    let r;
-    if (kind === 'photo') r = await analyzeUpload({ images: [await media.photoSmallAt(full)], kind, name, question: q });
-    else { const [{ frames, duration }, audio] = await Promise.all([media.framesAt(full, 4), media.audioAt(full)]); r = await analyzeUpload({ images: frames, audio, kind, name, duration, question: q }); }
-    const s2 = addSpend(r.cost, 'talk');
-    const prev = i === 1 ? '' : String(state.panels.upload_analysis?.body || '');
-    const blockTxt = `${tag.toUpperCase()}: ${r.title}${name ? ` (${name})` : ''}\n${r.details || r.spoken}`;
-    state.panels.upload_analysis = { id: 'upload_analysis', title: n > 1 ? `Uploads analyzed (${i}/${n})` : r.title, body: (prev ? prev + '\n\n' : '') + blockTxt, updatedAt: new Date().toISOString() };
-    saveState();
-    broadcast({ type: 'panels', panels: state.panels });
-    broadcast({ type: 'spend', turn: r.cost, today: s2.usd, limit: DAILY_BUDGET });
-    const spoken = (n > 1 ? `${tag}. ` : '') + r.spoken;
-    remember('user', `[uploaded ${kind} ${i} of ${n}: ${name}]`); remember('jarvis', spoken);
-    res.json({ ok: true, spoken, title: r.title });
-  } catch (e) {
-    fail(502, /^[A-Z]/.test(e.message) ? e.message : 'The analysis failed.');
-  } finally { if (full) fs.promises.unlink(full).catch(() => {}); }
+// ---------- Batch upload analysis (batch.js): the ANALYZE UPLOADS button. Separate from the SOCIAL button and /media: nothing here ever becomes a post. ----------
+const anyClient = () => [...clients].some(c => c.readyState === 1);
+async function startBatch(id) {
+  const b = batch.load(id); if (!b) return 'No such batch.';
+  if (!b.items.length && !(b.clientFailed || []).length) return 'That batch has no files.';
+  const block = overBudget('talk'); if (block) { broadcast({ type: 'say', text: block, speak: true, fresh: true }); return block; }
+  const n = b.items.length + (b.clientFailed || []).length;
+  broadcast({ type: 'state', state: 'thinking' });
+  broadcast({ type: 'log', role: 'user', text: `[batch upload] ${n} file${n > 1 ? 's' : ''}${b.instruction ? ': ' + b.instruction : ''}` });
+  remember('user', `[sent ${n} files for analysis]${b.instruction ? ' ' + b.instruction : ''}`);
+  if (n > 1) broadcast({ type: 'say', text: `Going through all ${n} files, sir. Each one gets its own answer.`, speak: true, fresh: true });
+  (async () => {
+    try {
+      const { results } = await batch.run(id, {
+        progress: t => broadcast({ type: 'activity', text: t }),
+        spend: v => { const s2 = addSpend(v, 'talk'); broadcast({ type: 'spend', turn: v, today: s2.usd, limit: DAILY_BUDGET }); },
+        blocked: () => overBudget('talk')
+      });
+      const blocks = batch.blocks(results), line = batch.spoken(results, 'sir');
+      state.panels.batch_analysis = { id: 'batch_analysis', title: `Upload analysis · ${results.length} file${results.length > 1 ? 's' : ''}`, body: blocks.join('\n\n'), updatedAt: new Date().toISOString() };
+      saveState(); broadcast({ type: 'panels', panels: state.panels });
+      for (const t of blocks) broadcast({ type: 'log', role: 'jarvis', text: t.replace(/\*\*/g, '') });
+      for (const r of results) remember('jarvis', `[${r.name}] ${r.ok ? r.answer : 'failed: ' + r.error}`);
+      for (const r of results.filter(r => !r.ok)) recordFailure(`analyze upload ${r.name}`, r.error);
+      broadcast({ type: 'say', text: line, speak: true, fresh: true });
+      if (!anyClient()) push('Upload analysis ready', line).catch(() => {});
+    } catch (e) {
+      const m = `The upload analysis failed, sir: ${e.message}`; recordFailure('analyze uploads', e.message);
+      broadcast({ type: 'say', text: m, speak: true, fresh: true });
+    }
+  })();
+  return `Analyzing ${n} file${n > 1 ? 's' : ''}.`;
+}
+app.post('/api/batch/file', async (req, res) => {
+  try { const item = await batch.saveFile(req, String(req.query.batch || ''), String(req.query.name || '')); res.json({ ok: true, item }); }
+  catch (e) { console.warn('  batch upload failed: ' + e.message); if (!res.headersSent) res.status(e.code || 400).json({ error: e.message }); }
 });
+// The queue from the HUD: overall instruction, a question per file, files that never made it up; run = analyze now, else wait for "analyze these uploads".
+app.post('/api/batch/queue', async (req, res) => {
+  const id = String(req.body?.batch || ''); let b = batch.load(id);
+  const failed = (Array.isArray(req.body?.clientFailed) ? req.body.clientFailed : []).slice(0, 20).map(f => ({ name: String(f?.name || 'file').slice(0, 80), reason: String(f?.reason || 'it did not upload').slice(0, 200) }));
+  if (!b && failed.length && /^[a-z0-9]{6,24}$/.test(id)) b = batch.save({ id, created: Date.now(), status: 'uploading', instruction: '', items: [] });
+  if (!b) return res.status(404).json({ error: 'No files arrived for that batch.' });
+  if (b.status === 'running' || b.status === 'done') return res.status(409).json({ error: 'That batch was already analyzed.' });
+  b.instruction = String(req.body?.instruction || '').trim().slice(0, 1000);
+  const qs = Array.isArray(req.body?.items) ? req.body.items : [];
+  for (const it of b.items) { const q = qs.find(x => x && x.file === it.file); if (q) it.question = String(q.question || '').trim().slice(0, 600); }
+  b.clientFailed = failed; b.status = 'queued'; batch.save(b);
+  if (req.body?.run) return res.json({ ok: true, started: await startBatch(b.id) });
+  broadcast({ type: 'activity', text: `${b.items.length} upload${b.items.length === 1 ? '' : 's'} queued. Say "analyze these uploads" when ready.` });
+  res.json({ ok: true, queued: b.items.length });
+});
+app.post('/api/batch/run', async (req, res) => {
+  const b = req.body?.batch ? batch.load(String(req.body.batch)) : batch.latestQueued();
+  if (!b || b.status !== 'queued') return res.json({ none: true });
+  res.json({ ok: true, started: await startBatch(b.id) });
+});
+// Voice: "analyze these uploads", "check my uploads", "what do you make of the files I sent" (the phone app also handles it before it gets here).
+const BATCH_VOICE = /\b(analy[sz]e (these|the|my|those) (uploads?|files)|check (my|the|these) (uploads|files)|what do you (make|think) of (the|these|those|my) (files|uploads)|(look at|go through) (the|my|these) (uploads|files)( i sent)?|batch upload)\b/i;
+async function batchAnswer(t) {
+  if (!BATCH_VOICE.test(t)) return false;
+  const q = batch.latestQueued();
+  if (q) { remember('user', t); await startBatch(q.id); return true; }
+  const last = batch.latest();
+  if (last?.status === 'running') { broadcast({ type: 'say', text: 'Still working through them, sir. Each file gets its own answer when it is done.', speak: true, fresh: true }); return true; }
+  if (last?.status === 'done' && last.results && Date.now() - (last.doneAt || 0) < 3 * 3600e3) {
+    state.panels.batch_analysis = { id: 'batch_analysis', title: `Upload analysis · ${last.results.length} file${last.results.length > 1 ? 's' : ''}`, body: batch.blocks(last.results).join('\n\n'), updatedAt: new Date().toISOString() };
+    saveState(); broadcast({ type: 'panels', panels: state.panels });
+    broadcast({ type: 'say', text: batch.spoken(last.results, 'sir'), speak: true, fresh: true }); return true;
+  }
+  broadcast({ type: 'say', text: 'Nothing is waiting to be analyzed, sir. Tap the uploads button and pick the files.', speak: true, fresh: true });
+  broadcast({ type: 'batch_pick' });
+  return true;
+}
+Object.assign(handlers, {
+  uploads_analyze: async () => {
+    const q = batch.latestQueued(); if (q) return (await startBatch(q.id)) + ' Results arrive per file on their own; tell him in one short line that you are on it.';
+    const last = batch.latest(); if (last?.status === 'running') return 'Already analyzing; results arrive per file on their own.';
+    if (last?.status === 'done' && last.results) return 'No new uploads. Last batch results, per file:\n' + batch.blocks(last.results).join('\n\n').replace(/\*\*/g, '').slice(0, 3500);
+    broadcast({ type: 'batch_pick' }); return 'Nothing uploaded for analysis. Tell him to tap the uploads button (ANALYZE UPLOADS) and pick the files.';
+  }
+});
+setInterval(() => { try { batch.cleanup(); } catch {} }, 6 * 3600e3);
+
 // Plain text ask (used by the safe-mode page)
 app.post('/api/ask', async (req, res) => {
   const t = String(req.body?.text || '').trim().slice(0, 4000);
@@ -4046,7 +4099,7 @@ wss.on('connection', (ws, req) => {
       // Any shortcut handler that throws or hangs must never swallow what he said: log it and hand the words to the brain.
       const tx = msg.text.trim(), lim = p => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('handler timed out')), 15000))]);
       let handled = false;
-      try { handled = muteAnswer(tx) || silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(lightAnswer(tx)) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)); }
+      try { handled = muteAnswer(tx) || silentAnswer(tx) || await lim(panelAnswer(tx)) || holdAnswer(tx) || quietAnswer(tx) || await lim(lightAnswer(tx)) || await lim(shopAnswer(tx)) || await lim(bucketAnswer(tx)) || await lim(batchAnswer(tx)); }
       catch (e) { console.error('answer shortcut failed, sending to the brain:', e?.stack || e); try { state.pendingQ = null; saveState(); } catch {} handled = false; }
       if (!handled) ask(tx);
     }

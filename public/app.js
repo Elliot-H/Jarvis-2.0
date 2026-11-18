@@ -213,6 +213,7 @@
       case 'stats': renderStats(m.stats); break;
       case 'panels': renderPanels(m.panels); break;
       case 'social_preview': showSocialPreview(m.url); break;
+      case 'batch_pick': showBatch(); break;   // "analyze these uploads" with nothing queued: open the batch screen (picking files needs a tap)
       case 'holdings': renderHoldings(m); break;
       case 'watchlist': renderWatchlist(m); break;
       case 'connections': renderConns(m.connections); break;
@@ -1013,8 +1014,9 @@
     if (!text) return;
     if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); muteMic(false); markSilentMute(true); send({ type: 'silent_on', text }); return; }   // "stop listening" = silent mode: mic + wake word off, text only, 8 h cap
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); replyDue = 0; setState('idle'); return; }
+    if (!raw && BATCH_RE.test(text) && bq.length && $('#batchBox') && !bBusy) { addLog('user', text); sendBatch(true); return; }   // files waiting in the batch screen: send them; otherwise the server runs the queued batch
     if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
-    if (!raw && ANA_RE.test(text)) { addLog('user', text); openAnalyze(text.replace(ANA_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); caption('Pick the files to analyze…'); return; }
+    if (!raw && ANA_RE.test(text) && !BATCH_RE.test(text)) { addLog('user', text); openBatchVoice(text.replace(ANA_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); caption('Pick the files to analyze…'); return; }   // "analyze these screenshots", "upload some files": open the batch screen (the rest of the sentence = instruction for all)
     if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     { const k = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && submit.last && submit.last.k === k && Date.now() - submit.last.t < 8000) { addActivity('Dropped a repeat of the same command.'); return; } submit.last = { k, t: Date.now() }; }   // the recognizer can deliver one sentence twice: send it once
     stopSpeaking(false);
@@ -1151,56 +1153,114 @@
     fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '', question: q || '', clientError: msg }) }).catch(() => { addLog('system', msg); caption(msg); });
   }
 
-  // ======================= upload & analyze: pick several photos / screenshots / videos, Jarvis reads each one back separately =======================
-  // Separate from the social button: nothing is posted or kept; files are analyzed one by one and each gets its own spoken answer.
-  const anaInput = $('#anaInput'), anaBtn = $('#anaBtn');
+  // ======================= ANALYZE UPLOADS: several photos / screenshots / videos, one answer per file =======================
+  // Separate from the SOCIAL button on purpose (own input, own server routes and folder): nothing picked here ever becomes a post.
+  const batchInput = $('#batchInput'), batchBtn = $('#batchBtn');
+  const BATCH_RE = /\b(analy[sz]e (these|the|my|those) (uploads?|files)|check (my|the|these) (uploads|files)|what do you (make|think) of (the|these|those|my) (files|uploads)|(look at|go through) (the|my|these) (uploads|files)( i sent)?|batch upload)\b/i;
+  const B_MAX_FILES = 12, B_MAX_MB = 200, B_MAX_SEC = 180;
   const ANA_RE = /\b((analy[sz]e|read|check|describe|look at|go through) (these|those|my|some|the|a few|multiple|several) (\w+ )?(files|uploads|screenshots|screen ?shots|screen recordings?|pictures|photos|images|pics|videos|clips)|(upload|send) (you )?(some |a few |multiple |several )?(files|screenshots|screen ?shots|pictures|photos|images|videos|screen recordings?)( for you| to analy[sz]e)?|(open|use|hit|press) (the )?(analy[sz]e|upload|batch)( files?)? button)\b/i;
-  function openAnalyze(question) {
-    anaInput.dataset.q = question || '';
-    try { anaInput.click(); } catch {}
-    if (!navigator.userActivation?.isActive) showAnaPrompt();   // from voice the browser needs one tap
+  function openBatchVoice(instruction) { showBatch(); const a = $('#bAll'); if (a && instruction && !a.value) a.value = instruction; try { if (navigator.userActivation?.isActive) batchInput.click(); } catch {} }
+  let bq = [], bBusy = false;
+  const bSt = 'width:100%;padding:14px;font:700 14px Orbitron,sans-serif;letter-spacing:.15em;background:#041422;color:#3fe0ff;border:1px solid #3fe0ff';
+  const bKind = f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name) ? 'image' : /^video\//.test(f.type) || /\.(mp4|mov|m4v|webm|mkv|3gp)$/i.test(f.name) ? 'video' : '';
+  const bSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const bTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  function showBatch() {
+    let box = $('#batchBox'); if (box) return box;
+    box = document.createElement('div'); box.id = 'batchBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:75;background:rgba(2,6,12,.96);overflow-y:auto;padding:14px 16px 28px;color:#cfefff;font:15px system-ui';
+    box.innerHTML = `<div style="max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b style="font:700 14px Orbitron,sans-serif;letter-spacing:.2em;color:#3fe0ff">ANALYZE UPLOADS</b><button id="bClose" style="padding:8px 14px;background:none;color:#9bb;border:1px solid #567">CLOSE</button></div>
+      <div id="bDrop" style="border:2px dashed #2a6f8f;border-radius:8px;padding:22px 12px;text-align:center;cursor:pointer;color:#8fd8f0">Tap to add photos, screenshots or videos<br><small style="color:#6aa">or drop files here · up to ${B_MAX_FILES} files, ${B_MAX_MB} MB each, videos up to ${bTime(B_MAX_SEC)} analyzed</small></div>
+      <div id="bList" style="display:flex;flex-direction:column;gap:8px"></div>
+      <textarea id="bAll" rows="2" placeholder="Instruction for ALL files (optional), e.g. what is wrong in each screenshot?" style="width:100%;box-sizing:border-box;padding:10px;font:15px system-ui;background:#041422;color:#cfefff;border:1px solid #2a5d78"></textarea>
+      <div id="bStat" style="min-height:1.2em;color:#8fd8f0"></div>
+      <button id="bGo" style="${bSt}">ANALYZE ALL</button>
+      <button id="bLater" style="${bSt};border-color:#356;color:#9bd">UPLOAD, ANALYZE WHEN I SAY</button>
+    </div>`;
+    document.body.appendChild(box);
+    const drop = $('#bDrop');
+    drop.onclick = () => batchInput.click();
+    drop.ondragover = e => { e.preventDefault(); drop.style.borderColor = '#3fe0ff'; };
+    drop.ondragleave = () => { drop.style.borderColor = '#2a6f8f'; };
+    drop.ondrop = e => { e.preventDefault(); e.stopPropagation(); drop.style.borderColor = '#2a6f8f'; addBatch(e.dataTransfer?.files); };
+    $('#bClose').onclick = () => { if (!bBusy) closeBatch(); };
+    $('#bGo').onclick = () => sendBatch(true);
+    $('#bLater').onclick = () => sendBatch(false);
+    renderBatch(); return box;
   }
-  function showAnaPrompt() {
-    if ($('#anaPrompt')) return;
-    const b = document.createElement('button'); b.id = 'anaPrompt'; b.textContent = 'TAP TO PICK FILES';
-    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;padding:22px 30px;font:700 16px Orbitron,sans-serif;letter-spacing:.2em;background:#041422;color:#3fe0ff;border:2px solid #3fe0ff;box-shadow:0 0 24px rgba(63,224,255,.5)';
-    b.onclick = () => { b.remove(); anaInput.click(); };
-    document.body.appendChild(b); setTimeout(() => b.remove(), 20000);
+  function closeBatch() { for (const x of bq) URL.revokeObjectURL(x.url); bq = []; $('#batchBox')?.remove(); }
+  function addBatch(files) {
+    const st = $('#bStat'), msgs = [];
+    for (const f of [...(files || [])]) {
+      const kind = bKind(f);
+      if (!kind) { msgs.push(`${f.name}: not a photo or video, skipped.`); continue; }
+      if (bq.length >= B_MAX_FILES) { msgs.push(`Only ${B_MAX_FILES} files per batch; the rest were left out.`); break; }
+      const it = { f, kind, url: URL.createObjectURL(f), q: '', warn: '', big: f.size > B_MAX_MB * 1048576 };
+      if (it.big) it.warn = `Too large (${bSize(f.size)}, limit ${B_MAX_MB} MB). It will not be sent; trim it or send a shorter clip.`;
+      bq.push(it);
+    }
+    if (st) st.textContent = msgs.join(' ');
+    renderBatch();
   }
-  anaBtn.addEventListener('click', () => { if (!booted) return boot(); anaInput.dataset.q = ''; anaInput.click(); });
-  // Photos are shrunk on the phone (quick on mobile data); videos go up as they are and the server takes frames + sound.
-  const shrinkBlob = f => shrink(f).then(u => fetch(u)).then(r => r.blob()).catch(() => f);
-  function postFile(body, f, i, n, q) {
-    return new Promise(done => {
+  function renderBatch() {
+    const list = $('#bList'); if (!list) return; list.innerHTML = '';
+    bq.forEach((it, i) => {
+      const row = document.createElement('div'); row.style.cssText = `display:flex;gap:10px;align-items:flex-start;padding:8px;border:1px solid ${it.big ? '#a33' : '#1d4a63'};border-radius:6px;background:#041019`;
+      const th = document.createElement(it.kind === 'image' ? 'img' : 'video'); th.style.cssText = 'width:64px;height:64px;object-fit:cover;flex:none;background:#000;border-radius:4px';
+      if (it.kind === 'video') { th.muted = true; th.preload = 'metadata'; th.playsInline = true; th.src = it.url + '#t=0.5'; th.onloadedmetadata = () => { it.dur = th.duration; if (isFinite(th.duration) && th.duration > B_MAX_SEC && !it.big) { it.warn = `${bTime(th.duration)} long: only the first ${bTime(B_MAX_SEC)} will be analyzed.`; renderWarn(); } }; }
+      else th.src = it.url;
+      const mid = document.createElement('div'); mid.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:6px';
+      const nm = document.createElement('div'); nm.style.cssText = 'font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent = `${i + 1}. ${it.f.name} · ${it.kind === 'video' ? 'video' : 'image'} · ${bSize(it.f.size)}${it.dur && isFinite(it.dur) ? ' · ' + bTime(it.dur) : ''}`;
+      const wn = document.createElement('div'); wn.style.cssText = 'font-size:12px;color:#ffb347'; const renderWarn = () => { wn.textContent = it.warn ? '⚠ ' + it.warn : ''; }; renderWarn();
+      const q = document.createElement('input'); q.placeholder = 'Question for this file (optional)'; q.value = it.q; q.oninput = () => { it.q = q.value; };
+      q.style.cssText = 'width:100%;box-sizing:border-box;padding:8px;font:14px system-ui;background:#041422;color:#cfefff;border:1px solid #2a5d78';
+      if (it.big) q.disabled = true;
+      mid.append(nm, wn, q);
+      const x = document.createElement('button'); x.textContent = '✕'; x.title = 'Remove'; x.style.cssText = 'flex:none;padding:6px 10px;background:none;color:#f88;border:1px solid #633';
+      x.onclick = () => { if (bBusy) return; URL.revokeObjectURL(it.url); bq.splice(i, 1); renderBatch(); };
+      row.append(th, mid, x); list.appendChild(row);
+    });
+    const go = $('#bGo'); if (go) go.textContent = bq.length ? `ANALYZE ALL ${bq.filter(x => !x.big).length}` : 'ANALYZE ALL';
+  }
+  function upBatch(id, it, onPct) {
+    return new Promise(res => {
       const x = new XMLHttpRequest();
-      x.open('POST', `/api/analyze-file?name=${encodeURIComponent(f.name || 'file')}&i=${i}&n=${n}&q=${encodeURIComponent(q)}`);
-      x.setRequestHeader('Content-Type', body.type || f.type || 'application/octet-stream');
-      x.upload.onprogress = e => { if (e.lengthComputable && e.total > 2e6) caption(`Uploading ${i} of ${n}: ${Math.round(e.loaded / e.total * 100)}%`); };
-      x.onload = () => { if (x.status === 401) return location.reload(); let j = {}; try { j = JSON.parse(x.responseText); } catch {} done(j.spoken || `File ${i} of ${n}: the analysis failed (${j.error || x.status}).`); };
-      x.onerror = () => done(`File ${i} of ${n}: the upload failed on the connection.`);
-      x.send(body);
+      x.open('POST', `/api/batch/file?batch=${id}&name=${encodeURIComponent(it.f.name)}`);
+      x.setRequestHeader('Content-Type', it.f.type || 'application/octet-stream');
+      x.upload.onprogress = e => { if (e.lengthComputable) onPct(Math.round(e.loaded / e.total * 100)); };
+      x.onload = () => { if (x.status === 401) return location.reload(); let j = {}; try { j = JSON.parse(x.responseText); } catch {} res(x.status === 200 && j.item ? { item: j.item } : { error: j.error || 'upload failed (' + x.status + ')' }); };
+      x.onerror = () => res({ error: 'the upload was cut off (connection)' });
+      x.send(it.f);
     });
   }
-  // Answers are spoken strictly in order, one at a time, never cutting each other off.
-  const anaQ = []; let anaPumping = false;
-  function anaSay(t) { anaQ.push(t); if (!anaPumping) anaPump(); }
-  function anaPump() {
-    if (!anaQ.length) { anaPumping = false; return; }
-    anaPumping = true;
-    if (speaking || pending || carry) return setTimeout(anaPump, 500);
-    const t = anaQ.shift(); addLog('jarvis', t); stopFillers(); speak(t); setTimeout(anaPump, 800);
-  }
-  anaInput.addEventListener('change', async () => {
-    const files = [...(anaInput.files || [])].slice(0, 20), q = anaInput.dataset.q || ''; anaInput.value = ''; anaInput.dataset.q = ''; $('#anaPrompt')?.remove();
-    if (!files.length) return;
-    const n = files.length; addActivity(`Analyzing ${n} file${n > 1 ? 's' : ''}`); setState('thinking');
-    if (n > 1) anaSay(`Got ${n} files. Going through them one at a time.`);
-    for (let i = 0; i < n; i++) {
-      const f = files[i], img = /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif)$/i.test(f.name);
-      const body = img ? await shrinkBlob(f) : f;
-      anaSay(await postFile(body, f, i + 1, n, q));
+  async function sendBatch(run) {
+    if (bBusy) return; const st = $('#bStat');
+    if (!bq.length) { if (st) st.textContent = 'Add some files first.'; return; }
+    if (!bq.some(x => !x.big)) { if (st) st.textContent = 'Every file is over the size limit. Nothing to send.'; return; }
+    bBusy = true; for (const b of ['#bGo', '#bLater']) { const el = $(b); if (el) el.disabled = true; }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8), items = [], clientFailed = [];
+    for (const [i, it] of bq.entries()) {
+      if (it.big) { clientFailed.push({ name: it.f.name, reason: `it is too large (${bSize(it.f.size)}, limit ${B_MAX_MB} MB) and was not sent` }); continue; }
+      const r = await upBatch(id, it, p => { if (st) st.textContent = `Uploading ${i + 1} of ${bq.length}: ${it.f.name} ${p}%`; });
+      if (r.item) items.push({ file: r.item.file, question: it.q.trim() }); else clientFailed.push({ name: it.f.name, reason: r.error });
     }
-  });
+    if (st) st.textContent = items.length ? (run ? 'Uploaded. Analyzing…' : 'Uploaded.') : 'Nothing uploaded.';
+    try {
+      const r = await fetch('/api/batch/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batch: id, instruction: ($('#bAll')?.value || '').trim(), items, clientFailed, run }) });
+      if (r.status === 401) return location.reload();
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'status ' + r.status);
+      addActivity(run ? `Batch: ${items.length} file(s) sent for analysis${clientFailed.length ? `, ${clientFailed.length} failed to upload` : ''}` : `Batch: ${items.length} file(s) queued. Say "analyze these uploads" when ready.`);
+      if (!run) caption('Queued. Say "analyze these uploads" when ready.'); else setState('thinking');
+      bBusy = false; closeBatch();
+    } catch (e) { bBusy = false; for (const b of ['#bGo', '#bLater']) { const el = $(b); if (el) el.disabled = false; } if (st) st.textContent = 'Could not hand the batch to Jarvis: ' + e.message; addLog('system', 'Batch upload failed: ' + e.message); }
+  }
+  batchBtn.addEventListener('click', () => { if (!booted) return boot(); showBatch(); try { batchInput.click(); } catch {} });
+  batchInput.addEventListener('change', () => { showBatch(); addBatch(batchInput.files); batchInput.value = ''; });
+  // Web version: drop files anywhere on the HUD to start a batch (never the social flow).
+  document.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+  document.addEventListener('drop', e => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); showBatch(); addBatch(e.dataTransfer.files); });
 
   // ======================= controls =======================
   $('#cmd').addEventListener('submit', e => {
