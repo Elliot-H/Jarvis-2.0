@@ -34,7 +34,7 @@ import * as sig from './signals.js';
 import * as ps5 from './ps5.js';
 import * as lightsMod from './lights.js';
 import * as companionsMod from './companions.js';
-import { analyzePhoto, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
+import { analyzePhoto, analyzeUpload, locateSubject, parseDataUrl, MAX_IMAGE_BYTES } from './vision.js';
 import { localClock, parseTime, dueSlots } from './schedule.js';
 import { talk, brainConfig, chatSystemPrompt, keyStatus, setKeyNote } from './brain.js';
 import { runBench, renderText } from './bench/run.js';
@@ -3487,6 +3487,38 @@ app.post('/api/photo', express.json({ limit: '12mb' }), async (req, res) => {
   } catch (e) {
     fail(502, /^[A-Z]/.test(e.message) ? e.message.replace(/\.?$/, ', sir.') : 'The photo analysis failed, sir.');
   }
+});
+// Upload-and-analyze button (HUD #anaBtn): the phone sends each picked file here one at a time (raw body, ?name=&i=&n=&q=).
+// Each file gets its own answer (returned for the phone to speak in order, logged, and added as its own block in the "upload_analysis" panel).
+// Files go to media/analyze (not the social library) and are deleted right after.
+app.post('/api/analyze-file', async (req, res) => {
+  const name = String(req.query.name || '').slice(0, 120), i = Math.max(1, Number(req.query.i) || 1), n = Math.max(i, Number(req.query.n) || 1), q = String(req.query.q || '').trim().slice(0, 400);
+  const tag = n > 1 ? `File ${i} of ${n}` : 'Your file';
+  const ext = media.extFor(req.headers['content-type'], name), kind = media.kindOf('x' + ext);
+  const fail = (code, msg) => { recordFailure(`analyze upload ${name}`, msg); broadcast({ type: 'log', role: 'system', text: `${tag} (${name || 'file'}): ${msg}` }); if (!res.headersSent) res.status(code).json({ error: msg, spoken: `${tag}: ${msg}` }); };
+  if (kind !== 'photo' && kind !== 'video') { req.resume(); return fail(415, 'I can only read photos, screenshots and videos.'); }
+  const block = overBudget('talk'); if (block) { req.resume(); return fail(429, block); }
+  let full = '';
+  try {
+    full = await media.saveTempStream(req, ext);
+    if (i === 1) broadcast({ type: 'state', state: 'thinking' });
+    broadcast({ type: 'log', role: 'user', text: `[upload ${i}/${n}] ${name}${q ? ' ' + q : ''}` });
+    let r;
+    if (kind === 'photo') r = await analyzeUpload({ images: [await media.photoSmallAt(full)], kind, name, question: q });
+    else { const [{ frames, duration }, audio] = await Promise.all([media.framesAt(full, 4), media.audioAt(full)]); r = await analyzeUpload({ images: frames, audio, kind, name, duration, question: q }); }
+    const s2 = addSpend(r.cost, 'talk');
+    const prev = i === 1 ? '' : String(state.panels.upload_analysis?.body || '');
+    const blockTxt = `${tag.toUpperCase()}: ${r.title}${name ? ` (${name})` : ''}\n${r.details || r.spoken}`;
+    state.panels.upload_analysis = { id: 'upload_analysis', title: n > 1 ? `Uploads analyzed (${i}/${n})` : r.title, body: (prev ? prev + '\n\n' : '') + blockTxt, updatedAt: new Date().toISOString() };
+    saveState();
+    broadcast({ type: 'panels', panels: state.panels });
+    broadcast({ type: 'spend', turn: r.cost, today: s2.usd, limit: DAILY_BUDGET });
+    const spoken = (n > 1 ? `${tag}. ` : '') + r.spoken;
+    remember('user', `[uploaded ${kind} ${i} of ${n}: ${name}]`); remember('jarvis', spoken);
+    res.json({ ok: true, spoken, title: r.title });
+  } catch (e) {
+    fail(502, /^[A-Z]/.test(e.message) ? e.message : 'The analysis failed.');
+  } finally { if (full) fs.promises.unlink(full).catch(() => {}); }
 });
 // Plain text ask (used by the safe-mode page)
 app.post('/api/ask', async (req, res) => {

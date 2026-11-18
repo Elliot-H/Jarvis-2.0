@@ -1014,6 +1014,7 @@
     if (!raw && MUTE_RE.test(text) && text.split(/\s+/).length <= 8) { addLog('user', text); muteMic(false); markSilentMute(true); send({ type: 'silent_on', text }); return; }   // "stop listening" = silent mode: mic + wake word off, text only, 8 h cap
     if (/^(stop|cancel|never ?mind|shut up|quiet)\b/i.test(text)) { stopSpeaking(); stopFillers(); if (filler.cur) { filler.cur.pause(); filler.cur = null; } send({ type: 'interrupt' }); replyDue = 0; setState('idle'); return; }
     if (!raw && SOC_RE.test(text)) { addLog('user', text); const bm = text.match(/\b(defiant|my ?online ?car ?guy|nexus|my ?guru)\b/i); openSocial(bm ? bm[1] : ''); caption('Pick the photo or video…'); return; }
+    if (!raw && ANA_RE.test(text)) { addLog('user', text); openAnalyze(text.replace(ANA_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); caption('Pick the files to analyze…'); return; }
     if (!raw && LOOK_RE.test(text)) { openCamera(text.replace(LOOK_RE, '').replace(/^[\s,.:;-]+|[\s,.]+$/g, '').replace(/^(and|then)\s+/i, '')); addLog('user', text); caption('Opening the camera…'); return; }
     { const k = text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); if (k && submit.last && submit.last.k === k && Date.now() - submit.last.t < 8000) { addActivity('Dropped a repeat of the same command.'); return; } submit.last = { k, t: Date.now() }; }   // the recognizer can deliver one sentence twice: send it once
     stopSpeaking(false);
@@ -1149,6 +1150,57 @@
     setState('idle');
     fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: '', question: q || '', clientError: msg }) }).catch(() => { addLog('system', msg); caption(msg); });
   }
+
+  // ======================= upload & analyze: pick several photos / screenshots / videos, Jarvis reads each one back separately =======================
+  // Separate from the social button: nothing is posted or kept; files are analyzed one by one and each gets its own spoken answer.
+  const anaInput = $('#anaInput'), anaBtn = $('#anaBtn');
+  const ANA_RE = /\b((analy[sz]e|read|check|describe|look at|go through) (these|those|my|some|the|a few|multiple|several) (\w+ )?(files|uploads|screenshots|screen ?shots|screen recordings?|pictures|photos|images|pics|videos|clips)|(upload|send) (you )?(some |a few |multiple |several )?(files|screenshots|screen ?shots|pictures|photos|images|videos|screen recordings?)( for you| to analy[sz]e)?|(open|use|hit|press) (the )?(analy[sz]e|upload|batch)( files?)? button)\b/i;
+  function openAnalyze(question) {
+    anaInput.dataset.q = question || '';
+    try { anaInput.click(); } catch {}
+    if (!navigator.userActivation?.isActive) showAnaPrompt();   // from voice the browser needs one tap
+  }
+  function showAnaPrompt() {
+    if ($('#anaPrompt')) return;
+    const b = document.createElement('button'); b.id = 'anaPrompt'; b.textContent = 'TAP TO PICK FILES';
+    b.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;padding:22px 30px;font:700 16px Orbitron,sans-serif;letter-spacing:.2em;background:#041422;color:#3fe0ff;border:2px solid #3fe0ff;box-shadow:0 0 24px rgba(63,224,255,.5)';
+    b.onclick = () => { b.remove(); anaInput.click(); };
+    document.body.appendChild(b); setTimeout(() => b.remove(), 20000);
+  }
+  anaBtn.addEventListener('click', () => { if (!booted) return boot(); anaInput.dataset.q = ''; anaInput.click(); });
+  // Photos are shrunk on the phone (quick on mobile data); videos go up as they are and the server takes frames + sound.
+  const shrinkBlob = f => shrink(f).then(u => fetch(u)).then(r => r.blob()).catch(() => f);
+  function postFile(body, f, i, n, q) {
+    return new Promise(done => {
+      const x = new XMLHttpRequest();
+      x.open('POST', `/api/analyze-file?name=${encodeURIComponent(f.name || 'file')}&i=${i}&n=${n}&q=${encodeURIComponent(q)}`);
+      x.setRequestHeader('Content-Type', body.type || f.type || 'application/octet-stream');
+      x.upload.onprogress = e => { if (e.lengthComputable && e.total > 2e6) caption(`Uploading ${i} of ${n}: ${Math.round(e.loaded / e.total * 100)}%`); };
+      x.onload = () => { if (x.status === 401) return location.reload(); let j = {}; try { j = JSON.parse(x.responseText); } catch {} done(j.spoken || `File ${i} of ${n}: the analysis failed (${j.error || x.status}).`); };
+      x.onerror = () => done(`File ${i} of ${n}: the upload failed on the connection.`);
+      x.send(body);
+    });
+  }
+  // Answers are spoken strictly in order, one at a time, never cutting each other off.
+  const anaQ = []; let anaPumping = false;
+  function anaSay(t) { anaQ.push(t); if (!anaPumping) anaPump(); }
+  function anaPump() {
+    if (!anaQ.length) { anaPumping = false; return; }
+    anaPumping = true;
+    if (speaking || pending || carry) return setTimeout(anaPump, 500);
+    const t = anaQ.shift(); addLog('jarvis', t); stopFillers(); speak(t); setTimeout(anaPump, 800);
+  }
+  anaInput.addEventListener('change', async () => {
+    const files = [...(anaInput.files || [])].slice(0, 20), q = anaInput.dataset.q || ''; anaInput.value = ''; anaInput.dataset.q = ''; $('#anaPrompt')?.remove();
+    if (!files.length) return;
+    const n = files.length; addActivity(`Analyzing ${n} file${n > 1 ? 's' : ''}`); setState('thinking');
+    if (n > 1) anaSay(`Got ${n} files. Going through them one at a time.`);
+    for (let i = 0; i < n; i++) {
+      const f = files[i], img = /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif)$/i.test(f.name);
+      const body = img ? await shrinkBlob(f) : f;
+      anaSay(await postFile(body, f, i + 1, n, q));
+    }
+  });
 
   // ======================= controls =======================
   $('#cmd').addEventListener('submit', e => {

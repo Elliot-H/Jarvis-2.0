@@ -86,6 +86,16 @@ public class MainActivity extends Activity {
       @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
         if (picker != null) picker.onReceiveValue(null);
         picker = cb;
+        // Upload & analyze button: several files at once, straight to the gallery/file picker (no camera shortcut).
+        if (p.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+          try {
+            camUri = null;
+            Intent pick = p.createIntent();
+            pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(Intent.createChooser(pick, "Files for Jarvis"), PICK);
+            return true;
+          } catch (Exception e) { picker = null; cb.onReceiveValue(null); return false; }
+        }
         try {
           Intent cam = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
           // Without an output file the camera app hands back only a tiny thumbnail (that is what made posts pixelated). Give it a file to save the full-size photo in.
@@ -188,14 +198,19 @@ public class MainActivity extends Activity {
     if (code != PICK || picker == null) return;
     Uri[] out = null;
     Uri cu = camUri; camUri = null;
-    boolean picked = result == RESULT_OK && data != null && data.getData() != null;
+    boolean picked = result == RESULT_OK && data != null && (data.getData() != null || data.getClipData() != null);
     if (cu != null && !picked) {
       // Camera result: the full-size photo is in the file we gave it; an abandoned shot leaves an empty row to remove.
       if (result == RESULT_OK) out = new Uri[]{cu};
       else { try { getContentResolver().delete(cu, null, null); } catch (Exception ignored) {} }
     } else if (cu != null) { try { getContentResolver().delete(cu, null, null); } catch (Exception ignored) {} }
     if (out == null && result == RESULT_OK && data != null) {
-      if (data.getData() != null) out = new Uri[]{data.getData()};
+      android.content.ClipData clip = data.getClipData();
+      if (clip != null && clip.getItemCount() > 0) {
+        out = new Uri[clip.getItemCount()];
+        for (int i = 0; i < out.length; i++) out[i] = clip.getItemAt(i).getUri();
+      }
+      else if (data.getData() != null) out = new Uri[]{data.getData()};
       else if (data.getExtras() != null && data.getExtras().get("data") instanceof android.graphics.Bitmap) {
         try {
           android.graphics.Bitmap b = (android.graphics.Bitmap) data.getExtras().get("data");

@@ -150,9 +150,9 @@ html,body{height:100%;background:var(--bg);color:var(--txt);overflow:hidden;
   clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px)}
 .cmd:focus-within{border-color:var(--c);box-shadow:var(--glow)}
 .prompt{font-family:"JetBrains Mono";color:var(--c)}
-#cmdInput{flex:1;background:none;border:0;outline:0;color:var(--txt);font-family:"JetBrains Mono";font-size:14px;padding:8px 0}
+#cmdInput{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--txt);font-family:"JetBrains Mono";font-size:14px;padding:8px 0}
 #cmdInput::placeholder{color:#4b6f82}
-.mic{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--cline);background:rgba(63,224,255,.06);cursor:pointer;transition:.2s}
+.mic{width:42px;height:42px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--cline);background:rgba(63,224,255,.06);cursor:pointer;transition:.2s}
 .mic svg{width:20px;height:20px;fill:var(--c)}
 .mic.on{background:var(--c);box-shadow:var(--glow)} .mic.on svg{fill:#001018}
 
@@ -208,3 +208,4 @@ a.tk{color:inherit;text-decoration:underline dotted;cursor:pointer}
 
 .coin{display:inline-block;margin-left:3px;color:#ffc94d;border:1px solid #ffc94d;border-radius:50%;width:11px;height:11px;line-height:11px;text-align:center;font-size:8px;vertical-align:middle}
 .atag{border:1px solid;padding:0 3px;font-size:8px;letter-spacing:.1em}.atag.st{color:#3fe0ff}.atag.cr{color:#ffb84d}
+@media (max-width:420px){.cmd{gap:6px;padding-left:10px}.cmd .mic{width:38px;height:38px}}
