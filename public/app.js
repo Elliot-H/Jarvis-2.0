@@ -728,12 +728,14 @@
   let manualMicUntil = 0, musicHeld = false;
   const musicPlaying = () => { try { return MUSIC_QUIET && !!window.AndroidPhoneAudio && window.AndroidPhoneAudio.musicActive(); } catch { return false; } };
   // The on-device wake word does the passive listening (no mic ding every second); the recognizer only opens after "Hey Jarvis" or the mic button. ?wake=speech goes back to recognizer-only listening.
+  let APP_T0 = Date.now();
   const WAKE_FIRST = !!window.AndroidWake && params.get('wake') !== 'speech';
   function startMic() {
     const now = Date.now();
     if (muted || !rec || now < micNotBefore || now - lastMicStart < 600) return;
     // Two recorders on the mic at once leave the recognizer deaf: the wake word engine must be off while the recognizer listens.
-    if (WAKE_FIRST && wakeEver && !wakeErrShown && mode === 'passive' && now > manualMicUntil) return;
+    // 2026-11-17: also hold the recognizer back during the first 20 s after the app opens, before the wake engine has come up. Otherwise the recognizer starts first, ends on silence every few seconds and restarts (beep, beep, beep), and the wake engine never gets a quiet 8 s to start: an endless open/close loop.
+    if (WAKE_FIRST && !wakeErrShown && mode === 'passive' && now > manualMicUntil && (wakeEver || now - APP_T0 < 20000)) return;
     // The wake engine releases the mic on its own thread, a moment after stop(): wait for its 'stopped' report, or the recognizer opens against a still-held mic and hears nothing.
     if (window.AndroidWake && (wakeOn || wakeHalting)) {
       if (wakeOn) { try { window.AndroidWake.stop(); } catch {} wakeOn = false; wakeHalting = true; clearTimeout(wakeHaltTimer); wakeHaltTimer = setTimeout(() => { wakeHalting = false; startMic(); }, 2500); }
@@ -765,7 +767,7 @@
     try {
       if (muted) { if (wakeOn) window.AndroidWake.stop(); return; }
       // Never open the wake engine's own recorder while the recognizer is starting or has just started: two recorders on the mic at once leave the recognizer deaf (the first minute after the app opens).
-      const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil && Date.now() - lastMicStart > 8000;
+      const want = (WAKE_FIRST || musicPlaying()) && mode !== 'active' && !recOn && Date.now() > manualMicUntil && Date.now() - lastMicStart > (wakeEver ? 8000 : 1500);
       if (want && !wakeOn && !wakeErrShown) window.AndroidWake.start(String(cfg.wakeThreshold || '0.5'));
       else if (!want && wakeOn) window.AndroidWake.stop();
     } catch {}
@@ -1182,7 +1184,8 @@
   // ======================= boot =======================
   let booted = false;
   async function boot() {
-    if (booted) return; booted = true;
+    if (booted) return; booted = true; APP_T0 = Date.now();
+    setTimeout(() => { if (WAKE_FIRST && !wakeEver && !wakeOn && recWanted && !recOn) startMic(); }, 21000);   // wake engine never came up: the recognizer takes over
     $('#boot').classList.add('hide');
     ensureAudio(); audioCtx.resume();
     // Never let the mic permission check hold up startup: if the phone is slow to hand over the mic (app just reopened, wake engine still releasing it), listening must still start.
