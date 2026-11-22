@@ -838,6 +838,28 @@
     recWanted = true; startMic();
   }
   function pauseListening() { recWanted = false; try { rec?.abort(); } catch {} }
+  // 2026-11-21: Jarvis opened by itself (dongle seen, asked a question) and showed LISTENING while nothing was listening: the page thought a mic session was
+  // still running (recOn) that Android had already ended while the app was in the background, and the wake engine / recognizer backoffs were stale.
+  // hardMicReset throws all of that away and starts clean. Used when the app is brought forward and by the deaf-mic watchdog below.
+  function hardMicReset(why) {
+    try { rec && rec.abort(); } catch {}
+    try { window.AndroidWake && window.AndroidWake.stop(); } catch {}
+    wakeOn = false; wakeHalting = false; clearTimeout(wakeHaltTimer);
+    recOn = false; blipN = 0; recBackoff = 0; recThrottled = false; recErrs = []; micNotBefore = 0; lastMicStart = 0;
+    addActivity('Mic reset (' + why + ').');
+  }
+  let deafT0 = 0, deafResets = 0, lastDeafReset = 0;
+  setInterval(() => {
+    if (!booted || muted || mode !== 'active' || !recWanted || speaking) { deafT0 = 0; deafResets = 0; return; }
+    const now = Date.now(); if (!deafT0) deafT0 = now;
+    const levelsSeen = vad.lastSample > 0, stale = now - vad.lastSample > 3500;
+    const dead = (!recOn && now - deafT0 > 4000) || (recOn && levelsSeen && stale && now - recT0 > 4000) || (recOn && !levelsSeen && now - recT0 > 8000 && !pending && !carry);
+    if (dead && now - lastDeafReset > 6000 && deafResets < 4) {
+      deafResets++; lastDeafReset = now;
+      hardMicReset(!recOn ? 'LISTENING but no mic session' : 'mic open but no audio reached it');
+      setTimeout(() => { if (mode === 'active' && recWanted && !recOn) startMic(); }, 500);
+    }
+  }, 1500);
   function resumeListening() {
     if (!rec || DISPLAY_ONLY || muted) return;
     mode = 'passive'; recWanted = true;
@@ -1315,13 +1337,13 @@
     else wake();
   }
   // Back to the front (tapped a Jarvis notification, switched back to the app): ask anything held while it was asleep.
-  document.addEventListener('visibilitychange', () => { if (booted && document.visibilityState === 'visible') send({ type: 'resume' }); });
+  document.addEventListener('visibilitychange', () => { if (booted && document.visibilityState === 'visible') { send({ type: 'resume' }); if (recOn || mode === 'active') hardMicReset('app came to the front'); } });
   $('#bootBtn').onclick = boot;
   // Inside the Android app there is no tap-to-start: boot straight away, and let the side key jump to listening.
   if (/JarvisApp/.test(navigator.userAgent)) {
     $('#boot').classList.add('hide');   // already installed and set up: never show the INITIALIZE screen again on a reopen
     setTimeout(boot, 500);
-    window.__jarvisWake = () => { if (!booted) boot(); else goActive(); };   // side key: ignored while muted (goActive)
+    window.__jarvisWake = () => { if (!booted) boot(); else { hardMicReset('opened by Jarvis or the side key'); setTimeout(goActive, 450); } };   // side key: ignored while muted (goActive)
   }
 
   // ======================= reactor =======================

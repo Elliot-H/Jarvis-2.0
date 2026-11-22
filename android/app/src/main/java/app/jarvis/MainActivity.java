@@ -254,6 +254,7 @@ public class MainActivity extends Activity {
   @Override protected void onNewIntent(Intent i) {
     super.onNewIntent(i);
     setIntent(i);
+    if (i.getBooleanExtra("answer", false) && stt != null) stt.prewarm();
     if (i.getBooleanExtra("answer", false)) { try { if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); } } catch (Exception ignored) {} }   // Jarvis asked a question aloud: open over the lock screen to hear the answer
     String buy = buyParam(i);
     if (!buy.isEmpty() && web != null) { web.loadUrl(BuildConfig.BASE_URL + "/?app=1" + buy); return; }   // alert "Buy" button: jarvis://open?buy=SYM

@@ -758,3 +758,7 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 - Android: `onActivityResult` now returns ClipData (multi-select); chooser titled "Files for Jarvis" in multi mode. Needs the new APK for multi-select inside the app; the web/PWA works now. Not compiled here (the Android workflow builds it on push).
 - Tested: node --check; local server with a mock OpenRouter and real ffmpeg: image, narrated mp4 (frames + transcript, length cap note), silent mov, a broken file (named failure), a client-side too-large file, the frame-retry path, voice phrases over the websocket, and the HUD queue (Playwright, 390 px: add, per-file question, remove, send). Not tested against the live vision/audio models or on the phone.
 - Noticed, not changed: `POST /api/media` and `GET /media` (social upload) are registered BEFORE the PIN middleware, so they do not require the PIN.
+
+## 2026-11-21 deaf mic after BT-dongle auto-open
+- Symptom: LISTENING shown, zero audio for 1-2 min (also on manual tap). Cause: cold Google recognizer + stale page mic state after app brought forward; deadCheck retried a cold engine only once, then waited for the 60 s stall.
+- Fix: SttBridge.coldTries (8 retries, 4.5 s apart), prewarm() on "answer" intent; app.js hardMicReset() on wake/visibility, deaf-mic watchdog (Activity line "Mic reset (...)"). Needs new APK.

@@ -42,6 +42,9 @@ public class SttBridge {
   private boolean levelsEver = false, coldTried = false;   // this phone has reported audio levels at least once / the one cold-start reset was used
   /** A session that says "ready" but never delivers audio levels is a dead mic (another app or the wake engine holds it): the page shows
    *  "listening" while nothing hears him. Reset it so the page opens a fresh one. */
+  private int coldTries = 0;
+  /** Build the recognizer now (app opened by Jarvis itself) so its slow first bind is not paid after the mic tap. */
+  void prewarm() { ui.post(() -> { try { if (sr == null && !running) { sr = make(); sr.setRecognitionListener(listener); } } catch (Exception ignored) {} }); }
   private final Runnable deadCheck = new Runnable() { @Override public void run() {
     if (!running || !ready) return;
     long now = System.currentTimeMillis();
@@ -50,9 +53,9 @@ public class SttBridge {
     // happened to reset it. Judge it after 3.5 s on a phone known to send levels, or once per app run (6 s) on a phone not yet known to.
     if (rmsCount == 0) {
       if (levelsEver && now - readyAt > 3500) dead = true;
-      else if (!levelsEver && !coldTried && now - readyAt > 6000) { dead = true; coldTried = true; }
+      else if (!levelsEver && coldTries < 8 && now - readyAt > 4500) { dead = true; coldTries++; }   // cold engine: retry every few seconds (was once, then a 60 s wait)
     }
-    if (dead && now - lastDeadReset < (rmsCount == 0 ? 12000 : 60000)) dead = false;   // at most one restart a minute: never a beep loop
+    if (dead && now - lastDeadReset < (rmsCount == 0 ? (levelsEver ? 12000 : 3000) : 60000)) dead = false;   // at most one restart a minute: never a beep loop
     if (dead) { lastDeadReset = now; emit("diag", "mic was open but no audio reached it (" + (rmsCount > 0 ? "levels stopped" : "no levels at all") + "), restarting it"); reset(); emit("error", "aborted"); emit("end", ""); return; }
     ui.postDelayed(this, 1000);
   } };
