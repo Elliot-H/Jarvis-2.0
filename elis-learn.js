@@ -7,8 +7,9 @@
 //      then tune picks / stop / trail / 11:00 keep rule / entry cut-off / minimum RVOL one step at a time.
 //   4. Adopt only if the change beats the current version on the most recent 30% of days it did NOT learn from (walk-forward).
 //   5. Guard: hard bounds on every setting; live paper results worse than expected after a change -> roll back.
-// History starts with a bootstrap: the last ~120 sessions rebuilt from the liquid core list, Alpaca bars and Alpaca news.
+// History: history() replays every session since 2024 across the whole market as if live (see below).
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import * as E from './elis.js';
 import * as RD from './elis-read.js';
@@ -148,8 +149,18 @@ export function finishWeights({ acc, eacc, why }) {
 // ---------- data: bars per candidate-day (1-min, 09:30-16:00), cached on disk ----------
 const BAR_DIR = path.join(DIR, 'bars'); try { fs.mkdirSync(BAR_DIR, { recursive: true }); } catch {}
 const pause = ms => new Promise(r => setTimeout(r, ms));
+// bars on disk: gzip JSON, prices in cents (the Railway volume is only 500 MB)
+const barFile = d => path.join(BAR_DIR, d + '.json.gz');
+export function readBars(date) {
+  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(barFile(date))).toString()); } catch {}
+  const legacy = load(path.join(BAR_DIR, date + '.json'), null);   // older uncompressed files (prices in dollars)
+  if (legacy) for (const s of Object.keys(legacy)) legacy[s] = legacy[s].map(([m, o, h, l, c, v]) => [m, Math.round(o * 100), Math.round(h * 100), Math.round(l * 100), Math.round(c * 100), v]);
+  return legacy || {};
+}
+const hasBars = d => fs.existsSync(barFile(d)) || fs.existsSync(path.join(BAR_DIR, d + '.json'));
+export function freeMB() { try { const st = fs.statfsSync(DIR); return st.bavail * st.bsize / 1e6; } catch { return Infinity; } }
 async function barsForDay(date, syms) {
-  const f = path.join(BAR_DIR, date + '.json'), have = load(f, {}), need = syms.filter(s => !have[s]);
+  const have = readBars(date), need = syms.filter(s => !have[s]);
   if (need.length) {
     for (let i = 0; i < need.length; i += 50) {
       let token = '';
@@ -157,16 +168,17 @@ async function barsForDay(date, syms) {
         const qs = new URLSearchParams({ symbols: need.slice(i, i + 50).join(','), timeframe: '1Min', start: new Date(E.etMs(date, 570)).toISOString(), end: new Date(E.etMs(date, 960)).toISOString(), feed: 'sip', limit: '10000', adjustment: 'split' });
         if (token) qs.set('page_token', token);
         const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(350);
-        for (const [s, arr] of Object.entries(j.bars || {})) (have[s] ||= []).push(...arr.map(b => [Math.round((Date.parse(b.t) - E.etMs(date, 570)) / 60e3), b.o, b.h, b.l, b.c, b.v]));
+        for (const [s, arr] of Object.entries(j.bars || {})) (have[s] ||= []).push(...arr.map(b => [Math.round((Date.parse(b.t) - E.etMs(date, 570)) / 60e3), Math.round(b.o * 100), Math.round(b.h * 100), Math.round(b.l * 100), Math.round(b.c * 100), Math.round(b.v)]));
         token = j.next_page_token || '';
       } while (token);
     }
     for (const s of need) have[s] ||= [];
-    save(f, have);
+    try { fs.writeFileSync(barFile(date) + '.tmp', zlib.gzipSync(JSON.stringify(have), { level: 9 })); fs.renameSync(barFile(date) + '.tmp', barFile(date)); try { fs.unlinkSync(path.join(BAR_DIR, date + '.json')); } catch {} }
+    catch (e) { E.noteOut('bar save failed ' + e.message); }
   }
   return have;
 }
-const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) => ({ t: E.etMs(date, 570) + m * 60e3, o, h, l, c, v })) : null;
+const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) => ({ t: E.etMs(date, 570) + m * 60e3, o: o / 100, h: h / 100, l: l / 100, c: c / 100, v })) : null;
 
 // ---------- HISTORY: replay every session since FROM as if live (whole market, no look-ahead) ----------
 // Each session: only data knowable at 09:35 picks the candidates (prior daily bars, the 09:30 5-min bar, pre-open news);
@@ -208,6 +220,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   for (const d of cal) {
     if (d < warm || (done.has(d) && d >= from) || (d < from && st.done.length)) continue;   // on resume the volume window is restored from the saved state
     if (shouldStop()) { save(HF, st); return { paused: true, sessions: st.done.length }; }
+    if (freeMB() < 120) { save(HF, st); return { paused: true, diskLow: true, sessions: st.done.length }; }
     const k = di.get(d), elig = [];
     for (const [s, x] of D) {
       if (k < 15) break;
@@ -260,7 +273,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
 // ---------- the weekly learning run ----------
 let running = false;
 // streaming helpers: one day of bars in memory at a time (two years of minute bars do not fit comfortably)
-function loadDayBars(date) { const raw = load(path.join(BAR_DIR, date + '.json'), {}), memo = new Map(); return (d, sym) => { if (!memo.has(sym)) memo.set(sym, expand(date, raw[sym])); return memo.get(sym); }; }
+function loadDayBars(date) { const raw = readBars(date), memo = new Map(); return (d, sym) => { if (!memo.has(sym)) memo.set(sym, expand(date, raw[sym])); return memo.get(sym); }; }
 const yieldNow = () => new Promise(r => setImmediate(r));
 const zero = () => ({ trades: 0, totalR: 0, wins: 0, winR: 0, lossR: 0 });
 async function streamEval(days, byDayAll, sets) {
@@ -285,7 +298,7 @@ export async function learn({ force = false, progress = null } = {}) {
     for (const r of J) (byDayAll.get(r.date) || byDayAll.set(r.date, []).get(r.date)).push(r);
     const days = [...byDayAll.keys()].sort();
     if (days.length < 30) return { skipped: `only ${days.length} sessions in the journal; need 30` };
-    for (const d of days) { if (byDayAll.get(d).every(c => c.hist) && fs.existsSync(path.join(BAR_DIR, d + '.json'))) continue; await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); await yieldNow(); }   // fill only live days' missing bars
+    for (const d of days) { if (byDayAll.get(d).every(c => c.hist) && hasBars(d)) continue; await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); await yieldNow(); }   // fill only live days' missing bars
     const cut = Math.floor(days.length * 0.7), train = days.slice(0, cut), test = days.slice(cut);
     const cur = params(), [curTest] = await streamEval(test, byDayAll, [cur]);
     // 1) weights from TRAIN only, 2) settings one step at a time on TRAIN only

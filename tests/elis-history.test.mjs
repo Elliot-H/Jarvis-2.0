@@ -39,5 +39,5 @@ assert(hot && hot.rvol >= 8 && hot.cat === 'fda' && hot.tone === 'news-pos', 'pr
 assert(hot.intraday.some(e => e.tone === 'neg' && e.m === 60), 'mid-day rescind headline attached at 10:30');
 assert(J.some(r => r.sym === 'GONE'), 'delisted symbols included');
 assert(!J.some(r => r.sym === 'TINY' || r.sym === 'BRK.B'), 'under-$5 and odd symbols excluded');
-assert(fs.existsSync(path.join(process.env.DATA_DIR, 'elis', 'bars', HOTDAY + '.json')), '1-min bars stored for grading');
+assert(fs.existsSync(path.join(process.env.DATA_DIR, 'elis', 'bars', HOTDAY + '.json.gz')), '1-min bars stored for grading');
 console.log('HISTORY TEST PASSED'); process.exit(0);
