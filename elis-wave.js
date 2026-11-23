@@ -322,7 +322,7 @@ export async function learnNow(reason = 'on request') {
       let lastPub = 0; const prog = m => { note(m); if (Date.now() - lastPub > 15 * 60e3 || /replaying|symbols/.test(m)) { lastPub = Date.now(); L.publish('elis/status.md', `${new Date().toISOString()} ${m}\n`).catch(() => {}); } };
       const h = await L.history({ from: process.env.ELIS_HISTORY_FROM || '2024-01-02', progress: prog, shouldStop: marketHours });
       L.publish('elis/status.md', `${new Date().toISOString()} history ${h.paused ? 'paused' : 'done'}: ${h.sessions} sessions\n`).catch(() => {});
-      if (h.paused) { await E.tellOut('history study paused', h.diskLow ? `${h.sessions} sessions done; stopped because the server disk has under 120 MB free. Learning from what it has.` : `${h.sessions} sessions done; resumes at 9:45.`); if (!h.diskLow) return 'paused'; }
+      if (h.paused) { await E.tellOut('history study paused', h.diskLow ? `${h.sessions} sessions done; stopped because the server disk has under 90 MB free. Learning from what it has.` : `${h.sessions} sessions done; resumes at 9:45.`); if (!h.diskLow) return 'paused'; }
       await E.tellOut('history study done', `${h.sessions} sessions, ${h.candidates} candidates graded. Learning from them now.`);
     }
     const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep), money = L.moneyText(rep);
