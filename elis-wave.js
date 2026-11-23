@@ -17,6 +17,7 @@
 import * as E from './elis.js';
 import * as L from './elis-learn.js';
 import * as RD from './elis-read.js';
+import * as C from './elis-context.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -72,7 +73,10 @@ async function scan(date) {
     } while (token && pages < 6);
   } catch (e) { note('news unavailable: ' + e.message); }
   const list = [...syms].filter(s => /^[A-Z]{1,5}$/.test(s) && s !== E.CFG.symbol);
-  const daily = await multiBars(list, '1Day', Date.now() - 40 * 86400e3, E.etMs(date, 0), 'sip');
+  const daily = await multiBars(list, '1Day', Date.now() - 100 * 86400e3, E.etMs(date, 0), 'sip');
+  S.closes = Object.fromEntries(Object.entries(daily).map(([s, arr]) => [s, Object.fromEntries(arr.map(b => [new Date(b.t).toISOString().slice(0, 10), b.c]))]));
+  try { S.etfDaily = await C.dailyCloses(C.ETFS, new Date(Date.now() - 100 * 86400e3).toISOString().slice(0, 10), new Date(E.etMs(date, 0) - 1).toISOString().slice(0, 10)); } catch (e) { S.etfDaily = {}; note('ETF dailies unavailable: ' + e.message); }
+  S.buzz = await C.buzzNow().catch(() => null); note(`context: ${Object.keys(S.etfDaily).length} ETFs, Reddit buzz ${S.buzz ? Object.keys(S.buzz).length + ' tickers' : 'unavailable'}`);
   const info = {};
   for (const s of list) {
     const d = daily[s] || []; if (d.length < 15) continue;
@@ -95,13 +99,14 @@ async function scan(date) {
 
 // ---- 09:35: rank by opening Relative Volume, pick the top N
 export function rank(info, firstBars, w = W, spyDir = null) { return rankAll(info, firstBars, w, spyDir).slice(0, w.picks); }
-export function rankAll(info, firstBars, w = W, spyDir = null) {
+export function rankAll(info, firstBars, w = W, spyDir = null, ctxFn = null) {
   const c = [];
   for (const [s, b] of Object.entries(firstBars)) {
     const i = info[s]; if (!i || !b || !i.avgOpenVol) continue;
     const rvol = b.v / i.avgOpenVol; if (rvol < w.minRvol || b.o < w.minPrice) continue;
     const dir = b.c > b.o ? 'long' : b.c < b.o ? 'short' : null; if (!dir || (dir === 'short' && !w.allowShort)) continue;
     const x = { sym: s, dir, rvol: Math.round(rvol * 100) / 100, orHigh: Math.round(b.h * 100) / 100, orLow: Math.round(b.l * 100) / 100, open: b.o, atr: i.atr, gapPct: Math.round((b.o / i.prevClose - 1) * 1000) / 10, headline: i.headline, cat: L.catOf((i.headlines || [i.headline]).join(' '), i.news), tone: RD.toneOf(i.headlines || []), spyDir };
+    if (ctxFn) x.ctx = ctxFn(x);
     const f = L.features(x); let sc = rvol;
     if (w.mult && Object.keys(w.mult).length) { for (const k of L.FEATURE_NAMES) sc *= w.mult[k]?.[f[k]] ?? 1; }   // learned weights on what Elis reads
     else if (i.news) sc *= w.newsBoost;
@@ -112,15 +117,18 @@ export function rankAll(info, firstBars, w = W, spyDir = null) {
 async function pick(date) {
   S.picked = true;
   const syms = Object.keys(S.info); if (!syms.length) { note('no candidates passed the scan'); return; }
-  const first = await multiBars([...syms, 'SPY'], '5Min', E.etMs(date, 570), E.etMs(date, 575), 'iex'), fb = {};
+  const first = await multiBars([...new Set([...syms, ...C.ETFS])], '5Min', E.etMs(date, 570), E.etMs(date, 575), 'iex'), fb = {}, etfFirst = {};
   for (const [s, arr] of Object.entries(first)) if (arr[0] && arr[0].t === E.etMs(date, 570)) fb[s] = arr[0];
-  const spy = fb.SPY; delete fb.SPY; const spyDir = spy ? (spy.c > spy.o ? 'long' : spy.c < spy.o ? 'short' : null) : null;
-  const all = rankAll(S.info, fb, W, spyDir).filter(c => !(W.skip || []).some(r => !r.chart && L.features(c)[r.k] === r.v)); S.picks = all.slice(0, W.picks);
+  for (const e of C.ETFS) if (fb[e]) { etfFirst[e] = fb[e]; if (!S.info[e]) delete fb[e]; }
+  const spy = etfFirst.SPY; delete fb.SPY; const spyDir = spy ? (spy.c > spy.o ? 'long' : spy.c < spy.o ? 'short' : null) : null;
+  const mk = C.snapshot(date, S.etfDaily || {}, etfFirst); S.mk = mk;
+  const ctxFn = x => { x.sector = C.sectorOf(S.closes?.[x.sym] || {}, S.etfDaily || {}); x.buzz = S.buzz ? (S.buzz[x.sym] || { rank: 999, change: 0 }) : null; return C.contextFeatures(x, mk); };
+  const all = rankAll(S.info, fb, W, spyDir, ctxFn).filter(c => !(W.skip || []).some(r => !r.chart && L.features(c)[r.k] === r.v)); S.picks = all.slice(0, W.picks);
   for (const p of S.picks) p.traded = true;
   L.journal(date, all, spyDir);
   S.spyDir = spyDir; S.jrows = all.slice(0, 15); S.newsSince = Date.now() - 60e3;
   if (!S.picks.length) return E.tellOut('wave: no stocks in play', `${date}: nothing with opening volume above its 14-day normal. Sitting out.`);
-  await E.tellOut('wave picks', S.picks.map(p => `${p.sym} ${p.dir.toUpperCase()} · RVOL ${p.rvol}x · gap ${p.gapPct >= 0 ? '+' : ''}${p.gapPct}% · break ${p.dir === 'long' ? 'above ' + p.orHigh : 'below ' + p.orLow}${p.headline ? '\n  ' + p.headline.slice(0, 90) : ''}`).join('\n'));
+  await E.tellOut('wave picks', S.picks.map(p => `${p.sym} ${p.dir.toUpperCase()} · RVOL ${p.rvol}x · gap ${p.gapPct >= 0 ? '+' : ''}${p.gapPct}% · break ${p.dir === 'long' ? 'above ' + p.orHigh : 'below ' + p.orLow}${p.ctx ? ` · ${p.ctx.sector}${p.sector ? ' (' + p.sector + ')' : ''}, ${p.ctx.mktGap}, ${p.ctx.fear}, ${p.ctx.buzz}` : ''}${p.headline ? '\n  ' + p.headline.slice(0, 90) : ''}`).join('\n'));
 }
 
 // ---- entries / management
@@ -325,6 +333,7 @@ export async function learnNow(reason = 'on request') {
       if (h.paused) { await E.tellOut('history study paused', h.diskLow ? `${h.sessions} sessions done; stopped because the server disk has under 90 MB free. Learning from what it has.` : `${h.sessions} sessions done; resumes at 9:45.`); if (!h.diskLow) return 'paused'; }
       await E.tellOut('history study done', `${h.sessions} sessions, ${h.candidates} candidates graded. Learning from them now.`);
     }
+    if (!L.ctxDone()) { const n = await L.enrich(m => note(m)); note(`context added to ${n} graded candidates`); }
     const rep = await L.learn({ progress: m => note(m) }); if (L.historyState().diskStop) L.markLearnedAfterStop(); const line = L.summaryLine(rep), money = L.moneyText(rep);
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
@@ -338,6 +347,7 @@ async function learnTick() {
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
+    if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');   // add market/sector/buzz context to the history and relearn
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }

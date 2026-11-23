@@ -29,7 +29,7 @@ for (const d of days) {
   }
 }
 fs.mkdirSync(path.join(tmp, 'elis'), { recursive: true });
-fs.writeFileSync(path.join(tmp, 'elis', 'journal.jsonl'), rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+fs.writeFileSync(path.join(tmp, 'elis', 'journal.jsonl'), rows.map(r => JSON.stringify(r)).join('\n') + '\n' + JSON.stringify({ date: E.et().date, sym: 'LIVE', dir: 'long', rvol: 3, atr: 1, orHigh: 10, orLow: 9, open: 9.5 }) + '\n');   // today's live row: must be skipped, never fetched
 global.fetch = async url => {
   const u = new URL(url), sp = u.searchParams, J = o => ({ ok: true, status: 200, text: async () => JSON.stringify(o) });
   if (u.pathname === '/v2/stocks/bars' && sp.get('timeframe') === '1Min') {

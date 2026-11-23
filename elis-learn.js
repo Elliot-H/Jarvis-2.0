@@ -13,6 +13,7 @@ import zlib from 'node:zlib';
 import path from 'node:path';
 import * as E from './elis.js';
 import * as RD from './elis-read.js';
+import * as C from './elis-context.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(path.dirname(new URL(import.meta.url).pathname), 'data'), 'elis');
 const F = { journal: path.join(DIR, 'journal.jsonl'), params: path.join(DIR, 'params.json'), report: path.join(DIR, 'learn-report.json') };
@@ -34,10 +35,15 @@ export function features(c) {
     market: !c.spyDir ? 'mkt-flat' : c.spyDir === c.dir ? 'with-market' : 'against-market',
     side: c.dir,
     newsTone: c.tone || (c.news ? 'news-neutral' : 'none'),
-    comboNewsMarket: `${c.tone || (c.news ? 'news-neutral' : 'none')}+${!c.spyDir ? 'mkt-flat' : c.spyDir === c.dir ? 'with-market' : 'against-market'}`
+    comboNewsMarket: `${c.tone || (c.news ? 'news-neutral' : 'none')}+${!c.spyDir ? 'mkt-flat' : c.spyDir === c.dir ? 'with-market' : 'against-market'}`,
+    // bigger picture (elis-context.js): market gap, fear, trend regime, sector, Reddit buzz; plus two combos traders use
+    mktGap: c.ctx?.mktGap || 'spy-unknown', fear: c.ctx?.fear || 'fear-unknown', regime: c.ctx?.regime || 'trend-unknown',
+    sector: c.ctx?.sector || 'sector-unknown', buzz: c.ctx?.buzz || 'buzz-unknown',
+    comboSectorNews: `${c.ctx?.sector || 'sector-unknown'}+${c.tone || (c.news ? 'news-neutral' : 'none')}`,
+    comboFearSide: `${c.ctx?.fear || 'fear-unknown'}+${c.dir}`
   };
 }
-export const FEATURE_NAMES = ['cat', 'gap', 'gapDir', 'rvol', 'orAtr', 'market', 'side', 'newsTone', 'comboNewsMarket'];
+export const FEATURE_NAMES = ['cat', 'gap', 'gapDir', 'rvol', 'orAtr', 'market', 'side', 'newsTone', 'comboNewsMarket', 'mktGap', 'fear', 'regime', 'sector', 'buzz', 'comboSectorNews', 'comboFearSide'];
 
 // ---------- settings: defaults, bounds, steps (risk per trade is NOT here on purpose) ----------
 export const DEFAULTS = { picks: 3, stopAtr: 0.10, trailR: 1, keepMinR: 1, entryEnd: 660, minRvol: 1, entryGate: 0, newsExit: true, marketExit: 0, newsDelay: 1, mult: {}, emult: {}, skip: [] };
@@ -56,7 +62,7 @@ export function journal(date, cands, spyDir) {
   const lines = cands.slice(0, 15).map(c => JSON.stringify(row(date, c, spyDir))).join('\n');
   if (lines) try { fs.appendFileSync(F.journal, lines + '\n'); } catch (e) { E.noteOut('journal write failed ' + e.message); }
 }
-export const row = (date, c, spyDir) => ({ date, sym: c.sym, dir: c.dir, rvol: c.rvol, gapPct: c.gapPct, atr: c.atr, orHigh: c.orHigh, orLow: c.orLow, open: c.open, cat: c.cat, news: !!c.headline, tone: c.tone, spyDir, traded: !!c.traded, intraday: c.intraday || [], post: c.post || null, v: P.version });
+export const row = (date, c, spyDir) => ({ date, sym: c.sym, dir: c.dir, rvol: c.rvol, gapPct: c.gapPct, atr: c.atr, orHigh: c.orHigh, orLow: c.orLow, open: c.open, cat: c.cat, news: !!c.headline, tone: c.tone, spyDir, traded: !!c.traded, intraday: c.intraday || [], post: c.post || null, ctx: c.ctx || null, sectorEtf: c.sector || null, v: P.version });
 export function journalUpdate(rows) {   // end of day: same rows again with mid-day news + post-mortem (last write wins)
   if (rows.length) try { fs.appendFileSync(F.journal, rows.map(r => JSON.stringify(r)).join('\n') + '\n'); } catch {}
 }
@@ -284,6 +290,26 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   return { finished: true, sessions: st.done.length, candidates: readJournal().length };
 }
 
+// ---------- add the bigger-picture context to already-graded history (no look-ahead: only data before each session) ----------
+const CTXF = path.join(DIR, 'context-state.json');
+export const ctxDone = () => load(CTXF, { v: 0 }).v >= 1;
+export async function enrich(progress = null) {
+  const J = readJournal(), need = J.filter(r => !r.ctx && r.date < E.et().date); if (!need.length) { save(CTXF, { v: 1 }); return 0; }
+  const days = [...new Set(need.map(r => r.date))].sort(), from = new Date(Date.parse(days[0]) - 120 * 86400e3).toISOString().slice(0, 10), to = days.at(-1);
+  progress?.(`context: ${need.length} graded candidates over ${days.length} sessions`);
+  const etf = await C.dailyCloses(C.ETFS, from, to, true), stock = await C.dailyCloses([...new Set(need.map(r => r.sym))], from, to, true);
+  const before = (m, d) => Object.fromEntries(Object.entries(m || {}).filter(([k]) => k < d));
+  let n = 0, buf = [];
+  for (const d of days) {
+    const first = await C.firstBarsFor(d, C.ETFS, 'sip', true), mk = C.snapshot(d, etf, first), etfPrior = Object.fromEntries(C.SECTORS.map(e => [e, before(etf[e], d)]));
+    for (const r of need.filter(x => x.date === d)) { const sector = C.sectorOf(before(stock[r.sym], d), etfPrior); r.sectorEtf = sector; r.ctx = C.contextFeatures({ dir: r.dir, sector, buzz: null }, mk); buf.push(r); n++; }
+    if (buf.length >= 300) { journalUpdate(buf); buf = []; progress?.(`context: ${n}/${need.length}`); }
+    await yieldNow();
+  }
+  journalUpdate(buf); save(CTXF, { v: 1 });
+  return n;
+}
+
 // ---------- the weekly learning run ----------
 let running = false;
 // streaming helpers: one day of bars in memory at a time (two years of minute bars do not fit comfortably)
@@ -347,7 +373,7 @@ export async function learn({ force = false, progress = null, minRuleN = 80 } = 
   try {
     const J = readJournal(), byDayAll = new Map();
     for (const r of J) (byDayAll.get(r.date) || byDayAll.set(r.date, []).get(r.date)).push(r);
-    const days = [...byDayAll.keys()].sort();
+    const days = [...byDayAll.keys()].sort().filter(d => d < E.et().date);   // only completed sessions (today's bars are not final, and the free plan blocks recent SIP)
     if (days.length < 30) return { skipped: `only ${days.length} sessions in the journal; need 30` };
     for (const d of days) { if (byDayAll.get(d).every(c => c.hist) && hasBars(d)) continue; await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); await yieldNow(); }   // fill only live days' missing bars
     const cut = Math.floor(days.length * 0.7), train = days.slice(0, cut), test = days.slice(cut);
