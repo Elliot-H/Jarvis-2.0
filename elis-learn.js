@@ -91,7 +91,9 @@ export function simulate(bars, c, p, out = {}, spy = null) {
         if (p.entryGate > 0 && m < p.entryGate) { out.skipped = true; return null; }
         if (p.skip?.some(r => r.chart && rd.feat[r.k] === r.v)) { out.skipped = true; return null; }   // adopted proposal: never take this chart read
         entry = (long ? Math.max(lvl, b.o) : Math.min(lvl, b.o)) + (long ? slip : -slip); entryT = b.t; spy0 = spyAt?.get(b.t); r = Math.max(0.02, c.atr * p.stopAtr); stop = long ? entry - r : entry + r; best = entry;
-        if (long ? b.l <= stop : b.h >= stop) return done(-1 - 2 * slip / r, 'stopped on the entry candle');
+        // entry candle: its low/high usually came BEFORE the breakout (the candle opened below the level and pushed through),
+        // so only count a stop-out if the candle opened beyond the stop (gap) or CLOSED beyond it (reversed after the break).
+        if (long ? (b.o <= stop || b.c <= stop) : (b.o >= stop || b.c >= stop)) { const fill = long ? (b.o <= stop ? b.o : stop) : (b.o >= stop ? b.o : stop); return done((long ? fill - entry : entry - fill) / r - 2 * slip / r, 'stopped on the entry candle'); }
       }
       continue;
     }
@@ -202,7 +204,7 @@ const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) =
 const HF = path.join(DIR, 'history-state.json'), PER_DAY = Number(process.env.ELIS_HISTORY_PER_DAY || 15);   // 15/day keeps the bar files ~38 MB on the 500 MB volume
 export const HS = { phase: 'idle', startedAt: null, rate: null };   // live progress for the report page
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
-export const LEARN_REV = 2;   // bump to make the disk-limited study relearn once after a learner upgrade
+export const LEARN_REV = 3;   // bump to make the disk-limited study relearn once after a learner upgrade
 export function markLearnedAfterStop() { const st = historyState(); st.learnedAfterStop = true; st.learnedRev = LEARN_REV; save(HF, st); }
 export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
   const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
