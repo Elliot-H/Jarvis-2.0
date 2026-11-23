@@ -3222,6 +3222,7 @@ function pruneData() {
     let freed = 0; const rm = f => { try { fs.unlinkSync(f.p); freed += f.size; f.gone = true; } catch {} };
     for (const f of files) if (/^alert-sound-.*\.mp3$/.test(f.n) && now - f.at > 12 * 3600e3) rm(f);
     for (const f of files) if (/^filler-.*\.mp3$/.test(f.n) && now - f.at > 30 * 864e5) rm(f);
+    for (const f of files) if (/[\\/]elis[\\/]bars[\\/]/.test(f.p) && now - f.at > 150 * 864e5) rm(f);   // Elis's 1-minute bar cache: re-downloadable, never needed past the learning window
     let total = files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0);
     if (total > 400 * 1048576) for (const f of files.filter(f => !f.gone && /^(alert-sound|filler)-.*\.mp3$/.test(f.n)).sort((a, b) => a.at - b.at)) { if (total <= 300 * 1048576) break; rm(f); total -= f.size; }
     dataMB = Math.round(files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0) / 1048576);
@@ -3237,13 +3238,13 @@ function freeDisk(why) {
   const files = [], dirs = [];
   const walk = d => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); try { if (e.isDirectory()) walk(p); else { const st = fs.statSync(p); files.push({ p, n: e.name, size: st.size, at: st.mtimeMs }); } } catch {} } };
   walk(DATA_DIR);
-  const tier = f => /^(alert-sound|filler)-.*\.mp3$/.test(f.n) ? 0 : /[\\/]media[\\/]out[\\/]/.test(f.p) ? 1 : /[\\/]batch[\\/]/.test(f.p) ? 2 : /[\\/]media[\\/]raw[\\/]/.test(f.p) ? 3 : /[\\/]elis[\\/]bars[\\/]/.test(f.p) ? 4 : 9;
+  const tier = f => /^(alert-sound|filler)-.*\.mp3$/.test(f.n) ? 0 : /[\\/]elis[\\/]bars[\\/]/.test(f.p) ? 1 : /[\\/]media[\\/]out[\\/]/.test(f.p) ? 2 : /[\\/]batch[\\/]/.test(f.p) ? 3 : /[\\/]media[\\/]raw[\\/]/.test(f.p) ? 4 : 9;
   const cands = files.filter(f => tier(f) < 9).sort((a, b) => tier(a) - tier(b) || a.at - b.at);
   const bytesBy = {}; for (const f of files) { const k = tier(f); bytesBy[k] = (bytesBy[k] || 0) + f.size; }
   let freed = 0; const want = 60 * 1048576;
   for (const f of cands) { if (freed >= want) break; try { fs.unlinkSync(f.p); freed += f.size; } catch {} }
   const total = files.reduce((a, f) => a + f.size, 0);
-  const msg = `Disk cleanup (${why}): freed ${Math.round(freed / 1048576)} MB. Volume held ${Math.round(total / 1048576)} MB (clips ${Math.round((bytesBy[0] || 0) / 1048576)}, posts ${Math.round((bytesBy[1] || 0) / 1048576)}, batches ${Math.round((bytesBy[2] || 0) / 1048576)}, raw uploads ${Math.round((bytesBy[3] || 0) / 1048576)}, bars ${Math.round((bytesBy[4] || 0) / 1048576)}).`;
+  const msg = `Disk cleanup (${why}): freed ${Math.round(freed / 1048576)} MB. Volume held ${Math.round(total / 1048576)} MB (clips ${Math.round((bytesBy[0] || 0) / 1048576)}, Elis bars ${Math.round((bytesBy[1] || 0) / 1048576)}, posts ${Math.round((bytesBy[2] || 0) / 1048576)}, batches ${Math.round((bytesBy[3] || 0) / 1048576)}, raw uploads ${Math.round((bytesBy[4] || 0) / 1048576)}).`;
   console.warn(msg); try { broadcast({ type: 'activity', text: msg }); } catch {}
 }
 setInterval(() => { try { const st = fs.statfsSync(DATA_DIR); if (st.bavail * st.bsize < 80 * 1048576) freeDisk('under 80 MB free'); } catch {} }, 10 * 60e3);
