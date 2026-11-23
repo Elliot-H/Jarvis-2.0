@@ -88,7 +88,13 @@ function loadState() {
 const state = loadState();
 let freshBoot = !state.backupStamp;   // data/ was wiped: wait for the phone's backup before stamping anything newer
 state.stats ||= {}; state.panels = {};   // no pop-ups on screen at boot
-const saveState = () => { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); pushBackup(); };
+// Atomic: a full disk (ENOSPC) must never truncate stats.json and wipe Jarvis's memory. Write a temp file, then rename over the real one.
+function writeStateFile() {
+  const tmp = STATS_FILE + '.tmp';
+  try { fs.writeFileSync(tmp, JSON.stringify(state, null, 2)); fs.renameSync(tmp, STATS_FILE); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch {} if (/ENOSPC/.test(String(e.message))) { try { freeDisk('state save hit a full disk'); } catch {} } throw e; }
+}
+const saveState = () => { try { writeStateFile(); } catch (e) { console.warn('state save failed: ' + e.message); } pushBackup(); };
 // ---------- phone backup: the phone keeps a copy of Jarvis's memory, so a redeploy that wipes data/ loses nothing ----------
 const BACKUP_KEYS = ['mute', 'speakers', 'spotifyRefresh', 'places', 'reminders', 'seededReminders', 'calendarColors', 'watchlist', 'lastPlace', 'talkModel', 'workDay', 'meal', 'shopAsk', 'placeSeeds', 'seededMoves', 'arrived', 'followups', 'outboxToken', 'reviewLink', 'followupTemplate', 'vehicles', 'seededTruck', 'tradeLog', 'memory', 'at', 'atSince', 'atInit', 'leftAt', 'lastCheck', 'notLeft', 'heading', 'alertCfg', 'cgLast', 'coinIds', 'silent', 'silentAt', 'quiet', 'finHold', 'family', 'sigWatch', 'wlHide', 'wlHideSeeded', 'trail', 'vAsked', 'nightSeeded', 'copilot', 'recs', 'cEntry', 'gaming', 'maintLast', 'devLast', 'social', 'pres', 'presLog', 'sigPlaces', 'sigIgnore', 'roadAlerts', 'lights', 'companions'];
 const backupOf = () => Object.fromEntries(BACKUP_KEYS.filter(k => state[k] !== undefined).map(k => [k, state[k]]));
@@ -99,7 +105,7 @@ function pushBackup() {
   if (j === lastBackup) return;
   if (freshBoot) { lastBackup = j; return; }   // never stamp or broadcast an empty memory over the phone's copy
   lastBackup = j; state.backupStamp = Date.now();
-  try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
+  try { writeStateFile(); } catch {}
   broadcast({ type: 'backup', data: { ...backupOf(), stamp: state.backupStamp } });
 }
 
@@ -364,7 +370,8 @@ async function drain() {
       catch (e) {
         console.error('turn crashed:', e);
         busy = false; current = null; broadcast({ type: 'state', state: 'idle' });
-        out = `Something broke while I was thinking, sir: ${String(e?.message || e).slice(0, 140)}. I am still here; try again.`;
+        if (/ENOSPC/.test(String(e?.message || e))) { try { freeDisk('ENOSPC while thinking'); } catch {} out = 'The server disk filled up, sir. I am clearing old uploads now; ask me again in a moment.'; }
+        else out = `Something broke while I was thinking, sir: ${String(e?.message || e).slice(0, 140)}. I am still here; try again.`;
         if (opts.origin === undefined || opts.origin === 'user') { broadcast({ type: 'say', text: out, speak: opts.spoken !== false }); try { recordFailure(text, String(e?.message || e)); } catch {} }
       }
       busySince = 0; resolve(out);
@@ -3222,6 +3229,25 @@ function pruneData() {
   } catch (e) { console.warn('prune failed: ' + e.message); }
 }
 setTimeout(pruneData, 20_000); setInterval(pruneData, 3 * 3600e3);
+// Emergency free-up when the volume is full (ENOSPC): the voice-clip cache first, then finished posts, then batch work areas, then the oldest raw uploads, until ~60 MB is free again.
+// Raw uploads used to stay forever; photos and videos from the upload button filled the volume.
+let lastFree = 0;
+function freeDisk(why) {
+  if (Date.now() - lastFree < 20_000) return; lastFree = Date.now();
+  const files = [], dirs = [];
+  const walk = d => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); try { if (e.isDirectory()) walk(p); else { const st = fs.statSync(p); files.push({ p, n: e.name, size: st.size, at: st.mtimeMs }); } } catch {} } };
+  walk(DATA_DIR);
+  const tier = f => /^(alert-sound|filler)-.*\.mp3$/.test(f.n) ? 0 : /[\\/]media[\\/]out[\\/]/.test(f.p) ? 1 : /[\\/]batch[\\/]/.test(f.p) ? 2 : /[\\/]media[\\/]raw[\\/]/.test(f.p) ? 3 : /[\\/]elis[\\/]bars[\\/]/.test(f.p) ? 4 : 9;
+  const cands = files.filter(f => tier(f) < 9).sort((a, b) => tier(a) - tier(b) || a.at - b.at);
+  const bytesBy = {}; for (const f of files) { const k = tier(f); bytesBy[k] = (bytesBy[k] || 0) + f.size; }
+  let freed = 0; const want = 60 * 1048576;
+  for (const f of cands) { if (freed >= want) break; try { fs.unlinkSync(f.p); freed += f.size; } catch {} }
+  const total = files.reduce((a, f) => a + f.size, 0);
+  const msg = `Disk cleanup (${why}): freed ${Math.round(freed / 1048576)} MB. Volume held ${Math.round(total / 1048576)} MB (clips ${Math.round((bytesBy[0] || 0) / 1048576)}, posts ${Math.round((bytesBy[1] || 0) / 1048576)}, batches ${Math.round((bytesBy[2] || 0) / 1048576)}, raw uploads ${Math.round((bytesBy[3] || 0) / 1048576)}, bars ${Math.round((bytesBy[4] || 0) / 1048576)}).`;
+  console.warn(msg); try { broadcast({ type: 'activity', text: msg }); } catch {}
+}
+setInterval(() => { try { const st = fs.statfsSync(DATA_DIR); if (st.bavail * st.bsize < 80 * 1048576) freeDisk('under 80 MB free'); } catch {} }, 10 * 60e3);
+setTimeout(() => { try { const st = fs.statfsSync(DATA_DIR); if (st.bavail * st.bsize < 80 * 1048576) freeDisk('boot check'); } catch {} }, 8_000);
 const socPage = (res, title, body, code = 200) => res.status(code).send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:system-ui;background:#02060c;color:#cfefff;padding:28px;line-height:1.45">${body}</body>`);
 const esc = t => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 // The preview: a phone-style mock of each channel's post, the full caption (editable), warnings, and the Post / Skip buttons. A link preview (GET) never posts; posting is a button (POST).
@@ -4098,7 +4124,7 @@ wss.on('connection', (ws, req) => {
       state.sigWatch = [...(state.sigWatch || []), ...keep.sigWatch.filter(w => !(state.sigWatch || []).some(x => x.symbol === w.symbol))].slice(-20);
       state.coinIds = { ...keep.coinIds, ...(state.coinIds || {}) }; for (const [k2, v] of Object.entries(state.coinIds)) crypto_.learnCoin(k2, v);
       state.backupStamp = Number(msg.data.stamp); lastBackup = JSON.stringify(backupOf());
-      try { fs.writeFileSync(STATS_FILE, JSON.stringify(state, null, 2)); } catch {}
+      try { writeStateFile(); } catch {}
       state.watchlist = [...new Set((state.watchlist || []).map(i => (i === 'night' || i === 'midnight') ? 'midnight-3' : i))]; console.log('  restored memory from the phone backup'); ensureSeedPlaces(); broadcast(watchlistMsg(true));
     }
     if (msg.type === 'silent_on') {   // the HUD caught "stop listening" / "go silent" itself and already shut its mic: turn silent mode on everywhere
