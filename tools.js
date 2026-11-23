@@ -189,6 +189,10 @@ export const SIGNAL_TOOLS = [
   { name: 'signal_watch', description: 'Watch a stock he owns or just bought so Jarvis sends a phone alert when the rules say the uptrend is breaking (sell warning) or the stop is hit. action add (symbol, optional entry price and stop; stop is computed if omitted), remove, or list. The HUD watch list = only what he added with this tool; it persists until he removes it, and Alpaca holdings are never auto-added (a held symbol is not shown in the list). Use list to see exactly what the HUD shows before saying something is not there.', shape: { action: z.enum(['add', 'remove', 'list']), symbol: z.string().optional(), entry: z.number().optional(), stop: z.number().optional() } }
 ];
 
+export const ELIS_TOOLS = [
+  { name: 'elis_status', description: 'Elis, the fully automated day-trading bot (paper account unless the Owner set the live switches): running or halted, mode, today\'s Asia/London/pre-market levels, today\'s trade, recent trades, last errors and its rules. Use for "how is Elis doing", "did Elis trade today", "is Elis on".', shape: {} },
+  { name: 'elis_backtest', description: 'Backtest Elis\'s strategy on real Alpaca QQQ history (default 120 trading days, max 500). Returns trades, win rate, total R, profit factor, return at 1% risk and max drawdown. Takes up to a minute. Use for "backtest Elis", "would Elis have made money".', shape: { days: z.number().int().positive().max(500).optional(), rr: z.number().positive().optional(), noShort: z.boolean().optional() } }
+];
 export const TRADE_TOOLS = [
   { name: 'trade_status', description: 'Trading account (Alpaca): cash, equity, open positions with profit/loss, open orders. Use for "how is my portfolio", "what do I own".', shape: {} },
   { name: 'trade_quote', description: 'Latest price of a stock (e.g. TSLA) or crypto (e.g. BTC, ETH, SOL).', shape: { symbol: z.string() } },

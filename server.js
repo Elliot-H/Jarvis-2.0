@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { createSelfRepair } from './self.js';
-import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS, LIGHT_TOOLS } from './tools.js';
+import { HUD_TOOLS, FAILURE_TOOLS, MEMORY_TOOLS, MODE_TOOLS, CRYPTO_TOOLS, PHONE_TOOLS, CALENDAR_TOOLS, MUSIC_TOOLS, MAINT_TOOLS, DEV_TOOLS, TRADE_TOOLS, CHART_TOOLS, SIGNAL_TOOLS, NEWS_TOOLS, OUTLOOK_TOOLS, MARKETDATA_TOOLS, SOCIAL_TOOLS, MEDIA_TOOLS, LIGHT_TOOLS, ELIS_TOOLS } from './tools.js';
 import * as news from './news.js';
 import * as social from './social.js';
 import * as media from './media.js';
@@ -26,6 +26,7 @@ import * as spo from './spotify.js';
 import * as crypto_ from './crypto.js';
 import * as kr from './krakenlive.js';
 import * as trade from './trade.js';
+import * as elis from './elis.js';
 import * as md from './marketdata.js';
 import * as lf from './livefeed.js';
 import * as alerts from './alerts.js';
@@ -759,7 +760,7 @@ Object.assign(handlers, {
   calendar_add: async a => { try { return JSON.stringify(await cal.add(a)); } catch (e) { return calFail(e); } },
   calendar_update: async a => { try { return JSON.stringify(await cal.update(a)); } catch (e) { return calFail(e); } }
 });
-const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS, ...LIGHT_TOOLS, ...companionsMod.COMPANION_TOOLS];
+const TALK_TOOLS = [...HUD_TOOLS, ...FAILURE_TOOLS, ...MEMORY_TOOLS, ...MODE_TOOLS, ...CRYPTO_TOOLS, ...PHONE_TOOLS, ...CALENDAR_TOOLS, ...MUSIC_TOOLS, ...MAINT_TOOLS, ...DEV_TOOLS, ...TRADE_TOOLS, ...CHART_TOOLS, ...SIGNAL_TOOLS, ...NEWS_TOOLS, ...OUTLOOK_TOOLS, ...MARKETDATA_TOOLS, ...SOCIAL_TOOLS, ...MEDIA_TOOLS, ...LIGHT_TOOLS, ...ELIS_TOOLS, ...companionsMod.COMPANION_TOOLS];
 // A model picked on the /bench page overrides TALK_MODEL until the next redeploy wipes data/
 const talkModel = () => state.talkModel || TALK.model;
 
@@ -2825,11 +2826,20 @@ async function watchTick() {
     if (watch.fails >= 5 && Date.now() - watch.failAlerted > 3600e3) { watch.failAlerted = Date.now(); await push('Investment Watch is blind', `The price check has failed ${watch.fails} times in a row: ${e.message.slice(0, 150)}. You are not being watched until this clears.`); }
   }
 }
+handlers.elis_status = async () => {
+  if (!elis.enabled()) return 'Elis is off: Alpaca keys are not set, or ELIS_ENABLED=0 in Railway.';
+  return JSON.stringify({ ...elis.status(), guide: 'Speak a short summary: on/off, mode, today (levels, trade or none), recent results. Elis trades on its own; the Owner does not confirm its orders.' });
+};
+handlers.elis_backtest = async ({ days, rr, noShort }) => {
+  try { const r = await elis.backtest(days || 120, { ...(rr ? { rr } : {}), ...(noShort ? { allowShort: false } : {}) }); return JSON.stringify({ ...r, guide: 'Say trades, win rate, total R, return and max drawdown. Past results do not guarantee future results.' }); }
+  catch (e) { return `Backtest failed: ${e.message}`; }
+};
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
   return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, restingBrokerStops: (watch.items || []).filter(i => i.brokerStop).map(i => ({ symbol: i.sym, shares: i.brokerStop.qty, type: i.brokerStop.type, stopPrice: i.brokerStop.stopPrice ?? null, trailPercent: i.brokerStop.trailPercent ?? null, trailPrice: i.brokerStop.trailPrice ?? null })), heldWithoutBrokerStop: (watch.items || []).filter(i => i.held && !i.brokerStop && !isDustVal(i.value)).map(i => i.sym), alertLevels: (watch.items || []).filter(i => i.stop).map(i => ({ symbol: i.sym, alertLevel: i.stop })), guide: 'Answer the interval as a real number (every N seconds). Report the resting broker stops (real orders at the broker, they execute on their own) separately from the alert levels (Jarvis only alerts the phone and the user must act). Positions in heldWithoutBrokerStop have no broker protection. To add one use stop_propose.' });
 };
+if (!process.env.JARVIS_SMOKE) elis.start({ push: (t, b) => push(t, b, undefined, true) });   // Elis: automated paper day-trading (elis.js)
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 // ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
 // Priority symbols = open Alpaca positions + signal_watch list. Quotes come from Finnhub (live pulse) with Twelve Data as backup/cross-check.
