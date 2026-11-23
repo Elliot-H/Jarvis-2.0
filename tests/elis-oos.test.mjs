@@ -26,4 +26,8 @@ console.log(b.proven.slice(0, 3), b.honestR);
 assert(b.ready && b.proven.length && /calm stock/.test(b.proven[0].rule) && b.proven[0].posMonths >= 60, 'the consistent condition is found, noise is not');
 const n2 = X.buildRules({ 2020: yr(2020).map(t => ({ ...t, R: r2() - 0.02 })), 2022: yr(2022).map(t => ({ ...t, R: r2() - 0.02 })), 2023: yr(2023).map(t => ({ ...t, R: r2() - 0.02 })) }, D2);
 assert(n2.ready && !n2.proven.length, 'pure noise proves nothing');
+// why variables ride along on every trade: news before the signal, sector move, chart read
+const tc = O.tradesForDay(stock, t0, 2, spy, 0.1, { news: [{ t: t0 - 3600e3, tone: 'pos', cat: 'fda' }], secBars: spy });
+assert(tc.length && tc.every(x => x.newsNight === 'with the move' || x.newsNight === 'against the move') && tc.every(x => x.newsNightCat === 'fda' && /sector/.test(x.sectorMove) && x.candle && x.structure), 'trades carry news, sector and chart variables');
+assert(O.WHY_DIMS.length >= 20, 'formula search covers the why variables');
 console.log('OOS TEST PASSED'); process.exit(0);

@@ -7,6 +7,8 @@
 import * as E from './elis.js';
 import * as RD from './elis-read.js';
 import * as X from './elis-explain.js';
+import * as CX from './elis-context.js';
+import { catOf } from './elis-learn.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -47,8 +49,11 @@ export const FORMULAS = {
   'strong move alone (control) -> go with the stock': () => true
 };
 // one stock-day: every 5-min candle after a strong 30-min move, tested against every formula
-export function tradesForDay(bars, t0, atr, spyBars, spyGap) {
-  const cs = RD.to5m(bars, t0), spy = spyBars ? RD.to5m(spyBars, t0) : [], out = [], used = new Set();
+// ctx (optional): { news: [{t, tone, cat}], secBars: sector ETF minute bars } - the why variables, measured only from what was known at the signal
+export function tradesForDay(bars, t0, atr, spyBars, spyGap, ctx = {}) {
+  const cs = RD.to5m(bars, t0), spy = spyBars ? RD.to5m(spyBars, t0) : [], sec = ctx.secBars ? RD.to5m(ctx.secBars, t0) : null, out = [], used = new Set();
+  const newsAt = (lo, hi, up) => { const n = (ctx.news || []).filter(x => x.t >= lo && x.t < hi); if (!n.length) return { tone: 'none', cat: 'none' };
+    const w = n.filter(x => x.tone === (up ? 'pos' : 'neg')).length, a = n.filter(x => x.tone === (up ? 'neg' : 'pos')).length; return { tone: w > a ? 'with the move' : a > w ? 'against the move' : 'neutral', cat: n.at(-1).cat || 'other' }; };
   let pv = 0, vv = 0, bi = 0;
   for (let k = 6; k < cs.length - HOLD; k++) {
     const end = cs[k].t + 300e3; while (bi < bars.length && bars[bi].t < end) { const b = bars[bi++]; pv += (b.h + b.l + b.c) / 3 * b.v; vv += b.v; }
@@ -60,7 +65,10 @@ export function tradesForDay(bars, t0, atr, spyBars, spyGap) {
       if (used.has(name) || !rule(m)) continue;
       const e = cs[k].c, risk = STOP * atr, dir = up ? 1 : -1; let R = null;
       for (let j = k + 1; j <= k + HOLD; j++) { const c = cs[j]; if (dir > 0 ? c.l <= e - risk : c.h >= e + risk) { R = -1 - COST; break; } if (j === k + HOLD) R = dir * (c.c - e) / risk - COST; }
-      if (R != null) { used.add(name); out.push({ formula: name, R, minute: m.minute, dir: up ? 'long' : 'short', entry: e, stopDist: risk, marketAgainst: m.marketAgainst, volRatio: m.volRatio, vwapWith: m.vwapWith, vwapFar: m.vwapFar, moveATR: Math.abs(mv) }); }
+      if (R != null) { used.add(name);
+        if (!m.ctx) { const T = end, rd = RD.read(bars.filter(b => b.t < T), up ? 'long' : 'short', t0, atr), nh = newsAt(T - 3600e3, T, up), no = newsAt(t0 - 18 * 3600e3, t0, up), sc = sec?.[k], sc6 = sec?.[k - 6], sm2 = sc && sc6 ? (sc.c / sc6.c - 1) * (up ? 1 : -1) : null;
+          m.ctx = { newsHour: nh.tone, newsHourCat: nh.cat, newsNight: no.tone, newsNightCat: no.cat, sectorMove: sm2 == null ? 'no sector' : sm2 > 0.0015 ? 'sector with the move' : sm2 < -0.0015 ? 'sector against the move' : 'sector flat', candle: rd.feat.candle, structure: rd.feat.structure, pattern: rd.patterns.at(-1) || 'none' }; }
+        out.push({ formula: name, R, minute: m.minute, dir: up ? 'long' : 'short', entry: e, stopDist: risk, marketAgainst: m.marketAgainst, volRatio: m.volRatio, vwapWith: m.vwapWith, vwapFar: m.vwapFar, moveATR: Math.abs(mv), ...m.ctx }); }
     }
   }
   return out;
@@ -92,8 +100,18 @@ export const WHY_DIMS = [
   { name: 'stock opening gap', get: t => X.bucket(t.gap, [-4, -1, 1, 4], ['gap down 4%+', 'gap down 1-4%', 'no gap', 'gap up 1-4%', 'gap up 4%+']) },
   { name: 'opening volume surge', get: t => X.bucket(t.rvol, [2, 4, 8], ['1-2x normal', '2-4x', '4-8x', '8x+']) },
   { name: 'stock volatility', get: t => X.bucket(t.atrPct, [3, 6, 10], ['calm stock', 'normal stock', 'jumpy stock', 'very jumpy stock']) },
+  { name: 'news in the last hour', key: 'newsHour' },
+  { name: 'type of last-hour news', key: 'newsHourCat' },
+  { name: 'overnight news', key: 'newsNight' },
+  { name: 'type of overnight news', key: 'newsNightCat' },
+  { name: 'sector', key: 'sectorMove' },
+  { name: 'candle read', key: 'candle' },
+  { name: 'chart structure', key: 'structure' },
+  { name: 'latest candle pattern', key: 'pattern' },
   { name: 'month', get: t => t.date?.slice(0, 7) }
 ];
+// UTILITY: to add a new variable to the formula search, add one line above ({ name, key } or { name, get }) and make sure the
+// trades carry it (tradesForDay ctx or run()). Every year test then stores it, and build() searches it alone and paired with every other one.
 export async function run({ year = '2023', progress = null, shouldStop = () => false, perDay = 30 } = {}) {
   const from = `${year}-01-01`, to = `${year}-12-31`, warm = new Date(Date.parse(from) - 50 * 86400e3).toISOString().slice(0, 10);
   const cal = (await A(E.BASE, `/v2/calendar?start=${warm}&end=${to}`)).map(c => c.date), N = cal.length, di = new Map(cal.map((d, i) => [d, i]));
@@ -113,7 +131,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
       D.set(s, { o, h, l, c, v });
     }
   }
-  const win = {}, all = []; let sessions = 0;
+  const win = {}, all = [], sectorCache = {}; let sessions = 0;
   for (let k = 15; k < N; k++) {
     const d = cal[k]; if (shouldStop()) return { paused: true, partial: summarize(all), sessions };
     const elig = [];
@@ -126,13 +144,18 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
     for (const e of elig) { const fb = first[e.s], w = win[e.s] || []; if (!fb) continue; win[e.s] = [...w, fb.v].slice(-14); if (w.length < 10 || d < from) continue; const rvol = fb.v / (w.reduce((a, b) => a + b, 0) / w.length); if (rvol >= 1) cands.push({ ...e, rvol }); }
     if (d >= from && cands.length) {
       const top = cands.sort((a, b) => b.rvol - a.rvol).slice(0, perDay), bars = {}, spy = D.get('SPY'), spyGap = spy && first.SPY ? (first.SPY.o / spy.c[k - 1] - 1) * 100 : 0;
-      const list = [...top.map(c => c.s), 'SPY'];
+      const secOf = {}; for (const c of top) { const ck = c.s + d.slice(0, 7); if (!(ck in sectorCache)) { const by = o => { const r = {}; for (let j = Math.max(0, k - 61); j < k; j++) if (!isNaN(o.c[j])) r[cal[j]] = o.c[j]; return r; };
+          const etf = {}; for (const e of CX.SECTORS) if (D.has(e)) etf[e] = by(D.get(e)); sectorCache[ck] = CX.sectorOf(by(D.get(c.s)), etf); } secOf[c.s] = sectorCache[ck]; }
+      let news = []; try { let token = '', pages = 0; do { const q = new URLSearchParams({ symbols: top.map(c => c.s).join(','), start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), limit: '50', sort: 'asc' }); if (token) q.set('page_token', token);
+        const j = await A(E.DATA, `/v1beta1/news?${q}`); news.push(...(j.news || [])); token = j.next_page_token || ''; } while (token && ++pages < 6); } catch {}
+      const list = [...new Set([...top.map(c => c.s), 'SPY', ...Object.values(secOf).filter(Boolean)])];
       for (let i = 0; i < list.length; i += 50) { let token = '';
         do { const qs = new URLSearchParams({ symbols: list.slice(i, i + 50).join(','), timeframe: '1Min', start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), feed: 'sip', limit: '10000', adjustment: 'split' }); if (token) qs.set('page_token', token);
           const j = await A(E.DATA, `/v2/stocks/bars?${qs}`); for (const [s, arr] of Object.entries(j.bars || {})) (bars[s] ||= []).push(...arr.map(b => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }))); token = j.next_page_token || ''; } while (token); }
       let spyTrend = null, spyVol = null; if (spy) { const cl = []; for (let j = k - 20; j < k; j++) if (!isNaN(spy.c[j])) cl.push(spy.c[j]); if (cl.length >= 15) { const sma = cl.reduce((a, b) => a + b, 0) / cl.length; spyTrend = spy.c[k - 1] >= sma ? 'market uptrend' : 'market downtrend'; const rr = cl.slice(1).map((c, i) => Math.log(c / cl[i])), mu = rr.reduce((a, b) => a + b, 0) / rr.length; spyVol = Math.sqrt(rr.reduce((a, b) => a + (b - mu) ** 2, 0) / rr.length * 252) * 100; } }
       for (const c of top) { const x = D.get(c.s), gap = x && first[c.s] ? (first[c.s].o / x.c[k - 1] - 1) * 100 : null;
-        for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap)) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
+        const nws = news.filter(n => (n.symbols || []).includes(c.s)).map(n => ({ t: Date.parse(n.created_at), tone: RD.tone(n.headline), cat: catOf(n.headline, true) }));
+        for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap, { news: nws, secBars: secOf[c.s] ? bars[secOf[c.s]] : null })) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
       sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`);
     }
     await yieldNow();
