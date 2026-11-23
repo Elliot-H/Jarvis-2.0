@@ -3222,7 +3222,6 @@ function pruneData() {
     let freed = 0; const rm = f => { try { fs.unlinkSync(f.p); freed += f.size; f.gone = true; } catch {} };
     for (const f of files) if (/^alert-sound-.*\.mp3$/.test(f.n) && now - f.at > 12 * 3600e3) rm(f);
     for (const f of files) if (/^filler-.*\.mp3$/.test(f.n) && now - f.at > 30 * 864e5) rm(f);
-    for (const f of files) if (/[\\/]elis[\\/]bars[\\/]/.test(f.p) && now - f.at > 150 * 864e5) rm(f);   // Elis's 1-minute bar cache: re-downloadable, never needed past the learning window
     let total = files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0);
     if (total > 400 * 1048576) for (const f of files.filter(f => !f.gone && /^(alert-sound|filler)-.*\.mp3$/.test(f.n)).sort((a, b) => a.at - b.at)) { if (total <= 300 * 1048576) break; rm(f); total -= f.size; }
     dataMB = Math.round(files.filter(f => !f.gone).reduce((a, f) => a + f.size, 0) / 1048576);

@@ -786,4 +786,4 @@ Parallel to maintenance, scope ONLY MyGuru. `developer_request` / `developer_sta
 
 ## 2026-11-23 ENOSPC (server disk full)
 - HUD showed "Something broke while I was thinking: ENOSPC". Volume full: raw uploads (media/raw, batch/) were never pruned, only voice-clip mp3s were.
-- Fix: state saves are atomic (tmp+rename; a full disk can no longer blank stats.json); freeDisk() frees clips > Elis bar cache (re-downloadable; also capped at 150 days) > posts > batches > raw uploads (oldest first, ~60 MB) on ENOSPC, at boot and every 10 min when < 80 MB free; posts a breakdown line to the Activity panel.
+- Fix: state saves are atomic (tmp+rename; a full disk can no longer blank stats.json); freeDisk() frees clips > Elis bar cache (re-downloadable, only deleted when the disk is nearly full; the Elis journal and params are never touched) > posts > batches > raw uploads (oldest first, ~60 MB) on ENOSPC, at boot and every 10 min when < 80 MB free; posts a breakdown line to the Activity panel.
