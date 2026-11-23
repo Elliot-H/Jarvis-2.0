@@ -22,6 +22,7 @@ import * as PV from './elis-pivot.js';
 import * as JS from './elis-jumps.js';
 import * as OOS from './elis-oos.js';
 import * as WHY from './elis-why.js';
+import * as BL from './elis-blind.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -397,8 +398,16 @@ export async function whyNow() {   // Owner: where does the moving information c
     return txt;
   } catch (e) { await E.tellOut('why-it-moved error', e.message); return e.message; } finally { learnBusy = false; }
 }
+let blindBusy = false;
+export async function blindNow() {   // Owner: test against blind charts and give the feedback (stored bars only, no API; runs beside the year tests)
+  if (blindBusy) return 'busy'; blindBusy = true;
+  try { const r = await BL.run({ progress: m => note(m), shouldStop: marketHours }); if (r.paused) return 'paused';
+    const txt = BL.text(r); await E.tellOut('blind chart test', txt); note('blind publish: ' + await L.publish('elis/blind-test.md', `# Elis blind chart test\n\n${txt}\n\n\`\`\`json\n${JSON.stringify(r, null, 1)}\n\`\`\`\n`)); return txt;
+  } catch (e) { await E.tellOut('blind test error', e.message); return e.message; } finally { blindBusy = false; }
+}
 async function learnTick() {
   try {
+    if (!marketHours() && !blindBusy && (BL.lastReport()?.rev || 0) < BL.BLIND_REV) void blindNow();
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();

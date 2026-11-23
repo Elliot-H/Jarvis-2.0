@@ -326,7 +326,7 @@ export async function enrich(progress = null) {
 // ---------- the weekly learning run ----------
 let running = false;
 // streaming helpers: one day of bars in memory at a time (two years of minute bars do not fit comfortably)
-function loadDayBars(date) { const raw = readBars(date), memo = new Map(); return (d, sym) => { if (!memo.has(sym)) memo.set(sym, expand(date, raw[sym])); return memo.get(sym); }; }
+export function loadDayBars(date) { const raw = readBars(date), memo = new Map(); return (d, sym) => { if (!memo.has(sym)) memo.set(sym, expand(date, raw[sym])); return memo.get(sym); }; }
 const yieldNow = () => new Promise(r => setImmediate(r));
 const zero = () => ({ trades: 0, totalR: 0, wins: 0, winR: 0, lossR: 0 });
 async function streamEval(days, byDayAll, sets) {
