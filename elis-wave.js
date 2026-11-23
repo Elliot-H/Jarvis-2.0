@@ -15,6 +15,7 @@
 //              ELIS_WAVE_EXIT=HH:MM replaces this with a plain timed exit (the paper exits at the close).
 // Orders carry client_order_id elisw-YYYYMMDD-SYMBOL-*, so the ELIS panel counts them and nothing else is touched.
 import * as E from './elis.js';
+import * as L from './elis-learn.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -23,7 +24,7 @@ export const W = {
   picks: num(env.ELIS_WAVE_PICKS, 3),
   riskPct: num(env.ELIS_WAVE_RISK_PCT, 1),
   stopAtr: num(env.ELIS_WAVE_STOP_ATR, 0.10),
-  minPrice: 5, minAvgVol: 1e6, minAtr: 0.5, minRvol: 1, newsBoost: 1.25,
+  minPrice: 5, minAvgVol: 1e6, minAtr: 0.5, minRvol: 1, newsBoost: 1.25, mult: {},
   scanAt: 9 * 60 + 15, orbEnd: 9 * 60 + 35, entryEnd: hm(env.ELIS_WAVE_ENTRY_END, 11 * 60),
   decideAt: hm(env.ELIS_WAVE_DECIDE, 11 * 60),            // keep-or-sell check (context exit); ELIS_WAVE_EXIT=HH:MM forces a plain timed exit instead
   exitAt: hm(env.ELIS_WAVE_EXIT, 15 * 60 + 55), smartExit: !hm(env.ELIS_WAVE_EXIT, 0), keepMinR: num(env.ELIS_WAVE_KEEP_R, 1), trailR: num(env.ELIS_WAVE_TRAIL_R, 1),
@@ -57,6 +58,7 @@ const atr14 = d => { const tr = d.slice(1).map((b, i) => Math.max(b.h - b.l, Mat
 
 // ---- pre-open scan: universe + daily stats + 14-day average opening-5-minute volume (IEX, same feed as the live bar)
 async function scan(date) {
+  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult']) if (lp[k] !== undefined) W[k] = lp[k];
   const syms = new Set(CORE), news = {};
   try { const a = await E.api(E.DATA, '/v1beta1/screener/stocks/most-actives?by=volume&top=100'); for (const x of a.most_actives || []) syms.add(x.symbol); } catch (e) { note('most-actives unavailable: ' + e.message); }
   try { const m = await E.api(E.DATA, '/v1beta1/screener/stocks/movers?top=50'); for (const x of [...(m.gainers || []), ...(m.losers || [])]) syms.add(x.symbol); } catch (e) { note('movers unavailable: ' + e.message); }
@@ -91,22 +93,30 @@ async function scan(date) {
 }
 
 // ---- 09:35: rank by opening Relative Volume, pick the top N
-export function rank(info, firstBars, w = W) {
+export function rank(info, firstBars, w = W, spyDir = null) { return rankAll(info, firstBars, w, spyDir).slice(0, w.picks); }
+export function rankAll(info, firstBars, w = W, spyDir = null) {
   const c = [];
   for (const [s, b] of Object.entries(firstBars)) {
     const i = info[s]; if (!i || !b || !i.avgOpenVol) continue;
     const rvol = b.v / i.avgOpenVol; if (rvol < w.minRvol || b.o < w.minPrice) continue;
     const dir = b.c > b.o ? 'long' : b.c < b.o ? 'short' : null; if (!dir || (dir === 'short' && !w.allowShort)) continue;
-    c.push({ sym: s, dir, rvol: Math.round(rvol * 100) / 100, score: rvol * (i.news ? w.newsBoost : 1), orHigh: Math.round(b.h * 100) / 100, orLow: Math.round(b.l * 100) / 100, open: b.o, atr: i.atr, gapPct: Math.round((b.o / i.prevClose - 1) * 1000) / 10, headline: i.headline });
+    const x = { sym: s, dir, rvol: Math.round(rvol * 100) / 100, orHigh: Math.round(b.h * 100) / 100, orLow: Math.round(b.l * 100) / 100, open: b.o, atr: i.atr, gapPct: Math.round((b.o / i.prevClose - 1) * 1000) / 10, headline: i.headline, cat: L.catOf(i.headline, i.news), spyDir };
+    const f = L.features(x); let sc = rvol;
+    if (w.mult && Object.keys(w.mult).length) { for (const k of L.FEATURE_NAMES) sc *= w.mult[k]?.[f[k]] ?? 1; }   // learned weights on what Elis reads
+    else if (i.news) sc *= w.newsBoost;
+    x.score = sc; c.push(x);
   }
-  return c.sort((a, b) => b.score - a.score).slice(0, w.picks);
+  return c.sort((a, b) => b.score - a.score);
 }
 async function pick(date) {
   S.picked = true;
   const syms = Object.keys(S.info); if (!syms.length) { note('no candidates passed the scan'); return; }
-  const first = await multiBars(syms, '5Min', E.etMs(date, 570), E.etMs(date, 575), 'iex'), fb = {};
+  const first = await multiBars([...syms, 'SPY'], '5Min', E.etMs(date, 570), E.etMs(date, 575), 'iex'), fb = {};
   for (const [s, arr] of Object.entries(first)) if (arr[0] && arr[0].t === E.etMs(date, 570)) fb[s] = arr[0];
-  S.picks = rank(S.info, fb);
+  const spy = fb.SPY; delete fb.SPY; const spyDir = spy ? (spy.c > spy.o ? 'long' : spy.c < spy.o ? 'short' : null) : null;
+  const all = rankAll(S.info, fb, W, spyDir); S.picks = all.slice(0, W.picks);
+  for (const p of S.picks) p.traded = true;
+  L.journal(date, all, spyDir);
   if (!S.picks.length) return E.tellOut('wave: no stocks in play', `${date}: nothing with opening volume above its 14-day normal. Sitting out.`);
   await E.tellOut('wave picks', S.picks.map(p => `${p.sym} ${p.dir.toUpperCase()} · RVOL ${p.rvol}x · gap ${p.gapPct >= 0 ? '+' : ''}${p.gapPct}% · break ${p.dir === 'long' ? 'above ' + p.orHigh : 'below ' + p.orLow}${p.headline ? '\n  ' + p.headline.slice(0, 90) : ''}`).join('\n'));
 }
@@ -123,16 +133,16 @@ async function enter(date, p, px) {
   if (qty < 1) { p.done = true; return note(`${p.sym}: size 0`); }
   if (!long) { const as = await E.api(E.BASE, `/v2/assets/${p.sym}`); if (!as.shortable || !as.easy_to_borrow && as.borrow_status !== 'ETB' || !a.shorting_enabled) { p.done = true; return note(`${p.sym}: not shortable`); } }
   const o = await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: p.sym, qty: String(qty), side: long ? 'buy' : 'sell', type: 'market', time_in_force: 'day', order_class: 'oto', stop_loss: { stop_price: stop.toFixed(2) }, client_order_id: `${tag(date, p.sym)}-${Date.now().toString(36)}` }) });
-  p.done = true; S.trades[p.sym] = { id: o.id, qty, stop, dir: p.dir, sentFill: false, sentExit: false };
+  p.done = true; S.trades[p.sym] = { id: o.id, qty, stop, dir: p.dir, sentFill: false, sentExit: false, r: stopDist };
   await E.tellOut(`wave ${long ? 'LONG' : 'SHORT'} ${qty} ${p.sym}`, `broke ${long ? 'above ' + p.orHigh : 'below ' + p.orLow} at ~${px} · stop ${stop} · risk ~$${Math.round(stopDist * qty)}`);
 }
 async function manage() {
   for (const [sym, t] of Object.entries(S.trades)) {
     if (t.sentExit) continue;
     const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
-    if (+o.filled_qty > 0 && !t.sentFill) { t.sentFill = true; t.entry = +o.filled_avg_price; t.r = Math.abs(t.entry - t.stop) || 0.01; t.best = t.entry; t.legId = (o.legs || []).find(l => l.type === 'stop')?.id; note(`${sym} filled ${o.filled_qty} @ ${o.filled_avg_price}`); }
+    if (+o.filled_qty > 0 && !t.sentFill) { t.sentFill = true; t.entry = +o.filled_avg_price; t.r = Math.abs(t.entry - t.stop) || t.r || 0.01; t.qty = +o.filled_qty; t.best = t.entry; t.legId = (o.legs || []).find(l => l.type === 'stop')?.id; note(`${sym} filled ${o.filled_qty} @ ${o.filled_avg_price}`); }
     const ex = (o.legs || []).find(l => l.status === 'filled');
-    if (ex) { t.sentExit = true; const pnl = (t.dir === 'long' ? 1 : -1) * (+ex.filled_avg_price - +o.filled_avg_price) * +ex.filled_qty; await E.tellOut(`wave ${pnl > 0 ? "TRAIL STOP (profit)" : "STOP"} ${sym}`, `out @ ${ex.filled_avg_price}, ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`); }
+    if (ex) { t.sentExit = true; const pnl = (t.dir === 'long' ? 1 : -1) * (+ex.filled_avg_price - +o.filled_avg_price) * +ex.filled_qty; liveDone(t, pnl); await E.tellOut(`wave ${pnl > 0 ? "TRAIL STOP (profit)" : "STOP"} ${sym}`, `out @ ${ex.filled_avg_price}, ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`); }
     if (['canceled', 'expired', 'rejected'].includes(o.status) && +o.filled_qty === 0) { t.sentExit = true; note(`${sym} entry ${o.status}`); }
   }
 }
@@ -160,6 +170,7 @@ async function closeOne(date, sym, t, reason) {
   t.sentExit = true;
   if (!pos) return;
   await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, qty: String(Math.abs(+pos.qty)), side: +pos.qty > 0 ? 'sell' : 'buy', type: 'market', time_in_force: 'day', client_order_id: `${tag(date, sym)}-flat-${Date.now().toString(36)}` }) });
+  liveDone(t, +pos.unrealized_pl);
   await E.tellOut(`wave SOLD ${sym}`, `${reason} · ${+pos.unrealized_pl >= 0 ? '+' : ''}$${(+pos.unrealized_pl).toFixed(2)}`);
 }
 async function contextExit(date, now) {
@@ -198,7 +209,7 @@ async function flatten(date) {
       let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
       if (pos && +o.filled_qty > 0) {
         await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, qty: String(Math.abs(+pos.qty)), side: +pos.qty > 0 ? 'sell' : 'buy', type: 'market', time_in_force: 'day', client_order_id: `${tag(date, sym)}-flat-${Date.now().toString(36)}` }) });
-        lines.push(`${sym} ${+pos.unrealized_pl >= 0 ? '+' : ''}$${(+pos.unrealized_pl).toFixed(2)}`);
+        lines.push(`${sym} ${+pos.unrealized_pl >= 0 ? '+' : ''}$${(+pos.unrealized_pl).toFixed(2)}`); liveDone(t, +pos.unrealized_pl);
       }
       t.sentExit = true;
     } catch (e) { lines.push(`${sym} FLATTEN ERROR ${e.message}`); }
@@ -206,6 +217,29 @@ async function flatten(date) {
   if (lines.length) await E.tellOut('wave closed', lines.join(' · '));
 }
 
+function liveDone(t, pnl) {   // teach the learner with every live win and loss
+  if (!t.r || !t.qty) return; const msg = L.recordLive(pnl / (t.r * t.qty)); if (msg) E.tellOut('learning rollback', msg);
+}
+// learning schedule: bootstrap history once (market closed), then every Saturday ~10:00 ET, or on request
+let learnBusy = false, lastLearnDay = null;
+export async function learnNow(reason = 'on request') {
+  if (learnBusy) return 'Elis is already learning.'; learnBusy = true;
+  try {
+    const st = L.status();
+    if (st.journalSessions < 30) { await E.tellOut('learning', 'Building history from the last ~120 sessions first (a few minutes).'); const b = await L.bootstrap(CORE, 120); note(`bootstrap: ${b.sessions} sessions, ${b.candidates} candidates`); }
+    const rep = await L.learn(); const line = L.summaryLine(rep);
+    await E.tellOut(`learned (${reason})`, line); return line;
+  } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
+  finally { learnBusy = false; }
+}
+async function learnTick() {
+  try {
+    const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
+    const c = await E.api(E.BASE, '/v2/clock'); if (c.is_open || (now.min >= 8 * 60 && now.min < 16 * 60 + 30 && dow >= 1 && dow <= 5)) return;   // never during market hours
+    if (L.status().journalSessions < 30 && !lastLearnDay) { lastLearnDay = 'boot'; return void learnNow('first run'); }
+    if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
+  } catch {}
+}
 let busy = false, timer = null;
 async function tick() {
   if (busy) return; busy = true;
@@ -247,11 +281,13 @@ export function start() {
   timer = setInterval(() => tick(), 15e3); setTimeout(() => tick(), 15e3);
   setInterval(() => openValues().then(v => { openCache = v; }).catch(() => {}), 60e3);
   E.setExtraOpen(() => openCache);
+  E.setHudExtra(() => ({ learnVersion: L.version(), learnBusy: learnBusy }));
+  if (process.env.ELIS_LEARN !== '0') { setInterval(() => learnTick(), 30 * 60e3); setTimeout(() => learnTick(), 90e3); }
   note(`online: picks ${W.picks}, risk ${W.riskPct}%/trade, entries until ${Math.floor(W.entryEnd / 60)}:${String(W.entryEnd % 60).padStart(2, '0')}, exit ${Math.floor(W.exitAt / 60)}:${String(W.exitAt % 60).padStart(2, '0')}`);
   return true;
 }
 export function status() {
-  return { running: !!timer, day: S.day, scanned: S.scanned, candidates: Object.keys(S.info).length, picks: S.picks.map(p => ({ symbol: p.sym, dir: p.dir, rvol: p.rvol, gapPct: p.gapPct, breakLevel: p.dir === 'long' ? p.orHigh : p.orLow, triggered: !!S.trades[p.sym], headline: p.headline })), trades: S.trades, lastError: S.lastErr, log: S.log.slice(0, 10), rules: `Stocks in Play 5-min opening range breakout (Zarattini, Barbon & Aziz 2024): top ${W.picks} by opening relative volume (news x${W.newsBoost}), price > $5, avg vol > 1M, ATR > $0.50; enter on the break of the first 5-min high/low until the entry cut-off, stop ${W.stopAtr * 100}% of ATR, ${W.riskPct}% risk each. ${W.smartExit ? `Exit: break-even then ${W.trailR}R trailing stop after +${W.trailR}R; 11:00 keep only if >= +${W.keepMinR}R, right side of VWAP and still moving its way; runners out on a close through VWAP; flat 15:55.` : 'Exit at the set time.'}` };
+  return { learning: { version: L.version(), busy: learnBusy }, running: !!timer, day: S.day, scanned: S.scanned, candidates: Object.keys(S.info).length, picks: S.picks.map(p => ({ symbol: p.sym, dir: p.dir, rvol: p.rvol, gapPct: p.gapPct, breakLevel: p.dir === 'long' ? p.orHigh : p.orLow, triggered: !!S.trades[p.sym], headline: p.headline })), trades: S.trades, lastError: S.lastErr, log: S.log.slice(0, 10), rules: `Stocks in Play 5-min opening range breakout (Zarattini, Barbon & Aziz 2024): top ${W.picks} by opening relative volume (news x${W.newsBoost}), price > $5, avg vol > 1M, ATR > $0.50; enter on the break of the first 5-min high/low until the entry cut-off, stop ${W.stopAtr * 100}% of ATR, ${W.riskPct}% risk each. ${W.smartExit ? `Exit: break-even then ${W.trailR}R trailing stop after +${W.trailR}R; 11:00 keep only if >= +${W.keepMinR}R, right side of VWAP and still moving its way; runners out on a close through VWAP; flat 15:55.` : 'Exit at the set time.'}` };
 }
 export const _tick = () => tick();
 export const _state = S;

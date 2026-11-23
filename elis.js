@@ -311,7 +311,8 @@ export function runBacktest(all, dates, cfg = CFG) {
 
 // ---------------- HUD panel: P/L graph + today / lifetime numbers ----------------
 // Elis P/L = cash flow of its own fills (client_order_id elis-*: entries, bracket exits, EOD flatten) + any open Elis position.
-let hudCache = { at: 0, v: null }, extraOpen = () => [];
+let hudCache = { at: 0, v: null }, extraOpen = () => [], hudExtra = () => ({});
+export const setHudExtra = f => { hudExtra = f; };
 export const setExtraOpen = f => { extraOpen = f; };
 export async function summary(force = false) {
   if (!force && hudCache.v && Date.now() - hudCache.at < 55e3) return hudCache.v;
@@ -336,7 +337,7 @@ export async function summary(force = false) {
   try { const acts = await api(BASE, `/v2/account/activities?${new URLSearchParams({ activity_types: 'CSD,CSW,JNLC', date: et().date })}`); for (const x of acts || []) netCash += +x.net_amount || 0; } catch {}
   hudCache = { at: Date.now(), v: { mode: mode(), running: !!timer && !S.halted, halted: S.halted, equity: +a.equity, accountToday: Math.round((+a.equity - +a.last_equity - netCash) * 100) / 100,
     elisToday: Math.round((byDay[today] || 0) * 100) / 100, elisLifetime: Math.round(cum * 100) / 100, tradeDays: trades, series: series.slice(-90),
-    today: S.trade ? `${S.trade.side === 'buy' ? 'LONG' : 'SHORT'} ${S.trade.qty} ${CFG.symbol}` : S.day === et().date ? 'no trade yet' : 'waiting for the open' } };
+    today: S.trade ? `${S.trade.side === 'buy' ? 'LONG' : 'SHORT'} ${S.trade.qty} ${CFG.symbol}` : S.day === et().date ? 'no trade yet' : 'waiting for the open', ...hudExtra() } };
   return hudCache.v;
 }
 async function sendHud(force = false) {

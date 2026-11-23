@@ -28,6 +28,7 @@ import * as kr from './krakenlive.js';
 import * as trade from './trade.js';
 import * as elis from './elis.js';
 import * as elisWave from './elis-wave.js';
+import * as elisLearn from './elis-learn.js';
 import * as md from './marketdata.js';
 import * as lf from './livefeed.js';
 import * as alerts from './alerts.js';
@@ -2834,6 +2835,12 @@ handlers.elis_status = async () => {
 handlers.elis_backtest = async ({ days, rr, noShort }) => {
   try { const r = await elis.backtest(days || 120, { ...(rr ? { rr } : {}), ...(noShort ? { allowShort: false } : {}) }); return JSON.stringify({ ...r, guide: 'Say trades, win rate, total R, return and max drawdown. Past results do not guarantee future results.' }); }
   catch (e) { return `Backtest failed: ${e.message}`; }
+};
+handlers.elis_learning = async () => JSON.stringify({ ...elisLearn.status(), guide: 'Explain plainly: what information has been predicting winners vs losers (highest/lowest weights and avg R), what settings changed and whether the last run was adopted (it only adopts when unseen days improve). Never claim certainty about future results.' });
+handlers.elis_learn_now = async () => {
+  const n = elis.et(); const dow = new Date(elis.etMs(n.date, 720)).getUTCDay();
+  if (dow >= 1 && dow <= 5 && n.min >= 8 * 60 && n.min < 16 * 60 + 30) return 'Not during market hours (8:00-16:30 ET on weekdays); Elis is trading. It learns automatically every Saturday; ask again after 16:30.';
+  elisWave.learnNow('on request').catch(() => {}); return 'Learning started. The result arrives on his phone in a few minutes.';
 };
 handlers.watch_status = async () => {
   if (!trade.configured()) return 'The Investment Watch cannot run: Alpaca keys are not set in Railway.';

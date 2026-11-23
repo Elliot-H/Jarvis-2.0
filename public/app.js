@@ -367,7 +367,7 @@
     box.innerHTML = svg +
       `<div class="elis-n"><span>ELIS TODAY <b class="${cl(m.elisToday)}">${sg(m.elisToday || 0)}</b></span><span>LIFETIME <b class="${cl(m.elisLifetime)}">${sg(m.elisLifetime || 0)}</b></span></div>` +
       `<div class="elis-n"><span>ACCOUNT <b>${usd(m.equity || 0)}</b></span><span>TODAY <b class="${cl(m.accountToday)}">${sg(m.accountToday || 0)}</b></span></div>` +
-      `<div class="elis-s"><small>${esc(m.today || '')} · ${m.tradeDays || 0} trade day${m.tradeDays === 1 ? '' : 's'}</small></div>`;
+      `<div class="elis-s"><small>${esc(m.today || '')} · ${m.tradeDays || 0} trade day${m.tradeDays === 1 ? '' : 's'} · ${m.learnBusy ? 'learning…' : 'brain v' + (m.learnVersion || 0)}</small></div>`;
     fr.style.display = '';
   }
   function renderWatchlist(m) {
