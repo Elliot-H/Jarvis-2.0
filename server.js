@@ -2848,7 +2848,7 @@ handlers.elis_proposals = async () => { const ps = elisLearn.proposals(); return
 handlers.elis_adopt_proposal = async ({ id }) => elisLearn.adoptProposal(id);
 handlers.elis_learn_now = async () => {
   const n = elis.et(); const dow = new Date(elis.etMs(n.date, 720)).getUTCDay();
-  if (dow >= 1 && dow <= 5 && n.min >= 9 * 60 && n.min < 16 * 60 + 30) return 'Not during market hours (9:00-16:30 ET on weekdays); Elis is trading. It learns automatically every Saturday; ask again after 16:30.';
+  if (dow >= 1 && dow <= 5 && n.min >= 9 * 60 + 10 && n.min < 9 * 60 + 45) return 'Not between 9:10 and 9:45 ET (the open burst); ask again after 9:45.';
   elisWave.learnNow('on request').catch(() => {}); return 'Learning started. The result arrives on his phone in a few minutes.';
 };
 handlers.watch_status = async () => {
