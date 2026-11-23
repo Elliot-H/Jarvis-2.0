@@ -233,7 +233,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   for (const d of cal) {
     if (d < warm || (done.has(d) && d >= from) || (d < from && st.done.length)) continue;   // on resume the volume window is restored from the saved state
     if (shouldStop()) { save(HF, st); HS.phase = 'paused (market hours)'; return { paused: true, sessions: st.done.length }; }
-    if (freeMB() < 90) { save(HF, st); HS.phase = 'stopped: disk nearly full';   // stop before Jarvis's own cleanup (< 80 MB) would delete Elis bar files return { paused: true, diskLow: true, sessions: st.done.length }; }
+    if (freeMB() < 90) { save(HF, st); HS.phase = 'stopped: disk nearly full'; return { paused: true, diskLow: true, sessions: st.done.length }; }   // stop before Jarvis's own cleanup (< 80 MB) would delete Elis bar files
     const k = di.get(d), elig = [];
     for (const [s, x] of D) {
       if (k < 15) break;
