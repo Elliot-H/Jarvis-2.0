@@ -205,7 +205,11 @@ async function contextExit(date, now) {
     const ns = trailStop(t, px);
     if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
       try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
-      catch (e) { note(`${sym}: stop amend failed ${e.message}`); if (e.status === 422) { const cur = await openStop(sym, t).catch(() => null); if (cur) t.legId = cur.id; } }
+      catch (e) {
+        if (e.status === 422) { const cur = await openStop(sym, t).catch(() => null); if (cur && cur.id !== t.legId) { t.legId = cur.id; continue; } t.amendFails = (t.amendFails || 0) + 1; }
+        if (!t.amendWarned) note(`${sym}: stop amend failed ${e.message}`);
+        if (t.amendFails >= 3 && !t.amendWarned) { t.amendWarned = true; t.amendAt = Date.now() + 10 * 60e3; note(`${sym}: no movable stop found; keeping the current stop, retrying in 10 min (the 11:00 rule, news exit and 15:55 close still apply)`); }
+      }
     }
   }
   if (!W.smartExit || now.min < W.decideAt || now.min === S.lastMinute) return;
@@ -389,6 +393,18 @@ export function start() {
 }
 export function status() {
   return { learning: { version: L.version(), busy: learnBusy }, running: !!timer, day: S.day, scanned: S.scanned, candidates: Object.keys(S.info).length, picks: S.picks.map(p => ({ symbol: p.sym, dir: p.dir, rvol: p.rvol, gapPct: p.gapPct, breakLevel: p.dir === 'long' ? p.orHigh : p.orLow, triggered: !!S.trades[p.sym], headline: p.headline })), trades: S.trades, lastError: S.lastErr, log: S.log.slice(0, 10), rules: `Stocks in Play 5-min opening range breakout (Zarattini, Barbon & Aziz 2024): top ${W.picks} by opening relative volume (news x${W.newsBoost}), price > $5, avg vol > 1M, ATR > $0.50; enter on the break of the first 5-min high/low until the entry cut-off, stop ${W.stopAtr * 100}% of ATR, ${W.riskPct}% risk each. ${W.smartExit ? `Exit: break-even then ${W.trailR}R trailing stop after +${W.trailR}R; 11:00 keep only if >= +${W.keepMinR}R, right side of VWAP and still moving its way; runners out on a close through VWAP; flat 15:55.` : 'Exit at the set time.'}` };
+}
+export async function diag() {   // live Alpaca view of every open Wave trade (for the report page)
+  const out = {};
+  for (const [sym, t] of Object.entries(S.trades).filter(([, t]) => !t.sentExit)) {
+    try {
+      const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`), open = await E.api(E.BASE, `/v2/orders?status=open&symbols=${sym}&limit=50`), openNested = await E.api(E.BASE, `/v2/orders?status=open&symbols=${sym}&nested=true&limit=50`);
+      let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
+      const f = x => ({ id: x.id, type: x.type, side: x.side, qty: x.qty, status: x.status, stop: x.stop_price, cls: x.order_class, replaced_by: x.replaced_by, legs: (x.legs || []).map(f) });
+      out[sym] = { legId: t.legId, parent: f(o), open: open.map(f), openNested: openNested.map(f), position: pos && { qty: pos.qty, avg: pos.avg_entry_price, price: pos.current_price, upl: pos.unrealized_pl } };
+    } catch (e) { out[sym] = { error: e.message }; }
+  }
+  return out;
 }
 export const _tick = () => tick();
 export const _state = S;
