@@ -212,7 +212,7 @@ const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) =
 const HF = path.join(DIR, 'history-state.json'), PER_DAY = Number(process.env.ELIS_HISTORY_PER_DAY || 15);   // 15/day keeps the bar files ~38 MB on the 500 MB volume
 export const HS = { phase: 'idle', startedAt: null, rate: null };   // live progress for the report page
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
-export const LEARN_REV = 4;   // bump to make the disk-limited study relearn once after a learner upgrade
+export const LEARN_REV = 5;   // bump to make the disk-limited study relearn once after a learner upgrade
 export function markLearnedAfterStop() { const st = historyState(); st.learnedAfterStop = true; st.learnedRev = LEARN_REV; save(HF, st); }
 export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
   const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
@@ -429,6 +429,15 @@ export async function learn({ force = false, progress = null, minRuleN = 80 } = 
       for (const r of byDayAll.get(d) || []) { if (seen.has(r.sym) || !r.atr) continue; seen.add(r.sym); for (const [f, o] of PV.samples(barsOf(d, r.sym), E.etMs(d, 570), r.atr, spy, r)) PV.add(T, f, o); }
       await yieldNow(); } return T; };
     const half = Math.floor(train.length / 2), Ta = await count(train.slice(0, half)), Tb = await count(train.slice(half)), Ttest = await count(test);
+    // formula search on strong 30-min moves: which combination of signs says which way (train vs unseen)
+    progress?.('formula search');
+    const fcount = async ds => { const F = PV.newF(); for (const d of ds) { const barsOf = loadDayBars(d), spy = barsOf(d, 'SPY'), seen = new Set();
+      for (const r of byDayAll.get(d) || []) { if (seen.has(r.sym) || !r.atr) continue; seen.add(r.sym); PV.formulaAdd(F, barsOf(d, r.sym), E.etMs(d, 570), r.atr, spy, r); }
+      await yieldNow(); } return F; };
+    const Ftr = await fcount(train), Fte = await fcount(test), flist = PV.formulas(Ftr, Fte);
+    const formula = { tested: PV.COMBOS.length, moments: Ftr.n + Fte.n, baseTrain: PV.formulaBaseline(Ftr), baseTest: PV.formulaBaseline(Fte), list: flist.slice(0, 30) };
+    formula.text = PV.formulaText(flist, formula.baseTrain, formula.baseTest, Ftr.m.size);
+    progress?.(`formula search: ${Ftr.m.size} formulas, ${flist.length} held up on unseen days`);
     const tableTrain = PV.compile(PV.validate(Ta, Tb)), Tall = PV.merge(Ta, Tb), pivotSignals = PV.validate(Tall, Ttest);
     const pivotBase = { up: Ttest.base.up / Math.max(1, Ttest.base.n), down: Ttest.base.down / Math.max(1, Ttest.base.n) };
     const pivot = { samples: Tall.base.n + Ttest.base.n, signals: pivotSignals.slice(0, 40), base: pivotBase, text: PV.textOf(pivotSignals, pivotBase) };
@@ -457,7 +466,7 @@ export async function learn({ force = false, progress = null, minRuleN = 80 } = 
     const money = { before: await equityCurve(days, byDayAll, cur), after: await equityCurve(days, byDayAll, cand),
       unseenBefore: await equityCurve(test, byDayAll, cur), unseenAfter: await equityCurve(test, byDayAll, cand) };
     P.proposals = proposals; save(F.params, P);
-    const report = { money, proposals, gaps, experiments, pivot, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
+    const report = { money, proposals, gaps, experiments, pivot, formula, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
       current: sum(curTest), learned: sum(newTest), adopted: !!better, changes, whatPredictsWins: allW.table, version: P.version + (better ? 1 : 0) };
     if (better) {
       P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);

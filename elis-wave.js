@@ -352,9 +352,10 @@ export async function learnNow(reason = 'on request') {
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
     const exps = L.experimentsText(rep); if (exps) await E.tellOut('experiments', exps);
     let sweepBt = null; try { sweepBt = await E.backtest(Number(process.env.ELIS_SWEEP_BT_DAYS || 400)); delete sweepBt._trades; await E.tellOut('QQQ strategy history', `${sweepBt.sessions} sessions: ${sweepBt.trades} trades, ${sweepBt.winRatePct}% wins, total ${sweepBt.totalR}R, return ${sweepBt.returnPct}% at 1% risk, max drawdown ${sweepBt.maxDrawdownPct}%`); } catch (e) { note('sweep backtest failed: ' + e.message); }
+    if (rep.formula) await E.tellOut('formula search', rep.formula.text);
     if (rep.pivot) await E.tellOut('pivot study', `${rep.pivot.samples.toLocaleString('en-US')} chart moments studied (with news, sector, market and fear context).\n\n${rep.pivot.text}`);
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
-    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Pivot study\n\n${rep.pivot ? rep.pivot.samples + ' moments\n\n' + rep.pivot.text : 'n/a'}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Formula search\n\n${rep.formula ? rep.formula.text : 'n/a'}\n\n## Pivot study\n\n${rep.pivot ? rep.pivot.samples + ' moments\n\n' + rep.pivot.text : 'n/a'}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
     return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }

@@ -26,4 +26,14 @@ const x = day(days[50], 999), table = PV.compile(v), c = { date: days[50], dir: 
 const o1 = {}, o2 = {}, withP = L.simulate(x.bars, c, { ...L.DEFAULTS, exitMode: 'close', newsExit: false, pivotExit: 0.5, pivotTable: table }, o1), noP = L.simulate(x.bars, c, { ...L.DEFAULTS, exitMode: 'close', newsExit: false }, o2);
 console.log('pivot exit', withP?.toFixed(2), o1.why, '| hold', noP?.toFixed(2), o2.why);
 assert(/pivot warning/.test(o1.why || '') && withP > noP, 'pivot exit sells on the warning signs and beats holding');
+// formula search: after a strong run-up, a volume surge + bad headline reverses it (hidden edge); found on train AND unseen days
+const fday = (d, i) => { const t0 = E.etMs(d, 570), bars = []; let p = 50; const hot = i % 2 === 0;
+  for (let m = 0; m < 390; m++) { const o = p; const ph = m % 60;   // every hour: 30 min strong run, then either reversal (hot) or noise
+    p += ph < 30 ? 0.045 : hot ? -0.06 : (rnd() * 0.06); const v = hot && ph >= 26 && ph < 30 ? 5000 : 1000;
+    bars.push({ t: t0 + m * 60e3, o, h: Math.max(o, p) + 0.01, l: Math.min(o, p) - 0.01, c: p, v }); }
+  return { bars, t0, row: { atr: 2, tone: 'none', intraday: hot ? [0, 60, 120, 180, 240, 300].map(h => ({ m: h + 28, tone: 'neg', headline: 'bad' })) : [], ctx: {} } }; };
+const fc = ds => { const F = PV.newF(); ds.forEach((d, j) => { for (let i = 0; i < 6; i++) { const x = fday(d, j * 6 + i); PV.formulaAdd(F, x.bars, x.t0, 2, null, x.row); } }); return F; };
+const Ftr = fc(days.slice(0, 40)), Fte = fc(days.slice(40)), fl = PV.formulas(Ftr, Fte, { minTrain: 40, minTest: 15 });
+console.log(PV.formulaText(fl, PV.formulaBaseline(Ftr), PV.formulaBaseline(Fte), Ftr.m.size, 3));
+assert(fl.some(x => x.trade === 'go AGAINST the strong move' && /vol-(rising|surge)|recent-news-bad/.test(x.signs) && x.unseen.avgR > 0.3), 'formula search finds the hidden reversal formula on unseen days');
 console.log('PIVOT TEST PASSED'); process.exit(0);

@@ -118,3 +118,67 @@ export function merge(a, b) {
     for (const [kn, vals] of Object.entries(x.t)) for (const [v, c] of Object.entries(vals)) { const d = ((T.t[kn] ||= {})[v] ||= { n: 0, up: 0, down: 0 }); d.n += c.n; d.up += c.up; d.down += c.down; } }
   return T;
 }
+
+// ================= FORMULA SEARCH (Owner 2026-11-23: "narrow it down - the 30-minute move plus candle pattern plus volume...
+// build a formula with a high success probability") =================
+// Only moments right after a STRONG 30-minute move (up-strong / down-strong): the next 30 min are ~3x more likely to move big.
+// Question: which combination of extra signs says WHICH WAY. Each moment is scored as two real trades from the candle close:
+// "continue" (with the move) and "reverse" (against it), stop 0.4 x ATR, otherwise out after 30 min, costs included.
+export const SIGNS = ['pattern', 'indecision', 'vol', 'vwap', 'time', 'market', 'sector', 'fear', 'newsRecent', 'mktGap'];
+const STOP = 0.4, COST_R = 0.05;   // stop in ATR; fills/slippage per trade in R
+function tradeR(cs, k, atr, dir) {   // dir: +1 long, -1 short, entered at the close of candle k
+  const e = cs[k].c, risk = STOP * atr;
+  for (let j = k + 1; j <= Math.min(k + HORIZON, cs.length - 1); j++) {
+    const c = cs[j];
+    if (dir > 0 ? c.l <= e - risk : c.h >= e + risk) return -1 - COST_R;   // stop (assumed first when both happen in one candle)
+    if (j === k + HORIZON) return dir * (c.c - e) / risk - COST_R;
+  }
+  return null;
+}
+// combos of 0..3 extra signs (0 = the strong move alone)
+export const COMBOS = (() => { const out = [[]]; for (let a = 0; a < SIGNS.length; a++) { out.push([SIGNS[a]]); for (let b = a + 1; b < SIGNS.length; b++) { out.push([SIGNS[a], SIGNS[b]]); for (let c = b + 1; c < SIGNS.length; c++) out.push([SIGNS[a], SIGNS[b], SIGNS[c]]); } } return out; })();
+export const newF = () => ({ n: 0, m: new Map() });
+// one stock-day -> add every strong-move moment to the accumulator
+export function formulaAdd(F, bars1m, t0, atr, spyBars1m, row) {
+  if (!bars1m?.length || !atr) return;
+  const cs = RD.to5m(bars1m, t0), spy = spyBars1m ? RD.to5m(spyBars1m, t0) : [];
+  let pv = 0, vv = 0, bi = 0;
+  for (let k = 6; k < cs.length - HORIZON; k++) {
+    const end = cs[k].t + 300e3; while (bi < bars1m.length && bars1m[bi].t < end) { const b = bars1m[bi++]; pv += (b.h + b.l + b.c) / 3 * b.v; vv += b.v; }
+    const mv = (cs[k].c - cs[k - 6].c) / atr; if (Math.abs(mv) <= 0.6) continue;   // strong moves only
+    const s = spy[k], s6 = spy[k - 6], spyTrend = s && s6 ? (s.c > s6.c * 1.0015 ? 'mkt-up' : s.c < s6.c * 0.9985 ? 'mkt-down' : 'mkt-flat') : null;
+    const f = pivotFeatures(cs, k, vv ? pv / vv : cs[k].c, atr, spyTrend, row), up = mv > 0;
+    // express market/sector relative to the move so "up" and "down" moves share statistics
+    f.market = !spyTrend || spyTrend === 'mkt-flat' ? 'mkt-flat' : (spyTrend === 'mkt-up') === up ? 'mkt-with-move' : 'mkt-against-move';
+    f.vwap = (f.vwap.startsWith('above') === up ? 'vwap-with-move' : 'vwap-against-move') + (f.vwap.endsWith('-far') ? '-far' : '');
+    const cont = tradeR(cs, k, atr, up ? 1 : -1), rev = tradeR(cs, k, atr, up ? -1 : 1); if (cont == null || rev == null) continue;
+    F.n++;
+    for (const cb of COMBOS) {
+      const key = (up ? '' : '') + (cb.length ? cb.map(x => f[x]).join(' + ') : 'strong move') + '|' + cb.join('+');
+      let a = F.m.get(key); if (!a) F.m.set(key, a = { n: 0, cont: 0, rev: 0, cw: 0, rw: 0 });
+      a.n++; a.cont += cont; a.rev += rev; if (cont > 0) a.cw++; if (rev > 0) a.rw++;
+    }
+  }
+}
+// formulas profitable on TRAIN and again on UNSEEN days (after costs), best first
+export function formulas(train, test, { minTrain = 150, minTest = 50, minR = 0.1 } = {}) {
+  const out = [];
+  for (const [key, a] of train.m) {
+    if (a.n < minTrain) continue;
+    for (const side of ['cont', 'rev']) {
+      const rTr = a[side] / a.n; if (rTr < minR) continue;
+      const u = test.m.get(key); if (!u || u.n < minTest) continue; const rTe = u[side] / u.n; if (rTe < minR * 0.5) continue;
+      const [signs, keys] = key.split('|');
+      out.push({ trade: side === 'cont' ? 'go WITH the strong move' : 'go AGAINST the strong move', signs, keys, train: { n: a.n, avgR: r2(rTr), winPct: Math.round(a[side === 'cont' ? 'cw' : 'rw'] / a.n * 100) },
+        unseen: { n: u.n, avgR: r2(rTe), winPct: Math.round(u[side === 'cont' ? 'cw' : 'rw'] / u.n * 100) } });
+    }
+  }
+  return out.sort((x, y) => y.unseen.avgR * Math.sqrt(y.unseen.n) - x.unseen.avgR * Math.sqrt(x.unseen.n));
+}
+export function formulaBaseline(F) { const a = F.m.get('strong move|'); return a ? { n: a.n, contR: r2(a.cont / a.n), revR: r2(a.rev / a.n), contWin: Math.round(a.cw / a.n * 100), revWin: Math.round(a.rw / a.n * 100) } : null; }
+export function formulaText(list, baseTrain, baseTest, tested, limit = 10) {
+  const head = `Searched ${tested.toLocaleString('en-US')} formulas on strong 30-min moves (stop 0.4 x daily range, out after 30 min, costs included).\n`
+    + (baseTest ? `Strong move alone, unseen days: going with it ${baseTest.contR}R avg (${baseTest.contWin}% wins), against it ${baseTest.revR}R (${baseTest.revWin}% wins), ${baseTest.n} cases.\n` : '');
+  if (!list.length) return head + 'No formula was profitable on both the training days and the unseen days.';
+  return head + list.slice(0, limit).map((x, i) => `${i + 1}. ${x.trade} when: ${x.signs}\n   unseen: ${x.unseen.avgR}R avg, ${x.unseen.winPct}% wins, ${x.unseen.n} cases | training: ${x.train.avgR}R, ${x.train.winPct}% wins, ${x.train.n} cases`).join('\n');
+}
