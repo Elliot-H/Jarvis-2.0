@@ -352,13 +352,13 @@ export async function learnNow(reason = 'on request') {
     }
     if (!L.ctxDone()) { const n = await L.enrich(m => note(m)); note(`context added to ${n} graded candidates`); }
     const rep = await L.learn({ progress: m => note(m) }); if (L.historyState().diskStop) L.markLearnedAfterStop(); const line = L.summaryLine(rep), money = L.moneyText(rep);
-    await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
+    await E.tellOut(`learned (${reason})`, line); if (rep.why) await E.tellOut('why (unseen days)', rep.why.text); if (money) await E.tellOut('money replay', money);
     const exps = L.experimentsText(rep); if (exps) await E.tellOut('experiments', exps);
     let sweepBt = null; try { sweepBt = await E.backtest(Number(process.env.ELIS_SWEEP_BT_DAYS || 400)); delete sweepBt._trades; await E.tellOut('QQQ strategy history', `${sweepBt.sessions} sessions: ${sweepBt.trades} trades, ${sweepBt.winRatePct}% wins, total ${sweepBt.totalR}R, return ${sweepBt.returnPct}% at 1% risk, max drawdown ${sweepBt.maxDrawdownPct}%`); } catch (e) { note('sweep backtest failed: ' + e.message); }
     if (rep.formula) await E.tellOut('formula search', rep.formula.text);
     if (rep.pivot) await E.tellOut('pivot study', `${rep.pivot.samples.toLocaleString('en-US')} chart moments studied (with news, sector, market and fear context).\n\n${rep.pivot.text}`);
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
-    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Formula search\n\n${rep.formula ? rep.formula.text : 'n/a'}\n\n## Pivot study\n\n${rep.pivot ? rep.pivot.samples + ' moments\n\n' + rep.pivot.text : 'n/a'}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n## Why (unseen days)\n\n${rep.why ? rep.why.text : 'n/a'}\n\n${money}\n\n## Formula search\n\n${rep.formula ? rep.formula.text : 'n/a'}\n\n## Pivot study\n\n${rep.pivot ? rep.pivot.samples + ' moments\n\n' + rep.pivot.text : 'n/a'}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
     return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }
@@ -373,7 +373,7 @@ export async function jumpNow() {   // Owner's big-jump study: once, outside 9:1
     return txt;
   } catch (e) { await E.tellOut('big-jump study error', e.message); return e.message; } finally { learnBusy = false; }
 }
-export async function oosNow(year = process.env.ELIS_OOS_YEAR || '2023') {   // Owner: test the newest formulas on a year they never saw
+export async function oosNow(year = OOS.nextYear()) {   // Owner: test the newest formulas on a year they never saw
   if (learnBusy) return 'busy'; learnBusy = true;
   try {
     await E.tellOut('year test', `Replaying ${year} as if live with the formulas found on 2024-2025 (stocks in play every morning, every 5-min candle). About an hour.`);
@@ -399,7 +399,7 @@ async function learnTick() {
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
     if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');
-    if (hs.learnedRev >= L.LEARN_REV && !OOS.lastReport()) return void oosNow();   // year test first (Owner's priority), then the jump study
+    if (hs.learnedRev >= L.LEARN_REV && OOS.nextYear()) return void oosNow();   // year tests (2023, 2020 COVID, 2022 bear) first, then the jump study
     if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();
     if (hs.learnedRev >= L.LEARN_REV && !WHY.lastReport()) return void whyNow();   // add market/sector/buzz context to the history and relearn
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts

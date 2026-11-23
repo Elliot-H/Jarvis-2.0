@@ -11,4 +11,10 @@ assert(mid && mid.dir === 'long' && mid.minute >= 115 && mid.R > 0.5, 'midday re
 assert(t.some(x => /S&P flat at the open/.test(x.formula)), 'S&P-flat variant fires (gap 0.1%)');
 const m = O.money([{ date: d, R: 1 }, { date: '2023-06-15', R: -1 }], 3000); console.log(m); assert(m.end === 3000 && m.maxDrawdownPct === 1, 'money compounding (+1% then -1% = $2,999.70)');
 console.log(O.text({ year: '2023', sessions: 1, results: O.summarize(t.map(x => ({ ...x, date: d }))) }).split('\n').slice(0, 3).join('\n'));
+const X = await import('../elis-explain.js');
+// why: a fake year where longs in nervous markets win and shorts lose -> the write-up says so
+let sd = 3; const rr = () => ((sd = (sd * 16807) % 2147483647) / 2147483647 - 0.5);
+const fake = Array.from({ length: 400 }, (_, i) => ({ date: '2023-0' + (1 + (i % 9)) + '-10', dir: i % 2 ? 'long' : 'short', spyVol: i % 4 < 2 ? 30 : 10, minute: 100, R: (i % 2 && i % 4 < 2 ? 0.8 : -0.4) + rr() }));
+const w = X.explain(fake, O.WHY_DIMS); console.log(w.text);
+assert(/Made money when:[\s\S]*panicky market/.test(w.text) && /Lost most when:[\s\S]*(short|calm market)/.test(w.text), 'why names the winning and losing conditions');
 console.log('OOS TEST PASSED'); process.exit(0);

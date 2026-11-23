@@ -15,6 +15,7 @@ import * as E from './elis.js';
 import * as RD from './elis-read.js';
 import * as C from './elis-context.js';
 import * as PV from './elis-pivot.js';
+import * as X from './elis-explain.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(path.dirname(new URL(import.meta.url).pathname), 'data'), 'elis');
 const F = { journal: path.join(DIR, 'journal.jsonl'), params: path.join(DIR, 'params.json'), report: path.join(DIR, 'learn-report.json') };
@@ -212,7 +213,7 @@ const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) =
 const HF = path.join(DIR, 'history-state.json'), PER_DAY = Number(process.env.ELIS_HISTORY_PER_DAY || 15);   // 15/day keeps the bar files ~38 MB on the 500 MB volume
 export const HS = { phase: 'idle', startedAt: null, rate: null };   // live progress for the report page
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
-export const LEARN_REV = 5;   // bump to make the disk-limited study relearn once after a learner upgrade
+export const LEARN_REV = 6;   // bump to make the disk-limited study relearn once after a learner upgrade
 export function markLearnedAfterStop() { const st = historyState(); st.learnedAfterStop = true; st.learnedRev = LEARN_REV; save(HF, st); }
 export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
   const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
@@ -462,11 +463,20 @@ export async function learn({ force = false, progress = null, minRuleN = 80 } = 
         why: `Tested as a whole system on the ${test.length} unseen sessions against Elis's current setup.`, evidence: { before: sum(base), after: sum(e) }, effort: 'None. Say "adopt Elis proposal" - applies at the next 9:15 scan.' });
     }
     const gaps = []; const mt = allW.table['outcome:midTradeNews']?.['bad news hit during trade']; if (mt) gaps.push(`${mt.trades} graded trades had bad news hit mid-trade (avg ${mt.avgR}R).`);
+    // WHY: every trade the current settings took on the unseen days, with what Elis knew and how it exited
+    const whyTrades = [];
+    for (const d of test) { const barsOf = loadDayBars(d), cands = byDayAll.get(d) || [];
+      const pick = cands.filter(c => c.rvol >= cur.minRvol && !(cur.skip || []).some(r => !r.chart && features(c)[r.k] === r.v)).sort((a, b) => score(b, cur) - score(a, cur)).slice(0, cur.picks);
+      for (const c of pick) { const b = barsOf(d, c.sym); if (!b) continue; const o = {}, R = simulate(b, c, cur, o, barsOf(d, 'SPY')); if (R == null) continue; whyTrades.push({ R, ...features(c), exit: String(o.why || '').replace(/:.*/, ''), chartAtEntry: o.ef?.candle, volAtEntry: o.ef?.volume, vwapAtEntry: o.ef?.vwap, month: d.slice(0, 7), midNews: o.adverseNews ? 'bad news hit mid-trade' : 'no bad news mid-trade' }); }
+      await yieldNow(); }
+    const why = X.explain(whyTrades, [{ name: 'how it exited', key: 'exit' }, { name: 'news type', key: 'cat' }, { name: 'news tone', key: 'newsTone' }, { name: 'S&P direction at the open', key: 'market' },
+      { name: 'S&P gap', key: 'mktGap' }, { name: 'fear gauge', key: 'fear' }, { name: 'trend regime', key: 'regime' }, { name: 'sector', key: 'sector' }, { name: 'side', key: 'side' }, { name: 'stock gap', key: 'gap' },
+      { name: 'opening volume surge', key: 'rvol' }, { name: 'opening range', key: 'orAtr' }, { name: 'candle read at entry', key: 'chartAtEntry' }, { name: 'volume at entry', key: 'volAtEntry' }, { name: 'VWAP at entry', key: 'vwapAtEntry' }, { name: 'mid-trade news', key: 'midNews' }, { name: 'month', key: 'month' }], { minN: 20 });
     progress?.('money replay: $3,000 from the first session, before vs after');
     const money = { before: await equityCurve(days, byDayAll, cur), after: await equityCurve(days, byDayAll, cand),
       unseenBefore: await equityCurve(test, byDayAll, cur), unseenAfter: await equityCurve(test, byDayAll, cand) };
     P.proposals = proposals; save(F.params, P);
-    const report = { money, proposals, gaps, experiments, pivot, formula, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
+    const report = { why, money, proposals, gaps, experiments, pivot, formula, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
       current: sum(curTest), learned: sum(newTest), adopted: !!better, changes, whatPredictsWins: allW.table, version: P.version + (better ? 1 : 0) };
     if (better) {
       P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);
