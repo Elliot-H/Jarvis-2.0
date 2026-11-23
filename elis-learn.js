@@ -61,7 +61,8 @@ export function journalUpdate(rows) {   // end of day: same rows again with mid-
 }
 export function readJournal() {
   let rows = []; try { rows = fs.readFileSync(F.journal, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
-  const seen = new Map(); for (const r of rows) seen.set(r.date + ':' + r.sym, r);   // last write wins
+  const hasHist = rows.some(r => r.hist);
+  const seen = new Map(); for (const r of rows) if (!(hasHist && r.boot)) seen.set(r.date + ':' + r.sym, r);   // last write wins; the old core-only bootstrap is replaced by the full history
   return [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
@@ -115,8 +116,9 @@ export function evaluate(byDay, barsOf, p) {
 }
 
 // ---------- learn which information predicts winners (shrunk bucket expectancy) ----------
-export function learnWeights(byDay, barsOf, p) {
-  const acc = {}, eacc = {}, why = {}, pOpen = { ...p, entryGate: 0 };
+export const newAcc = () => ({ acc: {}, eacc: {}, why: {} });
+export function learnWeights(byDay, barsOf, p, A = null) {
+  const own = !A; A ||= newAcc(); const { acc, eacc, why } = A, pOpen = { ...p, entryGate: 0 };
   const bump = (A, k, v, R) => { const a = ((A[k] ||= {})[v] ||= { n: 0, sum: 0, wins: 0 }); a.n++; a.sum += R; if (R > 0) a.wins++; };
   for (const [date, cands] of byDay) for (const c of cands) {
     if (c.rvol < p.minRvol) continue; const b = barsOf(date, c.sym); if (!b) continue;
@@ -126,6 +128,9 @@ export function learnWeights(byDay, barsOf, p) {
     bump(why, 'exit', String(o.why || '').replace(/:.*/, ''), R);
     if (o.adverseNews) bump(why, 'midTradeNews', 'bad news hit during trade', R);
   }
+  return own ? finishWeights(A) : A;
+}
+export function finishWeights({ acc, eacc, why }) {
   const toMult = A => { const mult = {}, table = {};
     for (const [k, buckets] of Object.entries(A)) {
       const all = Object.values(buckets).reduce((x, y) => ({ n: x.n + y.n, sum: x.sum + y.sum }), { n: 0, sum: 0 }), base = all.n ? all.sum / all.n : 0;
@@ -163,59 +168,116 @@ async function barsForDay(date, syms) {
 }
 const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) => ({ t: E.etMs(date, 570) + m * 60e3, o, h, l, c, v })) : null;
 
-// ---------- bootstrap: rebuild ~120 past sessions of candidates from the liquid core (no historical screener exists) ----------
-export async function bootstrap(core, days = 120) {
-  const cal = await E.api(E.BASE, `/v2/calendar?start=${new Date(Date.now() - (days * 1.6 + 40) * 86400e3).toISOString().slice(0, 10)}&end=${new Date(Date.now() - 86400e3).toISOString().slice(0, 10)}`);
-  const sessions = cal.map(c => c.date).filter(d => d < E.et().date), use = sessions.slice(-days), all = sessions.slice(-(days + 15));
-  const syms = [...core, 'SPY'], daily = {};
+// ---------- HISTORY: replay every session since FROM as if live (whole market, no look-ahead) ----------
+// Each session: only data knowable at 09:35 picks the candidates (prior daily bars, the 09:30 5-min bar, pre-open news);
+// then the top 20 by opening relative volume are graded on real 1-min bars with mid-day news. Resumable; outside market hours.
+// Survivorship: inactive (delisted) symbols are included. Data: Alpaca SIP history (free plan allows SIP older than 15 min) + Alpaca/Benzinga news.
+const HF = path.join(DIR, 'history-state.json'), PER_DAY = 20;
+export const historyState = () => load(HF, { done: [], finished: false, from: null });
+export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 320 } = {}) {
+  const st = historyState(); if (st.finished && st.from === from) return { finished: true, sessions: st.done.length };
+  st.from = from; st.done ||= []; st.win ||= {};
+  const today = E.et().date, warm = new Date(Date.parse(from) - 45 * 86400e3).toISOString().slice(0, 10);
+  const cal = (await E.api(E.BASE, `/v2/calendar?start=${warm}&end=${today}`)).map(c => c.date).filter(d => d < today);
+  const sessions = cal.filter(d => d >= from), di = new Map(cal.map((d, i) => [d, i])), N = cal.length;
+  // 1) universe: every US common-stock-like symbol, active and delisted
+  const assets = [];
+  for (const status of ['active', 'inactive']) { try { assets.push(...(await E.api(E.BASE, `/v2/assets?status=${status}&asset_class=us_equity`))); } catch {} await pause(gap); }
+  const syms = [...new Set(assets.filter(a => /^[A-Z]{1,5}$/.test(a.symbol) && ['NASDAQ', 'NYSE', 'ARCA', 'AMEX', 'BATS'].includes(a.exchange)).map(a => a.symbol))];
+  progress?.(`history: ${syms.length} symbols, ${sessions.length} sessions since ${from} (${st.done.length} already done)`);
+  // 2) daily bars for all of them, kept only for symbols that are ever liquid enough (typed arrays by session index)
+  const D = new Map();
   for (let i = 0; i < syms.length; i += 100) {
-    let token = '';
+    if (shouldStop()) { save(HF, st); return { paused: true, sessions: st.done.length }; }
+    const part = syms.slice(i, i + 100), raw = {}; let token = '';
     do {
-      const qs = new URLSearchParams({ symbols: syms.slice(i, i + 100).join(','), timeframe: '1Day', start: all[0], end: use.at(-1), feed: 'sip', limit: '10000', adjustment: 'split' }); if (token) qs.set('page_token', token);
-      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(350);
-      for (const [s, arr] of Object.entries(j.bars || {})) (daily[s] ||= []).push(...arr.map(b => ({ d: b.t.slice(0, 10), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })));
-      token = j.next_page_token || '';
+      const qs = new URLSearchParams({ symbols: part.join(','), timeframe: '1Day', start: warm, end: cal.at(-1), feed: 'sip', limit: '10000', adjustment: 'split' }); if (token) qs.set('page_token', token);
+      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
+      for (const [s, arr] of Object.entries(j.bars || {})) (raw[s] ||= []).push(...arr); token = j.next_page_token || '';
     } while (token);
-  }
-  const first = {};   // first 5-min bar per day per symbol (IEX, same feed as live RVOL)
-  for (const d of all) {
-    for (let i = 0; i < syms.length; i += 100) {
-      const qs = new URLSearchParams({ symbols: syms.slice(i, i + 100).join(','), timeframe: '5Min', start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 575)).toISOString(), feed: 'iex', limit: '10000' });
-      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(350);
-      for (const [s, arr] of Object.entries(j.bars || {})) if (arr[0]) (first[s] ||= {})[d] = arr[0];
+    for (const [s, arr] of Object.entries(raw)) {
+      if (arr.filter(b => b.v >= 1e6).length < 10 || Math.max(...arr.map(b => b.c)) < 5) continue;
+      const o = new Float32Array(N).fill(NaN), h = o.slice(), l = o.slice(), c = o.slice(), v = o.slice();
+      for (const b of arr) { const k = di.get(b.t.slice(0, 10)); if (k === undefined) continue; o[k] = b.o; h[k] = b.h; l[k] = b.l; c[k] = b.c; v[k] = b.v; }
+      D.set(s, { o, h, l, c, v });
     }
   }
-  const rows = [];
-  for (const d of use) {
-    const idx = all.indexOf(d), prior = all.slice(Math.max(0, idx - 14), idx), spyB = first.SPY?.[d], spyDir = spyB ? (spyB.c > spyB.o ? 'long' : spyB.c < spyB.o ? 'short' : null) : null, cands = [];
-    for (const s of core) {
-      const dd = (daily[s] || []).filter(x => x.d < d).slice(-15), fb = first[s]?.[d]; if (dd.length < 15 || !fb) continue;
-      const last14 = dd.slice(-14), avgVol = last14.reduce((a, b) => a + b.v, 0) / 14, prevClose = dd.at(-1).c;
-      const tr = dd.slice(1).map((b, i) => Math.max(b.h - b.l, Math.abs(b.h - dd[i].c), Math.abs(b.l - dd[i].c))), atr = tr.reduce((a, b) => a + b, 0) / tr.length;
-      if (prevClose < 5 || avgVol < 1e6 || atr <= 0.5) continue;
-      const ov = prior.map(p => first[s]?.[p]?.v).filter(Boolean); if (ov.length < 10) continue;
-      const rvol = fb.v / (ov.reduce((a, b) => a + b, 0) / ov.length), dir = fb.c > fb.o ? 'long' : fb.c < fb.o ? 'short' : null;
+  progress?.(`history: ${D.size} symbols were liquid at some point; replaying sessions`);
+  // 3) sessions in order (the 14-session opening-volume window needs order)
+  const done = new Set(st.done); let n = 0;
+  for (const d of cal) {
+    if (d < warm || (done.has(d) && d >= from) || (d < from && st.done.length)) continue;   // on resume the volume window is restored from the saved state
+    if (shouldStop()) { save(HF, st); return { paused: true, sessions: st.done.length }; }
+    const k = di.get(d), elig = [];
+    for (const [s, x] of D) {
+      if (k < 15) break;
+      let ok = 0, vs = 0, trs = 0; for (let j = k - 14; j < k; j++) if (!isNaN(x.c[j])) { ok++; vs += x.v[j]; trs += Math.max(x.h[j] - x.l[j], Math.abs(x.h[j] - x.c[j - 1] || 0), Math.abs(x.l[j] - x.c[j - 1] || 0)); }
+      const prev = x.c[k - 1]; if (ok < 13 || isNaN(prev) || isNaN(x.o[k])) continue;
+      const avgVol = vs / ok, atr = trs / ok; if (prev < 5 || avgVol < 1e6 || atr <= 0.5) continue;
+      elig.push({ s, prev, atr });
+    }
+    const first = {}; const ask = [...elig.map(e => e.s), 'SPY'];
+    for (let i = 0; i < ask.length; i += 100) {
+      const qs = new URLSearchParams({ symbols: ask.slice(i, i + 100).join(','), timeframe: '5Min', start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 575)).toISOString(), feed: 'sip', limit: '10000' });
+      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
+      for (const [s, arr] of Object.entries(j.bars || {})) if (arr[0]) first[s] = arr[0];
+    }
+    const spyB = first.SPY, spyDir = spyB ? (spyB.c > spyB.o ? 'long' : spyB.c < spyB.o ? 'short' : null) : null, cands = [];
+    for (const e of elig) {
+      const fb = first[e.s], win = st.win[e.s] || []; if (fb) st.win[e.s] = [...win, fb.v].slice(-14); else continue;
+      if (win.length < 10 || d < from) continue;
+      const rvol = fb.v / (win.reduce((a, b) => a + b, 0) / win.length), dir = fb.c > fb.o ? 'long' : fb.c < fb.o ? 'short' : null;
       if (!dir || rvol < 1) continue;
-      cands.push({ date: d, sym: s, dir, rvol: Math.round(rvol * 100) / 100, gapPct: Math.round((fb.o / prevClose - 1) * 1000) / 10, atr, orHigh: fb.h, orLow: fb.l, open: fb.o, spyDir, cat: 'none', news: false, boot: true });
+      cands.push({ date: d, sym: e.s, dir, rvol: Math.round(rvol * 100) / 100, gapPct: Math.round((fb.o / e.prev - 1) * 1000) / 10, atr: e.atr, orHigh: fb.h, orLow: fb.l, open: fb.o, spyDir, cat: 'none', news: false, tone: 'none', intraday: [], hist: true });
     }
-    cands.sort((a, b) => b.rvol - a.rvol); const top = cands.slice(0, 15);
-    if (top.length) {   // news in the 18 h before the open, for the top candidates
-      try {
-        const j = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: top.map(c => c.sym).join(','), start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 570)).toISOString(), limit: '50' })}`); await pause(350);
-        for (const c of top) { const n = (j.news || []).filter(x => (x.symbols || []).includes(c.sym)); if (n.length) { c.news = true; c.cat = catOf(n.map(x => x.headline).join(' '), true); c.tone = RD.toneOf(n.map(x => x.headline)); } }
-        const k = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: top.map(c => c.sym).join(','), start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), limit: '50', sort: 'asc' })}`); await pause(350);
-        for (const x of k.news || []) for (const c of top) if ((x.symbols || []).includes(c.sym)) (c.intraday ||= []).push({ m: Math.round((Date.parse(x.created_at) - E.etMs(d, 570)) / 60e3), tone: RD.tone(x.headline), headline: String(x.headline).slice(0, 140) });
-      } catch {}
+    if (d >= from) {
+      cands.sort((a, b) => b.rvol - a.rvol); const top = cands.slice(0, PER_DAY);
+      if (top.length) {
+        const list = top.map(c => c.sym).join(',');
+        try {   // pre-open news (18 h before the bell) -> type + tone
+          const j = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: list, start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 570)).toISOString(), limit: '50' })}`); await pause(gap);
+          for (const c of top) { const hs = (j.news || []).filter(x => (x.symbols || []).includes(c.sym)).map(x => x.headline); if (hs.length) { c.news = true; c.cat = catOf(hs.join(' '), true); c.tone = RD.toneOf(hs); } }
+          let token = '', pages = 0;   // mid-day news (09:30-16:00), the part Elis must learn to react to
+          do {
+            const q = new URLSearchParams({ symbols: list, start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), limit: '50', sort: 'asc' }); if (token) q.set('page_token', token);
+            const k2 = await E.api(E.DATA, `/v1beta1/news?${q}`); await pause(gap);
+            for (const x of k2.news || []) for (const c of top) if ((x.symbols || []).includes(c.sym)) c.intraday.push({ m: Math.round((Date.parse(x.created_at) - E.etMs(d, 570)) / 60e3), tone: RD.tone(x.headline), headline: String(x.headline).slice(0, 140) });
+            token = k2.next_page_token || ''; pages++;
+          } while (token && pages < 4);
+        } catch (e) { progress?.(`news ${d}: ${e.message}`); }
+        await barsForDay(d, [...top.map(c => c.sym), 'SPY']);   // the real 1-min bars the replay grades against
+        fs.appendFileSync(F.journal, top.map(c => JSON.stringify(c)).join('\n') + '\n');
+      }
+      st.done.push(d); n++;
+      if (n % 10 === 0) save(HF, st);
+      if (n % 60 === 0) progress?.(`history: ${st.done.length}/${sessions.length} sessions replayed (through ${d})`);
     }
-    rows.push(...top);
   }
-  fs.appendFileSync(F.journal, rows.map(r => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : ''));
-  return { sessions: use.length, candidates: rows.length };
+  st.finished = true; st.win = {}; save(HF, st);
+  return { finished: true, sessions: st.done.length, candidates: readJournal().length };
 }
 
 // ---------- the weekly learning run ----------
 let running = false;
-export async function learn({ force = false } = {}) {
+// streaming helpers: one day of bars in memory at a time (two years of minute bars do not fit comfortably)
+function loadDayBars(date) { const raw = load(path.join(BAR_DIR, date + '.json'), {}), memo = new Map(); return (d, sym) => { if (!memo.has(sym)) memo.set(sym, expand(date, raw[sym])); return memo.get(sym); }; }
+const yieldNow = () => new Promise(r => setImmediate(r));
+const zero = () => ({ trades: 0, totalR: 0, wins: 0, winR: 0, lossR: 0 });
+async function streamEval(days, byDayAll, sets) {
+  const out = sets.map(zero);
+  for (const d of days) {
+    const barsOf = loadDayBars(d), one = new Map([[d, byDayAll.get(d)]]);
+    sets.forEach((p, i) => { const e = evaluate(one, barsOf, p), o = out[i], w = Math.round(e.winRate * e.trades); o.trades += e.trades; o.totalR += e.totalR; o.wins += w; o.winR += e.avgWinR * w; o.lossR += e.avgLossR * (e.trades - w); });
+    await yieldNow();
+  }
+  return out.map(o => ({ trades: o.trades, totalR: o.totalR, avgR: o.trades ? o.totalR / o.trades : 0, winRate: o.trades ? o.wins / o.trades : 0, avgWinR: o.wins ? o.winR / o.wins : 0, avgLossR: o.trades - o.wins ? o.lossR / (o.trades - o.wins) : 0 }));
+}
+async function streamWeights(days, byDayAll, p) {
+  const A = newAcc();
+  for (const d of days) { learnWeights(new Map([[d, byDayAll.get(d)]]), loadDayBars(d), p, A); await yieldNow(); }
+  return finishWeights(A);
+}
+export async function learn({ force = false, progress = null } = {}) {
   if (running) return { busy: true };
   running = true;
   try {
@@ -223,23 +285,21 @@ export async function learn({ force = false } = {}) {
     for (const r of J) (byDayAll.get(r.date) || byDayAll.set(r.date, []).get(r.date)).push(r);
     const days = [...byDayAll.keys()].sort();
     if (days.length < 30) return { skipped: `only ${days.length} sessions in the journal; need 30` };
-    const bars = {};
-    for (const d of days) { bars[d] = await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); }
-    const memo = new Map(), barsOf = (d, s) => { const k = d + s; if (!memo.has(k)) memo.set(k, expand(d, bars[d]?.[s])); return memo.get(k); };
-    const cut = Math.floor(days.length * 0.7), trainDays = new Map(days.slice(0, cut).map(d => [d, byDayAll.get(d)])), testDays = new Map(days.slice(cut).map(d => [d, byDayAll.get(d)]));
-    const cur = params(), curTest = evaluate(testDays, barsOf, cur);
-    // 1) weights from TRAIN data, 2) settings one step at a time on TRAIN data
-    const lw0 = learnWeights(trainDays, barsOf, cur); let cand = { ...cur, mult: lw0.mult, emult: lw0.emult };
+    for (const d of days) { if (byDayAll.get(d).every(c => c.hist) && fs.existsSync(path.join(BAR_DIR, d + '.json'))) continue; await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); await yieldNow(); }   // fill only live days' missing bars
+    const cut = Math.floor(days.length * 0.7), train = days.slice(0, cut), test = days.slice(cut);
+    const cur = params(), [curTest] = await streamEval(test, byDayAll, [cur]);
+    // 1) weights from TRAIN only, 2) settings one step at a time on TRAIN only
+    const lw0 = await streamWeights(train, byDayAll, cur); let cand = { ...cur, mult: lw0.mult, emult: lw0.emult };
     for (let pass = 0; pass < 2; pass++) for (const [k, vals] of Object.entries(GRID)) {
       const i = vals.indexOf(cand[k]), opts = [vals[i - 1], cand[k], vals[i + 1]].filter(v => v !== undefined);
-      let bestV = cand[k], bestR = -Infinity;
-      for (const v of opts) { const e = evaluate(trainDays, barsOf, { ...cand, [k]: v }); const sc = e.trades >= 20 ? e.totalR : -Infinity; if (sc > bestR + 1e-9) { bestR = sc; bestV = v; } await pause(0); }
-      cand[k] = bestV;
+      const res = await streamEval(train, byDayAll, opts.map(v => ({ ...cand, [k]: v })));
+      let bestV = cand[k], bestR = -Infinity; res.forEach((e, j) => { const sc = e.trades >= 20 ? e.totalR : -Infinity; if (sc > bestR + 1e-9) { bestR = sc; bestV = opts[j]; } });
+      cand[k] = bestV; progress?.(`tuned ${k} (pass ${pass + 1})`);
     }
-    const newTest = evaluate(testDays, barsOf, cand), allW = learnWeights(new Map(days.map(d => [d, byDayAll.get(d)])), barsOf, cur);
+    const [newTest] = await streamEval(test, byDayAll, [cand]), allW = await streamWeights(days, byDayAll, cur);
     const better = newTest.trades >= 15 && newTest.totalR > curTest.totalR + Math.max(1, Math.abs(curTest.totalR) * 0.1) && newTest.avgR > curTest.avgR;
     const changes = Object.keys(GRID).filter(k => cand[k] !== cur[k]).map(k => `${k} ${cur[k]} -> ${cand[k]}`);
-    const report = { at: new Date().toISOString(), sessions: days.length, trainSessions: cut, testSessions: days.length - cut,
+    const report = { at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
       current: sum(curTest), learned: sum(newTest), adopted: !!better, changes, whatPredictsWins: allW.table, version: P.version + (better ? 1 : 0) };
     if (better) {
       P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);

@@ -273,21 +273,27 @@ function liveDone(t, pnl) {   // teach the learner with every live win and loss
 }
 // learning schedule: bootstrap history once (market closed), then every Saturday ~10:00 ET, or on request
 let learnBusy = false, lastLearnDay = null;
+const marketHours = () => { const n = E.et(), dow = new Date(E.etMs(n.date, 720)).getUTCDay(); return dow >= 1 && dow <= 5 && n.min >= 9 * 60 && n.min < 16 * 60 + 30; };   // study runs until 9:00, before the 9:15 scan
 export async function learnNow(reason = 'on request') {
   if (learnBusy) return 'Elis is already learning.'; learnBusy = true;
   try {
-    const st = L.status();
-    if (st.journalSessions < 30) { await E.tellOut('learning', 'Building history from the last ~120 sessions first (a few minutes).'); const b = await L.bootstrap(CORE, 120); note(`bootstrap: ${b.sessions} sessions, ${b.candidates} candidates`); }
-    const rep = await L.learn(); const line = L.summaryLine(rep);
+    const hs = L.historyState();
+    if (!hs.finished) {
+      await E.tellOut('history study', hs.done?.length ? `Resuming the 2024-to-now replay (${hs.done.length} sessions done).` : 'Replaying every session from Jan 2024 to now, whole market, as if live. About 1.5 hours; it pauses during market hours and resumes after.');
+      const h = await L.history({ from: process.env.ELIS_HISTORY_FROM || '2024-01-02', progress: m => note(m), shouldStop: marketHours });
+      if (h.paused) { await E.tellOut('history study paused', `${h.sessions} sessions done; resumes after 16:30.`); return 'paused'; }
+      await E.tellOut('history study done', `${h.sessions} sessions, ${h.candidates} candidates graded. Learning from them now.`);
+    }
+    const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep);
     await E.tellOut(`learned (${reason})`, line); return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }
 }
 async function learnTick() {
   try {
+    if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
-    const c = await E.api(E.BASE, '/v2/clock'); if (c.is_open || (now.min >= 8 * 60 && now.min < 16 * 60 + 30 && dow >= 1 && dow <= 5)) return;   // never during market hours
-    if (L.status().journalSessions < 30 && !lastLearnDay) { lastLearnDay = 'boot'; return void learnNow('first run'); }
+    if (!L.historyState().finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
   } catch {}
 }
