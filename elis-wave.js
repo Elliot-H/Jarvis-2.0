@@ -8,7 +8,11 @@
 //              Direction = colour of the first 5-min candle (green long, red short, doji skipped).
 //   09:35-11:00 Enter when price breaks the opening-range high (long) / low (short): market order + protective stop
 //              at entry -/+ 10% of the 14-day ATR (the paper's stop). 1% account risk per trade, exposure capped by buying power.
-//   15:55      Flatten (the paper exits at the close; ELIS_WAVE_EXIT=11:00 switches to the Owner's old sell-by-11 style).
+//   Exit (context-driven, Owner 2026-11-23: "3:55 loses the wave unless the stock is winning all day"):
+//              - after +1R the stop moves to break-even, then trails 1R behind the best price;
+//              - 11:00 keep-or-sell: keep only if >= +1R, on the right side of VWAP and the last 30 min still move its way;
+//              - runners: trailing stop, out on a 1-min close back through VWAP; everything flat by 15:55.
+//              ELIS_WAVE_EXIT=HH:MM replaces this with a plain timed exit (the paper exits at the close).
 // Orders carry client_order_id elisw-YYYYMMDD-SYMBOL-*, so the ELIS panel counts them and nothing else is touched.
 import * as E from './elis.js';
 
@@ -20,14 +24,16 @@ export const W = {
   riskPct: num(env.ELIS_WAVE_RISK_PCT, 1),
   stopAtr: num(env.ELIS_WAVE_STOP_ATR, 0.10),
   minPrice: 5, minAvgVol: 1e6, minAtr: 0.5, minRvol: 1, newsBoost: 1.25,
-  scanAt: 9 * 60 + 15, orbEnd: 9 * 60 + 35, entryEnd: hm(env.ELIS_WAVE_ENTRY_END, 11 * 60), exitAt: hm(env.ELIS_WAVE_EXIT, 15 * 60 + 55),
+  scanAt: 9 * 60 + 15, orbEnd: 9 * 60 + 35, entryEnd: hm(env.ELIS_WAVE_ENTRY_END, 11 * 60),
+  decideAt: hm(env.ELIS_WAVE_DECIDE, 11 * 60),            // keep-or-sell check (context exit); ELIS_WAVE_EXIT=HH:MM forces a plain timed exit instead
+  exitAt: hm(env.ELIS_WAVE_EXIT, 15 * 60 + 55), smartExit: !hm(env.ELIS_WAVE_EXIT, 0), keepMinR: num(env.ELIS_WAVE_KEEP_R, 1), trailR: num(env.ELIS_WAVE_TRAIL_R, 1),
   allowShort: !/^(0|false)$/i.test(String(env.ELIS_WAVE_SHORT || '').trim())
 };
 // Liquid core: large caps that are often "in play" (earnings, news). Screeners and news add the day's movers on top.
 export const CORE = 'AAPL MSFT NVDA AMZN GOOGL META TSLA AMD AVGO NFLX ORCL CRM ADBE INTC MU QCOM TXN AMAT LRCX KLAC MRVL ARM SMCI PLTR SNOW CRWD PANW NET DDOG ZS SHOP UBER LYFT ABNB DASH COIN HOOD SQ PYPL SOFI AFRM RIVN LCID NIO F GM BA DAL UAL AAL CCL RCL NCLH DIS WBD PARA ROKU SPOT PINS SNAP RBLX U TTD JPM BAC C WFC GS MS SCHW XOM CVX OXY SLB HAL COP DVN MRNA PFE BNTX JNJ LLY ABBV MRK BMY GILD AMGN REGN VRTX BIIB CVS UNH HUM WMT TGT COST HD LOW NKE SBUX MCD CMG LULU DKNG PENN MARA RIOT MSTR CLSK BABA JD PDD BIDU SE TSM ASML DELL HPQ WDC STX ON MCHP NXPI ENPH FSLR RUN PLUG CHPT GME AMC'.split(' ');
 const CATALYST = /\b(fda|approv|clearance|phase|trial|earnings|beats?|revenue|guidance|raises?|upgrade|downgrade|contract|award|partnership|acqui|merger|buyout|ipo|launch|record|patent|settle|lawsuit|sec |investigat)/i;
 
-const S = { day: null, universe: null, info: {}, picks: [], trades: {}, flattened: false, scanned: false, picked: false, lastErr: null, log: [] };
+const S = { day: null, lastMinute: -1, universe: null, info: {}, picks: [], trades: {}, flattened: false, scanned: false, picked: false, lastErr: null, log: [] };
 const note = m => { S.log.unshift(`${new Date().toISOString().slice(11, 16)}Z ${m}`); S.log.length = Math.min(S.log.length, 30); E.noteOut('wave: ' + m); };
 const tag = (date, sym) => `elisw-${date.replace(/-/g, '')}-${sym}`;
 const chunk = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
@@ -124,10 +130,62 @@ async function manage() {
   for (const [sym, t] of Object.entries(S.trades)) {
     if (t.sentExit) continue;
     const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
-    if (+o.filled_qty > 0 && !t.sentFill) { t.sentFill = true; t.entry = +o.filled_avg_price; note(`${sym} filled ${o.filled_qty} @ ${o.filled_avg_price}`); }
+    if (+o.filled_qty > 0 && !t.sentFill) { t.sentFill = true; t.entry = +o.filled_avg_price; t.r = Math.abs(t.entry - t.stop) || 0.01; t.best = t.entry; t.legId = (o.legs || []).find(l => l.type === 'stop')?.id; note(`${sym} filled ${o.filled_qty} @ ${o.filled_avg_price}`); }
     const ex = (o.legs || []).find(l => l.status === 'filled');
-    if (ex) { t.sentExit = true; const pnl = (t.dir === 'long' ? 1 : -1) * (+ex.filled_avg_price - +o.filled_avg_price) * +ex.filled_qty; await E.tellOut(`wave STOP ${sym}`, `out @ ${ex.filled_avg_price}, ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`); }
+    if (ex) { t.sentExit = true; const pnl = (t.dir === 'long' ? 1 : -1) * (+ex.filled_avg_price - +o.filled_avg_price) * +ex.filled_qty; await E.tellOut(`wave ${pnl > 0 ? "TRAIL STOP (profit)" : "STOP"} ${sym}`, `out @ ${ex.filled_avg_price}, ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`); }
     if (['canceled', 'expired', 'rejected'].includes(o.status) && +o.filled_qty === 0) { t.sentExit = true; note(`${sym} entry ${o.status}`); }
+  }
+}
+// ---- context exit: trailing stop, 11:00 keep-or-sell, VWAP exit for runners
+export function trailStop(t, px, w = W) {   // returns a better stop or null
+  const long = t.dir === 'long';
+  t.best = long ? Math.max(t.best, px) : Math.min(t.best, px);
+  const gainR = (long ? t.best - t.entry : t.entry - t.best) / t.r;
+  if (gainR < w.trailR) return null;
+  const want = Math.round((long ? Math.max(t.entry, t.best - w.trailR * t.r) : Math.min(t.entry, t.best + w.trailR * t.r)) * 100) / 100;
+  return (long ? want > t.stop + 0.009 : want < t.stop - 0.009) ? want : null;
+}
+export function vwapOf(bars) { let pv = 0, v = 0; for (const b of bars) { pv += (b.h + b.l + b.c) / 3 * b.v; v += b.v; } return v ? pv / v : null; }
+export function keepAtDecision(t, bars, w = W) {   // bars = today's 1-min bars up to now
+  if (!bars.length) return { keep: false, why: 'no bars' };
+  const px = bars.at(-1).c, long = t.dir === 'long', vw = vwapOf(bars), gainR = (long ? px - t.entry : t.entry - px) / t.r;
+  const ago = bars.at(-31)?.c ?? bars[0].c, momentum = long ? px > ago : px < ago, sideOk = vw != null && (long ? px > vw : px < vw);
+  const keep = gainR >= w.keepMinR && sideOk && momentum;
+  return { keep, why: `${gainR >= 0 ? '+' : ''}${gainR.toFixed(1)}R, ${sideOk ? 'right side of' : 'wrong side of'} VWAP ${vw?.toFixed(2)}, last 30 min ${momentum ? 'with' : 'against'} it` };
+}
+async function closeOne(date, sym, t, reason) {
+  const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
+  for (const x of [o, ...(o.legs || [])]) if (['new', 'accepted', 'held', 'pending_new', 'partially_filled'].includes(x.status)) await E.api(E.BASE, `/v2/orders/${x.id}`, { method: 'DELETE' }).catch(() => {});
+  let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
+  t.sentExit = true;
+  if (!pos) return;
+  await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, qty: String(Math.abs(+pos.qty)), side: +pos.qty > 0 ? 'sell' : 'buy', type: 'market', time_in_force: 'day', client_order_id: `${tag(date, sym)}-flat-${Date.now().toString(36)}` }) });
+  await E.tellOut(`wave SOLD ${sym}`, `${reason} · ${+pos.unrealized_pl >= 0 ? '+' : ''}$${(+pos.unrealized_pl).toFixed(2)}`);
+}
+async function contextExit(date, now) {
+  const live = Object.entries(S.trades).filter(([, t]) => t.sentFill && !t.sentExit); if (!live.length) return;
+  const j = await E.api(E.DATA, `/v2/stocks/trades/latest?${q({ symbols: live.map(([s]) => s).join(','), feed: 'iex' })}`);
+  for (const [sym, t] of live) {
+    const px = j.trades?.[sym]?.p; if (!px) continue;
+    const ns = trailStop(t, px);
+    if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
+      try { await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
+      catch (e) { note(`${sym}: stop amend failed ${e.message}`); }
+    }
+  }
+  if (!W.smartExit || now.min < W.decideAt || now.min === S.lastMinute) return;
+  S.lastMinute = now.min;
+  const bars = await multiBars(live.map(([s]) => s), '1Min', E.etMs(date, 570), Date.now(), 'iex');
+  for (const [sym, t] of live) {
+    const b = (bars[sym] || []).filter(x => x.t + 60e3 <= Date.now());
+    if (!t.decided) {
+      t.decided = true; const d = keepAtDecision(t, b);
+      if (d.keep) { t.runner = true; await E.tellOut(`wave HOLDING ${sym}`, `still running at 11:00: ${d.why}. Trailing stop ${t.stop}.`); }
+      else await closeOne(date, sym, t, `11:00 exit: ${d.why}`);
+    } else if (t.runner && b.length) {
+      const vw = vwapOf(b), c = b.at(-1).c;
+      if (vw != null && (t.dir === 'long' ? c < vw : c > vw)) await closeOne(date, sym, t, `closed back through VWAP ${vw.toFixed(2)}`);
+    }
   }
 }
 async function flatten(date) {
@@ -155,7 +213,7 @@ async function tick() {
     const c = await E.api(E.BASE, '/v2/clock'), now = E.et(), date = now.date;
     const tradingDay = c.is_open || (Date.parse(c.next_open) - Date.now() < 4 * 3600e3 && E.et(Date.parse(c.next_open)).date === date);
     if (!tradingDay) return;
-    if (S.day !== date) Object.assign(S, { day: date, info: {}, picks: [], trades: {}, flattened: false, scanned: false, picked: false });
+    if (S.day !== date) Object.assign(S, { day: date, lastMinute: -1, info: {}, picks: [], trades: {}, flattened: false, scanned: false, picked: false });
     if (!S.scanned && now.min >= W.scanAt && now.min < W.entryEnd) await scan(date);
     if (!c.is_open) return;
     const closingSoon = Date.parse(c.next_close) - Date.now() < 5 * 60e3;
@@ -170,6 +228,7 @@ async function tick() {
       }
     } else if (open.length && now.min >= W.entryEnd) { for (const p of open) p.done = true; note('entry window closed; untriggered picks dropped'); }
     await manage();
+    await contextExit(date, now);
     S.lastErr = null;
   } catch (e) {
     if (e.message !== S.lastErr) await E.tellOut('wave error', e.message);
@@ -192,7 +251,7 @@ export function start() {
   return true;
 }
 export function status() {
-  return { running: !!timer, day: S.day, scanned: S.scanned, candidates: Object.keys(S.info).length, picks: S.picks.map(p => ({ symbol: p.sym, dir: p.dir, rvol: p.rvol, gapPct: p.gapPct, breakLevel: p.dir === 'long' ? p.orHigh : p.orLow, triggered: !!S.trades[p.sym], headline: p.headline })), trades: S.trades, lastError: S.lastErr, log: S.log.slice(0, 10), rules: `Stocks in Play 5-min opening range breakout (Zarattini, Barbon & Aziz 2024): top ${W.picks} by opening relative volume (news x${W.newsBoost}), price > $5, avg vol > 1M, ATR > $0.50; enter on the break of the first 5-min high/low until the entry cut-off, stop ${W.stopAtr * 100}% of ATR, ${W.riskPct}% risk each, flat at the exit time.` };
+  return { running: !!timer, day: S.day, scanned: S.scanned, candidates: Object.keys(S.info).length, picks: S.picks.map(p => ({ symbol: p.sym, dir: p.dir, rvol: p.rvol, gapPct: p.gapPct, breakLevel: p.dir === 'long' ? p.orHigh : p.orLow, triggered: !!S.trades[p.sym], headline: p.headline })), trades: S.trades, lastError: S.lastErr, log: S.log.slice(0, 10), rules: `Stocks in Play 5-min opening range breakout (Zarattini, Barbon & Aziz 2024): top ${W.picks} by opening relative volume (news x${W.newsBoost}), price > $5, avg vol > 1M, ATR > $0.50; enter on the break of the first 5-min high/low until the entry cut-off, stop ${W.stopAtr * 100}% of ATR, ${W.riskPct}% risk each. ${W.smartExit ? `Exit: break-even then ${W.trailR}R trailing stop after +${W.trailR}R; 11:00 keep only if >= +${W.keepMinR}R, right side of VWAP and still moving its way; runners out on a close through VWAP; flat 15:55.` : 'Exit at the set time.'}` };
 }
 export const _tick = () => tick();
 export const _state = S;
