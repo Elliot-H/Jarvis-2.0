@@ -146,13 +146,13 @@ async function api(base, path, opts = {}, bulk = false) {
   return j;
 }
 const SIP_DELAY = 16 * 60e3;
-async function fetchBars(startMs, endMs, feed) {
+async function fetchBars(startMs, endMs, feed, bulk = false) {
   if (endMs <= startMs) return [];
   const out = []; let token = '';
   do {
     const q = new URLSearchParams({ timeframe: '1Min', start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString(), feed, limit: '10000', adjustment: 'split' });
     if (token) q.set('page_token', token);
-    const j = await api(DATA, `/v2/stocks/${CFG.symbol}/bars?${q}`);
+    const j = await api(DATA, `/v2/stocks/${CFG.symbol}/bars?${q}`, {}, bulk);
     for (const b of j.bars || []) out.push({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
     token = j.next_page_token || '';
   } while (token);
@@ -306,26 +306,36 @@ export function status() {
 }
 
 // Backtest on Alpaca history (same strategy code). days = trading sessions to test.
+// History test for the QQQ strategy. Works 10 sessions at a time and yields between chunks, so it never freezes the
+// server (the first version held ~400 days of minute bars and ran in one block: Jarvis stopped answering).
 export async function backtest(days = 120, overrides = {}) {
   const cfg = { ...CFG, ...overrides };
   const end = Date.now() - 20 * 60e3, start = end - Math.ceil(days * 1.5 + 5) * 86400e3;
-  const cal = await api(BASE, `/v2/calendar?start=${new Date(start).toISOString().slice(0, 10)}&end=${new Date(end).toISOString().slice(0, 10)}`);
-  const dates = cal.map(c => c.date).slice(-days), all = [];
-  for (let s = start; s < end; s += 20 * 86400e3) all.push(...await fetchBars(s, Math.min(s + 20 * 86400e3, end), 'sip'));
-  return runBacktest(all, dates, cfg);
+  const cal = await api(BASE, `/v2/calendar?start=${new Date(start).toISOString().slice(0, 10)}&end=${new Date(end).toISOString().slice(0, 10)}`, {}, true);
+  const dates = cal.map(c => c.date).filter(d => d < et().date).slice(-days), trades = [];
+  for (let i = 0; i < dates.length; i += 10) {
+    const chunk = dates.slice(i, i + 10), bars = await fetchBars(etMs(chunk[0], 19 * 60, -1), etMs(chunk.at(-1), 16 * 60), 'sip', true);
+    trades.push(...runBacktest(bars, chunk, cfg)._trades);
+    await new Promise(r => setImmediate(r));
+  }
+  return summarize(trades, dates.length, cfg);
 }
 export function runBacktest(all, dates, cfg = CFG) {
   const trades = [];
   for (const d of dates) {
-    const w = all.filter(b => b.t >= etMs(d, 19 * 60, -1) && b.t < etMs(d, 16 * 60));
-    const lv = sessionLevels(w, d), rth = w.filter(b => b.t >= etMs(d, 570));
+    const a = etMs(d, 19 * 60, -1), z = etMs(d, 16 * 60), o = etMs(d, 570);   // once per day, not per bar
+    const w = all.filter(b => b.t >= a && b.t < z);
+    const lv = sessionLevels(w, d), rth = w.filter(b => b.t >= o);
     if (!Object.keys(lv).length || !rth.length) continue;
     const s = findSignal(rth, lv, cfg); if (!s) continue;
     const r = simulate(s, rth, cfg); if (r) trades.push({ date: d, ...r });
   }
+  return summarize(trades, dates.length, cfg);
+}
+function summarize(trades, sessions, cfg) {
   const R = trades.map(t => t.r), wins = R.filter(x => x > 0), loss = R.filter(x => x < 0);
   let eq = 1, peak = 1, dd = 0; for (const r of R) { eq *= 1 + r * cfg.riskPct / 100; peak = Math.max(peak, eq); dd = Math.min(dd, eq / peak - 1); }
-  return { sessions: dates.length, trades: trades.length, winRatePct: trades.length ? Math.round(wins.length / trades.length * 1000) / 10 : 0, totalR: Math.round(R.reduce((a, b) => a + b, 0) * 100) / 100, profitFactor: loss.length ? Math.round(wins.reduce((a, b) => a + b, 0) / -loss.reduce((a, b) => a + b, 0) * 100) / 100 : null, returnPct: Math.round((eq - 1) * 1000) / 10, maxDrawdownPct: Math.round(dd * 1000) / 10, last: trades.slice(-10) };
+  return { _trades: trades, sessions, trades: trades.length, winRatePct: trades.length ? Math.round(wins.length / trades.length * 1000) / 10 : 0, totalR: Math.round(R.reduce((a, b) => a + b, 0) * 100) / 100, profitFactor: loss.length ? Math.round(wins.reduce((a, b) => a + b, 0) / -loss.reduce((a, b) => a + b, 0) * 100) / 100 : null, returnPct: Math.round((eq - 1) * 1000) / 10, maxDrawdownPct: Math.round(dd * 1000) / 10, last: trades.slice(-10) };
 }
 
 // ---------------- HUD panel: P/L graph + today / lifetime numbers ----------------
