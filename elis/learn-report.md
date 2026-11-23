@@ -1,6 +1,6 @@
 # Elis learning report
 
-2026-11-23T20:12:02.351Z
+2026-11-23T22:19:22.929Z
 
 Kept current settings (444 sessions, tested on the last 134 it did not learn from).
 Unseen days: win rate 40% -> 36%, avg -0.28R -> -0.38R, avg win 1.29R -> 1.09R.
@@ -15,6 +15,30 @@ Honest check, only the 134 sessions the learner never saw (2025-03-28 to 2025-10
 BEFORE: $3,000 -> $2,097 (-30.1%), max drawdown 35.1%, 283 trades, 40% wins, avg win $20 / avg loss $19, 6/8 red months
 AFTER: $3,000 -> $2,299 (-23.4%), max drawdown 26.1%, 69 trades, 36% wins, avg win $27 / avg loss $31, 7/8 red months
 
+## Pivot study
+
+481244 moments
+
+Warning signs before drops:
+DROP next 30 min: fear-calm + down-strong -> 33% on unseen days (normal 9%, 4166 cases; 31% in training, 10034 cases)
+DROP next 30 min: down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)
+DROP next 30 min: no-recent-news + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)
+DROP next 30 min: none/none + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)
+DROP next 30 min: buzz-unknown + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)
+DROP next 30 min: down-strong + mkt-flat -> 34% on unseen days (normal 9%, 3022 cases; 32% in training, 7311 cases)
+DROP next 30 min: no-indecision + down-strong -> 32% on unseen days (normal 9%, 4625 cases; 31% in training, 10729 cases)
+DROP next 30 min: up-strong -> 32% on unseen days (normal 9%, 5038 cases; 33% in training, 11062 cases)
+
+Signs before rises:
+RISE next 30 min: no-indecision + up-strong -> 32% on unseen days (normal 9%, 4804 cases; 32% in training, 10552 cases)
+RISE next 30 min: up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)
+RISE next 30 min: no-recent-news + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)
+RISE next 30 min: none/none + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)
+RISE next 30 min: buzz-unknown + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)
+RISE next 30 min: no-indecision + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2289 cases; 33% in training, 4977 cases)
+RISE next 30 min: vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)
+RISE next 30 min: no-recent-news + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)
+
 ## Experiments
 
 Experiments on the 134 unseen sessions (current: 283 trades, 40% wins, avg -0.28R, total -80.2R):
@@ -23,6 +47,9 @@ Experiments on the 134 unseen sessions (current: 283 trades, 40% wins, avg -0.28
 - study rules, top 3, entries all day: 307 trades, 7% wins, avg -0.51R, total -157R
 - study rules + sell on bad news, top 3: 294 trades, 8% wins, avg -0.47R, total -138.6R
 - Elis exits, but 10% ATR stop: 283 trades, 27% wins, avg -0.94R, total -264.6R
+- Elis + sell on pivot warning >= 45%: 283 trades, 40% wins, avg -0.28R, total -80.2R
+- Elis + sell on pivot warning >= 55%: 283 trades, 40% wins, avg -0.28R, total -80.2R
+- Elis + sell on pivot warning >= 65%: 283 trades, 40% wins, avg -0.28R, total -80.2R
 
 ## QQQ strategy history
 
@@ -509,9 +536,652 @@ No new rule or process beat the current setup on the unseen days, so nothing to 
     "avgWinR": 2.19,
     "avgLossR": 2.1
    }
+  },
+  {
+   "name": "Elis + sell on pivot warning >= 45%",
+   "unseen": {
+    "trades": 283,
+    "totalR": -80.2,
+    "avgR": -0.28,
+    "winRatePct": 40,
+    "avgWinR": 1.29,
+    "avgLossR": 1.33
+   }
+  },
+  {
+   "name": "Elis + sell on pivot warning >= 55%",
+   "unseen": {
+    "trades": 283,
+    "totalR": -80.2,
+    "avgR": -0.28,
+    "winRatePct": 40,
+    "avgWinR": 1.29,
+    "avgLossR": 1.33
+   }
+  },
+  {
+   "name": "Elis + sell on pivot warning >= 65%",
+   "unseen": {
+    "trades": 283,
+    "totalR": -80.2,
+    "avgR": -0.28,
+    "winRatePct": 40,
+    "avgWinR": 1.29,
+    "avgLossR": 1.33
+   }
   }
  ],
- "at": "2026-11-23T20:11:54.201Z",
+ "pivot": {
+  "samples": 481244,
+  "signals": [
+   {
+    "dir": "down",
+    "key": "fear+trend",
+    "signs": "fear-calm + down-strong",
+    "train": {
+     "n": 10034,
+     "p": 0.311,
+     "lift": 3.37
+    },
+    "unseen": {
+     "n": 4166,
+     "p": 0.329,
+     "lift": 3.63
+    }
+   },
+   {
+    "dir": "down",
+    "key": "trend",
+    "signs": "down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.308,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.322,
+     "lift": 3.55
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsRecent+trend",
+    "signs": "no-recent-news + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.308,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.322,
+     "lift": 3.55
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsDay+trend",
+    "signs": "none/none + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.308,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.322,
+     "lift": 3.55
+    }
+   },
+   {
+    "dir": "down",
+    "key": "buzz+trend",
+    "signs": "buzz-unknown + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.308,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.322,
+     "lift": 3.55
+    }
+   },
+   {
+    "dir": "down",
+    "key": "trend+market",
+    "signs": "down-strong + mkt-flat",
+    "train": {
+     "n": 7311,
+     "p": 0.32,
+     "lift": 3.46
+    },
+    "unseen": {
+     "n": 3022,
+     "p": 0.341,
+     "lift": 3.75
+    }
+   },
+   {
+    "dir": "down",
+    "key": "indecision+trend",
+    "signs": "no-indecision + down-strong",
+    "train": {
+     "n": 10729,
+     "p": 0.309,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 4625,
+     "p": 0.323,
+     "lift": 3.56
+    }
+   },
+   {
+    "dir": "down",
+    "key": "trend",
+    "signs": "up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.327,
+     "lift": 3.54
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.315,
+     "lift": 3.47
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsRecent+trend",
+    "signs": "no-recent-news + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.327,
+     "lift": 3.54
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.315,
+     "lift": 3.47
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsDay+trend",
+    "signs": "none/none + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.327,
+     "lift": 3.54
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.315,
+     "lift": 3.47
+    }
+   },
+   {
+    "dir": "down",
+    "key": "buzz+trend",
+    "signs": "buzz-unknown + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.327,
+     "lift": 3.54
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.315,
+     "lift": 3.47
+    }
+   },
+   {
+    "dir": "down",
+    "key": "vwap+trend",
+    "signs": "above-vwap-far + up-strong",
+    "train": {
+     "n": 5821,
+     "p": 0.339,
+     "lift": 3.66
+    },
+    "unseen": {
+     "n": 2581,
+     "p": 0.341,
+     "lift": 3.76
+    }
+   },
+   {
+    "dir": "down",
+    "key": "indecision+trend",
+    "signs": "no-indecision + up-strong",
+    "train": {
+     "n": 10552,
+     "p": 0.327,
+     "lift": 3.54
+    },
+    "unseen": {
+     "n": 4804,
+     "p": 0.315,
+     "lift": 3.47
+    }
+   },
+   {
+    "dir": "up",
+    "key": "indecision+trend",
+    "signs": "no-indecision + up-strong",
+    "train": {
+     "n": 10552,
+     "p": 0.315,
+     "lift": 3.56
+    },
+    "unseen": {
+     "n": 4804,
+     "p": 0.315,
+     "lift": 3.44
+    }
+   },
+   {
+    "dir": "up",
+    "key": "trend",
+    "signs": "up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.317,
+     "lift": 3.58
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.313,
+     "lift": 3.42
+    }
+   },
+   {
+    "dir": "up",
+    "key": "newsRecent+trend",
+    "signs": "no-recent-news + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.317,
+     "lift": 3.58
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.313,
+     "lift": 3.42
+    }
+   },
+   {
+    "dir": "up",
+    "key": "newsDay+trend",
+    "signs": "none/none + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.317,
+     "lift": 3.58
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.313,
+     "lift": 3.42
+    }
+   },
+   {
+    "dir": "up",
+    "key": "buzz+trend",
+    "signs": "buzz-unknown + up-strong",
+    "train": {
+     "n": 11062,
+     "p": 0.317,
+     "lift": 3.58
+    },
+    "unseen": {
+     "n": 5038,
+     "p": 0.313,
+     "lift": 3.42
+    }
+   },
+   {
+    "dir": "up",
+    "key": "indecision+vol+trend",
+    "signs": "no-indecision + vol-fading + up-strong",
+    "train": {
+     "n": 4977,
+     "p": 0.325,
+     "lift": 3.67
+    },
+    "unseen": {
+     "n": 2289,
+     "p": 0.344,
+     "lift": 3.76
+    }
+   },
+   {
+    "dir": "up",
+    "key": "vol+trend",
+    "signs": "vol-fading + up-strong",
+    "train": {
+     "n": 5311,
+     "p": 0.325,
+     "lift": 3.67
+    },
+    "unseen": {
+     "n": 2438,
+     "p": 0.34,
+     "lift": 3.71
+    }
+   },
+   {
+    "dir": "up",
+    "key": "newsRecent+vol+trend",
+    "signs": "no-recent-news + vol-fading + up-strong",
+    "train": {
+     "n": 5311,
+     "p": 0.325,
+     "lift": 3.67
+    },
+    "unseen": {
+     "n": 2438,
+     "p": 0.34,
+     "lift": 3.71
+    }
+   },
+   {
+    "dir": "down",
+    "key": "fear+trend",
+    "signs": "fear-calm + up-strong",
+    "train": {
+     "n": 9690,
+     "p": 0.33,
+     "lift": 3.57
+    },
+    "unseen": {
+     "n": 4373,
+     "p": 0.31,
+     "lift": 3.42
+    }
+   },
+   {
+    "dir": "up",
+    "key": "fear+trend",
+    "signs": "fear-calm + up-strong",
+    "train": {
+     "n": 9690,
+     "p": 0.315,
+     "lift": 3.56
+    },
+    "unseen": {
+     "n": 4373,
+     "p": 0.312,
+     "lift": 3.41
+    }
+   },
+   {
+    "dir": "up",
+    "key": "trend",
+    "signs": "down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.3,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.308,
+     "lift": 3.36
+    }
+   },
+   {
+    "dir": "up",
+    "key": "newsRecent+trend",
+    "signs": "no-recent-news + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.3,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.308,
+     "lift": 3.36
+    }
+   },
+   {
+    "dir": "up",
+    "key": "newsDay+trend",
+    "signs": "none/none + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.3,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.308,
+     "lift": 3.36
+    }
+   },
+   {
+    "dir": "up",
+    "key": "buzz+trend",
+    "signs": "buzz-unknown + down-strong",
+    "train": {
+     "n": 11241,
+     "p": 0.3,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 4831,
+     "p": 0.308,
+     "lift": 3.36
+    }
+   },
+   {
+    "dir": "up",
+    "key": "indecision+trend",
+    "signs": "no-indecision + down-strong",
+    "train": {
+     "n": 10729,
+     "p": 0.3,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 4625,
+     "p": 0.307,
+     "lift": 3.35
+    }
+   },
+   {
+    "dir": "down",
+    "key": "sector+trend",
+    "signs": "against-sector + down-strong",
+    "train": {
+     "n": 4296,
+     "p": 0.299,
+     "lift": 3.23
+    },
+    "unseen": {
+     "n": 1904,
+     "p": 0.338,
+     "lift": 3.73
+    }
+   },
+   {
+    "dir": "down",
+    "key": "trend+market",
+    "signs": "up-strong + mkt-flat",
+    "train": {
+     "n": 7544,
+     "p": 0.333,
+     "lift": 3.6
+    },
+    "unseen": {
+     "n": 3247,
+     "p": 0.315,
+     "lift": 3.48
+    }
+   },
+   {
+    "dir": "down",
+    "key": "vol+trend",
+    "signs": "vol-fading + down-strong",
+    "train": {
+     "n": 5728,
+     "p": 0.314,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 2471,
+     "p": 0.327,
+     "lift": 3.6
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsRecent+vol+trend",
+    "signs": "no-recent-news + vol-fading + down-strong",
+    "train": {
+     "n": 5728,
+     "p": 0.314,
+     "lift": 3.39
+    },
+    "unseen": {
+     "n": 2471,
+     "p": 0.327,
+     "lift": 3.6
+    }
+   },
+   {
+    "dir": "down",
+    "key": "indecision+vol+trend",
+    "signs": "no-indecision + vol-fading + down-strong",
+    "train": {
+     "n": 5394,
+     "p": 0.316,
+     "lift": 3.42
+    },
+    "unseen": {
+     "n": 2345,
+     "p": 0.326,
+     "lift": 3.6
+    }
+   },
+   {
+    "dir": "up",
+    "key": "trend+market",
+    "signs": "up-strong + mkt-flat",
+    "train": {
+     "n": 7544,
+     "p": 0.322,
+     "lift": 3.64
+    },
+    "unseen": {
+     "n": 3247,
+     "p": 0.316,
+     "lift": 3.45
+    }
+   },
+   {
+    "dir": "down",
+    "key": "vwap+trend",
+    "signs": "below-vwap-far + down-strong",
+    "train": {
+     "n": 5764,
+     "p": 0.309,
+     "lift": 3.34
+    },
+    "unseen": {
+     "n": 2445,
+     "p": 0.323,
+     "lift": 3.56
+    }
+   },
+   {
+    "dir": "up",
+    "key": "fear+trend",
+    "signs": "fear-calm + down-strong",
+    "train": {
+     "n": 10034,
+     "p": 0.297,
+     "lift": 3.35
+    },
+    "unseen": {
+     "n": 4166,
+     "p": 0.304,
+     "lift": 3.32
+    }
+   },
+   {
+    "dir": "down",
+    "key": "vol+trend",
+    "signs": "vol-fading + up-strong",
+    "train": {
+     "n": 5311,
+     "p": 0.333,
+     "lift": 3.6
+    },
+    "unseen": {
+     "n": 2438,
+     "p": 0.318,
+     "lift": 3.51
+    }
+   },
+   {
+    "dir": "down",
+    "key": "newsRecent+vol+trend",
+    "signs": "no-recent-news + vol-fading + up-strong",
+    "train": {
+     "n": 5311,
+     "p": 0.333,
+     "lift": 3.6
+    },
+    "unseen": {
+     "n": 2438,
+     "p": 0.318,
+     "lift": 3.51
+    }
+   },
+   {
+    "dir": "up",
+    "key": "vwap+trend",
+    "signs": "below-vwap-far + down-strong",
+    "train": {
+     "n": 5764,
+     "p": 0.317,
+     "lift": 3.58
+    },
+    "unseen": {
+     "n": 2445,
+     "p": 0.321,
+     "lift": 3.5
+    }
+   },
+   {
+    "dir": "down",
+    "key": "vwap+trend",
+    "signs": "below-vwap + down-strong",
+    "train": {
+     "n": 4327,
+     "p": 0.303,
+     "lift": 3.27
+    },
+    "unseen": {
+     "n": 1875,
+     "p": 0.329,
+     "lift": 3.62
+    }
+   }
+  ],
+  "base": {
+   "up": 0.09155334891235758,
+   "down": 0.09068656343829527
+  },
+  "text": "Warning signs before drops:\nDROP next 30 min: fear-calm + down-strong -> 33% on unseen days (normal 9%, 4166 cases; 31% in training, 10034 cases)\nDROP next 30 min: down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: no-recent-news + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: none/none + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: buzz-unknown + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: down-strong + mkt-flat -> 34% on unseen days (normal 9%, 3022 cases; 32% in training, 7311 cases)\nDROP next 30 min: no-indecision + down-strong -> 32% on unseen days (normal 9%, 4625 cases; 31% in training, 10729 cases)\nDROP next 30 min: up-strong -> 32% on unseen days (normal 9%, 5038 cases; 33% in training, 11062 cases)\n\nSigns before rises:\nRISE next 30 min: no-indecision + up-strong -> 32% on unseen days (normal 9%, 4804 cases; 32% in training, 10552 cases)\nRISE next 30 min: up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: no-recent-news + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: none/none + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: buzz-unknown + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: no-indecision + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2289 cases; 33% in training, 4977 cases)\nRISE next 30 min: vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)\nRISE next 30 min: no-recent-news + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)"
+ },
+ "at": "2026-11-23T22:19:15.091Z",
  "sessions": 444,
  "candidates": 6730,
  "firstDay": "2024-01-02",
