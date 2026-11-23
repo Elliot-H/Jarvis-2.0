@@ -19,6 +19,7 @@ import * as L from './elis-learn.js';
 import * as RD from './elis-read.js';
 import * as C from './elis-context.js';
 import * as PV from './elis-pivot.js';
+import * as JS from './elis-jumps.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -360,12 +361,23 @@ export async function learnNow(reason = 'on request') {
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }
 }
+export async function jumpNow() {   // Owner's big-jump study: once, outside 9:10-9:45, never alongside learning
+  if (learnBusy) return 'busy'; learnBusy = true;
+  try {
+    await E.tellOut('big-jump study', 'Studying every 8%+ up/down day across the market since Jan 2024 vs ordinary days (learn 2024, check 2025). About an hour.');
+    const rep = await JS.run({ progress: m => note(m), shouldStop: marketHours }); if (rep.paused) return 'paused';
+    const txt = JS.text(rep); await E.tellOut('big-jump study', txt);
+    const pub = await L.publish('elis/jump-report.md', `# Elis big-jump study\n\n${txt}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('jump report publish: ' + pub);
+    return txt;
+  } catch (e) { await E.tellOut('big-jump study error', e.message); return e.message; } finally { learnBusy = false; }
+}
 async function learnTick() {
   try {
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
-    if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');   // add market/sector/buzz context to the history and relearn
+    if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');
+    if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();   // after the current learning run   // add market/sector/buzz context to the history and relearn
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
