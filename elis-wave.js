@@ -18,6 +18,7 @@ import * as E from './elis.js';
 import * as L from './elis-learn.js';
 import * as RD from './elis-read.js';
 import * as C from './elis-context.js';
+import * as PV from './elis-pivot.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -26,7 +27,7 @@ export const W = {
   picks: num(env.ELIS_WAVE_PICKS, 3),
   riskPct: num(env.ELIS_WAVE_RISK_PCT, 1),
   stopAtr: num(env.ELIS_WAVE_STOP_ATR, 0.10),
-  minPrice: 5, minAvgVol: 1e6, minAtr: 0.5, minRvol: 1, newsBoost: 1.25, mult: {}, emult: {}, entryGate: 0, newsExit: true, marketExit: 0,
+  minPrice: 5, minAvgVol: 1e6, minAtr: 0.5, minRvol: 1, newsBoost: 1.25, mult: {}, emult: {}, entryGate: 0, newsExit: true, marketExit: 0, pivotExit: 0, pivotTable: null,
   scanAt: 9 * 60 + 15, orbEnd: 9 * 60 + 35, entryEnd: hm(env.ELIS_WAVE_ENTRY_END, 11 * 60),
   decideAt: hm(env.ELIS_WAVE_DECIDE, 11 * 60),            // keep-or-sell check (context exit); ELIS_WAVE_EXIT=HH:MM forces a plain timed exit instead
   exitAt: hm(env.ELIS_WAVE_EXIT, 15 * 60 + 55), smartExit: !hm(env.ELIS_WAVE_EXIT, 0), keepMinR: num(env.ELIS_WAVE_KEEP_R, 1), trailR: num(env.ELIS_WAVE_TRAIL_R, 1),
@@ -60,7 +61,7 @@ const atr14 = d => { const tr = d.slice(1).map((b, i) => Math.max(b.h - b.l, Mat
 
 // ---- pre-open scan: universe + daily stats + 14-day average opening-5-minute volume (IEX, same feed as the live bar)
 async function scan(date) {
-  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit', 'skip', 'exitMode']) if (lp[k] !== undefined) W[k] = lp[k];
+  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit', 'skip', 'exitMode', 'pivotExit', 'pivotTable']) if (lp[k] !== undefined) W[k] = lp[k];
   const syms = new Set(CORE), news = {};
   try { const a = await E.api(E.DATA, '/v1beta1/screener/stocks/most-actives?by=volume&top=100'); for (const x of a.most_actives || []) syms.add(x.symbol); } catch (e) { note('most-actives unavailable: ' + e.message); }
   try { const m = await E.api(E.DATA, '/v1beta1/screener/stocks/movers?top=50'); for (const x of [...(m.gainers || []), ...(m.losers || [])]) syms.add(x.symbol); } catch (e) { note('movers unavailable: ' + e.message); }
@@ -150,7 +151,7 @@ async function enter(date, p, px) {
   if (!long) { const as = await E.api(E.BASE, `/v2/assets/${p.sym}`); if (!as.shortable || !as.easy_to_borrow && as.borrow_status !== 'ETB' || !a.shorting_enabled) { p.done = true; return note(`${p.sym}: not shortable`); } }
   const o = await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: p.sym, qty: String(qty), side: long ? 'buy' : 'sell', type: 'market', time_in_force: 'day', order_class: 'oto', stop_loss: { stop_price: stop.toFixed(2) }, client_order_id: `${tag(date, p.sym)}-${Date.now().toString(36)}` }) });
   let spy0 = null; try { spy0 = (await E.api(E.DATA, `/v2/stocks/trades/latest?${q({ symbols: 'SPY', feed: 'iex' })}`)).trades?.SPY?.p; } catch {}
-  p.done = true; S.trades[p.sym] = { id: o.id, qty, stop, dir: p.dir, sentFill: false, sentExit: false, r: stopDist, read: rd?.text, spy0, at: Date.now(), events: [] };
+  p.done = true; S.trades[p.sym] = { id: o.id, qty, stop, dir: p.dir, atr: p.atr, sentFill: false, sentExit: false, r: stopDist, read: rd?.text, spy0, at: Date.now(), events: [] };
   await E.tellOut(`wave ${long ? 'LONG' : 'SHORT'} ${qty} ${p.sym}`, `broke ${long ? 'above ' + p.orHigh : 'below ' + p.orLow} at ~${px} · stop ${stop} · risk ~$${Math.round(stopDist * qty)}${rd ? '\nChart: ' + rd.text : ''}`);
 }
 async function manage() {
@@ -241,6 +242,19 @@ async function contextExit(date, now) {
       }
     }
   }
+  if (W.pivotExit > 0 && W.pivotTable && now.min % 5 === 0 && now.min !== S.pivotMinute && new Date(Date.now()).getSeconds() >= 5) {   // learned warning signs, every closed 5-min candle
+    S.pivotMinute = now.min; const syms = live.filter(([, t]) => t.atr).map(([s]) => s);
+    if (syms.length) {
+      const b = await multiBars([...syms, 'SPY'], '1Min', E.etMs(date, 570), Date.now(), 'iex'), t0 = E.etMs(date, 570);
+      const spy = RD.to5m((b.SPY || []).filter(x => x.t + 60e3 <= Date.now()), t0), k6 = spy.length - 7, spyTrend = k6 >= 0 ? (spy.at(-1).c > spy[k6].c * 1.0015 ? 'mkt-up' : spy.at(-1).c < spy[k6].c * 0.9985 ? 'mkt-down' : 'mkt-flat') : null;
+      for (const sym of syms) {
+        const t = S.trades[sym]; if (t.sentExit) continue; const bars = (b[sym] || []).filter(x => x.t + 60e3 <= Date.now()), cs = RD.to5m(bars, t0); if (cs.length < 2) continue;
+        let pv = 0, vv = 0; for (const x of bars) { pv += (x.h + x.l + x.c) / 3 * x.v; vv += x.v; }
+        const row = (S.jrows || []).find(c => c.sym === sym), f = PV.pivotFeatures(cs, cs.length - 1, vv ? pv / vv : cs.at(-1).c, t.atr, spyTrend, row), pr = PV.pChance(W.pivotTable, f, t.dir === 'long' ? 'down' : 'up');
+        if (pr >= W.pivotExit) await closeOne(date, sym, t, `pivot warning ${Math.round(pr * 100)}%: ${f.pattern}, ${f.vol}, ${f.trend}, ${f.newsRecent}`);
+      }
+    }
+  }
   if (!W.smartExit || W.exitMode === 'close' || now.min < W.decideAt || now.min === S.lastMinute) return;   // study rules: hold to 15:55
   S.lastMinute = now.min;
   const bars = await multiBars(live.map(([s]) => s), '1Min', E.etMs(date, 570), Date.now(), 'iex');
@@ -285,7 +299,7 @@ async function newsWatch(date) {
     if ((S.seenNews ||= new Set()).has(n.id)) continue; S.seenNews.add(n.id);
     const tn = RD.tone(n.headline), m = Math.round((Date.parse(n.created_at || n.updated_at) - E.etMs(date, 570)) / 60e3);
     for (const sym of n.symbols || []) {
-      const c = (S.jrows || []).find(x => x.sym === sym); if (c) (c.intraday ||= []).push({ m, tone: tn, headline: String(n.headline).slice(0, 140) });
+      const c = (S.jrows || []).find(x => x.sym === sym); if (c) (c.intraday ||= []).push({ m, tone: tn, headline: String(n.headline).slice(0, 140), source: n.source || null, author: n.author || null });
       const t = S.trades[sym], p = S.picks.find(x => x.sym === sym);
       if (t) t.events.push({ m, tone: tn, headline: n.headline });
       if (t && t.sentFill && !t.sentExit && RD.adverse(tn, t.dir)) {
@@ -338,8 +352,9 @@ export async function learnNow(reason = 'on request') {
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
     const exps = L.experimentsText(rep); if (exps) await E.tellOut('experiments', exps);
     let sweepBt = null; try { sweepBt = await E.backtest(Number(process.env.ELIS_SWEEP_BT_DAYS || 400)); delete sweepBt._trades; await E.tellOut('QQQ strategy history', `${sweepBt.sessions} sessions: ${sweepBt.trades} trades, ${sweepBt.winRatePct}% wins, total ${sweepBt.totalR}R, return ${sweepBt.returnPct}% at 1% risk, max drawdown ${sweepBt.maxDrawdownPct}%`); } catch (e) { note('sweep backtest failed: ' + e.message); }
+    if (rep.pivot) await E.tellOut('pivot study', `${rep.pivot.samples.toLocaleString('en-US')} chart moments studied (with news, sector, market and fear context).\n\n${rep.pivot.text}`);
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
-    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Pivot study\n\n${rep.pivot ? rep.pivot.samples + ' moments\n\n' + rep.pivot.text : 'n/a'}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
     return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }

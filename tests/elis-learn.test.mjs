@@ -46,7 +46,7 @@ console.log('replay FDA1', rF?.toFixed(2), 'NON1', rN?.toFixed(2)); assert(rF > 
 
 const rep = await L.learn({ minRuleN: 20 });
 console.log(L.summaryLine(rep)); console.log(L.moneyText(rep)); console.log('PROPOSALS:\n' + L.proposalsText(rep)); console.log(L.experimentsText(rep));
-assert(rep.experiments.length === 5 && rep.experiments.every(x => x.unseen.trades >= 0), 'experiments reported');
+assert(rep.experiments.length === 8 && rep.experiments.every(x => x.unseen.trades >= 0) && rep.pivot && rep.pivot.samples > 0, 'experiments + pivot study reported');
 assert(rep.money.before.start === 3000 && rep.money.after.end > rep.money.before.end && rep.money.unseenAfter.trades > 0, 'money replay before/after from $3,000');
 assert(rep.money.after.monthly.length >= 2 && rep.money.after.maxDrawdownPct >= 0, 'monthly curve + drawdown');
 console.log('weights cat:', JSON.stringify(L.params().mult.cat), 'market:', JSON.stringify(L.params().mult.market));
