@@ -153,7 +153,7 @@ const pause = ms => new Promise(r => setTimeout(r, ms));
 // Alpaca call with retries: rate limits (429), server errors and network blips back off instead of stopping the study
 async function A(base, p) {
   for (let i = 0; ; i++) {
-    try { return await E.api(base, p); }
+    try { return await E.api(base, p, {}, true); }   // bulk lane: paced behind live trading calls
     catch (e) { if (i >= 6 || (e.status && e.status !== 429 && e.status < 500)) throw e; await pause(Math.min(60e3, 2000 * 2 ** i)); }
   }
 }
@@ -193,8 +193,10 @@ const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) =
 // then the top 20 by opening relative volume are graded on real 1-min bars with mid-day news. Resumable; outside market hours.
 // Survivorship: inactive (delisted) symbols are included. Data: Alpaca SIP history (free plan allows SIP older than 15 min) + Alpaca/Benzinga news.
 const HF = path.join(DIR, 'history-state.json'), PER_DAY = 20;
+export const HS = { phase: 'idle', startedAt: null, rate: null };   // live progress for the report page
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
-export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 320 } = {}) {
+export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
+  const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
   const st = historyState(); if (st.finished && st.from === from) return { finished: true, sessions: st.done.length };
   st.from = from; st.done ||= []; st.win ||= {};
   const today = E.et().date, warm = new Date(Date.parse(from) - 45 * 86400e3).toISOString().slice(0, 10);
@@ -204,7 +206,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   const assets = [];
   for (const status of ['active', 'inactive']) { try { assets.push(...(await A(E.BASE, `/v2/assets?status=${status}&asset_class=us_equity`))); } catch {} await pause(gap); }
   const syms = [...new Set(assets.filter(a => /^[A-Z]{1,5}$/.test(a.symbol) && ['NASDAQ', 'NYSE', 'ARCA', 'AMEX', 'BATS'].includes(a.exchange)).map(a => a.symbol))];
-  progress?.(`history: ${syms.length} symbols, ${sessions.length} sessions since ${from} (${st.done.length} already done)`);
+  progress?.(`history: ${syms.length} symbols, ${sessions.length} sessions since ${from} (${st.done.length} already done)`); HS.phase = `daily bars for ${syms.length} symbols`; HS.total = sessions.length;
   // 2) daily bars for all of them, kept only for symbols that are ever liquid enough (typed arrays by session index)
   const D = new Map();
   for (let i = 0; i < syms.length; i += 100) {
@@ -222,12 +224,12 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
       D.set(s, { o, h, l, c, v });
     }
   }
-  progress?.(`history: ${D.size} symbols were liquid at some point; replaying sessions`);
+  progress?.(`history: ${D.size} symbols were liquid at some point; replaying sessions`); HS.phase = 'replaying sessions';
   // 3) sessions in order (the 14-session opening-volume window needs order)
   const done = new Set(st.done); let n = 0;
   for (const d of cal) {
     if (d < warm || (done.has(d) && d >= from) || (d < from && st.done.length)) continue;   // on resume the volume window is restored from the saved state
-    if (shouldStop()) { save(HF, st); return { paused: true, sessions: st.done.length }; }
+    if (shouldStop()) { save(HF, st); HS.phase = 'paused (market hours)'; return { paused: true, sessions: st.done.length }; }
     if (freeMB() < 120) { save(HF, st); return { paused: true, diskLow: true, sessions: st.done.length }; }
     const k = di.get(d), elig = [];
     for (const [s, x] of D) {
@@ -269,12 +271,12 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
         await barsForDay(d, [...top.map(c => c.sym), 'SPY']);   // the real 1-min bars the replay grades against
         fs.appendFileSync(F.journal, top.map(c => JSON.stringify(c)).join('\n') + '\n');
       }
-      st.done.push(d); n++;
+      st.done.push(d); n++; HS.last = d; HS.done = st.done.length; HS.rate = Math.round(n / ((Date.now() - runStart) / 3600e3)); HS.etaH = HS.rate ? Math.round((sessions.length - st.done.length) / HS.rate * 10) / 10 : null;
       if (n % 10 === 0) save(HF, st);
       if (n % 60 === 0) progress?.(`history: ${st.done.length}/${sessions.length} sessions replayed (through ${d})`);
     }
   }
-  st.finished = true; st.win = {}; save(HF, st);
+  st.finished = true; st.win = {}; save(HF, st); HS.phase = 'finished';
   return { finished: true, sessions: st.done.length, candidates: readJournal().length };
 }
 

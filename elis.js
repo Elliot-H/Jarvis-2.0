@@ -120,10 +120,29 @@ function result(s, tin, tout, px, why, slip) {
 }
 
 // ---------------- Alpaca ----------------
-async function api(base, path, opts = {}) {
-  const r = await fetch(base + path, { ...opts, headers: { 'APCA-API-KEY-ID': KEY(), 'APCA-API-SECRET-KEY': SEC(), 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000) });
+// One pacing lane for every Elis call: Alpaca allows ~200 requests/min per account (free data plan), shared with
+// live trading. Live calls (priority) jump the queue; the history study ('bulk') takes whatever is left.
+export const apiStats = { calls: 0, e429: 0, errors: 0, msTotal: 0, since: Date.now(), bulkWaitMs: 0 };
+const BULK_MAX = Number(process.env.ELIS_API_PER_MIN || 170), LIVE_MAX = 195, win = [];   // calls in the last 60 s
+let pausedUntil = 0;
+async function slot(bulk) {
+  for (;;) {
+    const now = Date.now(); while (win.length && win[0] <= now - 60e3) win.shift();
+    const cap = bulk ? BULK_MAX : LIVE_MAX;
+    if (now >= pausedUntil && win.length < cap) { win.push(now); return; }
+    const w = Math.max(pausedUntil - now, win.length ? win[0] + 60e3 - now : 50, 50); if (bulk) apiStats.bulkWaitMs += Math.min(w, 1000);
+    await new Promise(r => setTimeout(r, Math.min(w, 1000)));   // re-check every second so live calls are never stuck behind bulk
+  }
+}
+async function api(base, path, opts = {}, bulk = false) {
+  await slot(bulk);
+  const t0 = Date.now(); apiStats.calls++;
+  let r; try { r = await fetch(base + path, { ...opts, headers: { 'APCA-API-KEY-ID': KEY(), 'APCA-API-SECRET-KEY': SEC(), 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000) }); }
+  catch (e) { apiStats.errors++; throw e; }
+  finally { apiStats.msTotal += Date.now() - t0; }
   const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
-  if (!r.ok) { const e = new Error(`Alpaca ${r.status}: ${j?.message || t}`.slice(0, 300)); e.status = r.status; throw e; }
+  if (r.status === 429) { apiStats.e429++; pausedUntil = Date.now() + 5000; }   // back everything off for 5 s
+  if (!r.ok) { if (r.status !== 429) apiStats.errors++; const e = new Error(`Alpaca ${r.status}: ${j?.message || t}`.slice(0, 300)); e.status = r.status; throw e; }
   return j;
 }
 const SIP_DELAY = 16 * 60e3;
