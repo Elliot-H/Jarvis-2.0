@@ -280,12 +280,16 @@ export async function learnNow(reason = 'on request') {
     const hs = L.historyState();
     if (!hs.finished) {
       await E.tellOut('history study', hs.done?.length ? `Resuming the 2024-to-now replay (${hs.done.length} sessions done).` : 'Replaying every session from Jan 2024 to now, whole market, as if live. About 1.5 hours; it pauses during market hours and resumes after.');
-      const h = await L.history({ from: process.env.ELIS_HISTORY_FROM || '2024-01-02', progress: m => note(m), shouldStop: marketHours });
+      let lastPub = 0; const prog = m => { note(m); if (Date.now() - lastPub > 15 * 60e3 || /replaying|symbols/.test(m)) { lastPub = Date.now(); L.publish('elis/status.md', `${new Date().toISOString()} ${m}\n`).catch(() => {}); } };
+      const h = await L.history({ from: process.env.ELIS_HISTORY_FROM || '2024-01-02', progress: prog, shouldStop: marketHours });
+      L.publish('elis/status.md', `${new Date().toISOString()} history ${h.paused ? 'paused' : 'done'}: ${h.sessions} sessions\n`).catch(() => {});
       if (h.paused) { await E.tellOut('history study paused', h.diskLow ? `${h.sessions} sessions done; stopped because the server disk has under 120 MB free. Learning from what it has.` : `${h.sessions} sessions done; resumes after 16:30.`); if (!h.diskLow) return 'paused'; }
       await E.tellOut('history study done', `${h.sessions} sessions, ${h.candidates} candidates graded. Learning from them now.`);
     }
-    const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep);
-    await E.tellOut(`learned (${reason})`, line); return line;
+    const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep), money = L.moneyText(rep);
+    await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }
 }

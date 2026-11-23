@@ -45,7 +45,9 @@ const rF = L.simulate(bar('FDA1'), rows.find(r => r.date === d0 && r.sym === 'FD
 console.log('replay FDA1', rF?.toFixed(2), 'NON1', rN?.toFixed(2)); assert(rF > 1 && rN < 0, 'replay wins/losses');
 
 const rep = await L.learn();
-console.log(L.summaryLine(rep));
+console.log(L.summaryLine(rep)); console.log(L.moneyText(rep));
+assert(rep.money.before.start === 3000 && rep.money.after.end > rep.money.before.end && rep.money.unseenAfter.trades > 0, 'money replay before/after from $3,000');
+assert(rep.money.after.monthly.length >= 2 && rep.money.after.maxDrawdownPct >= 0, 'monthly curve + drawdown');
 console.log('weights cat:', JSON.stringify(L.params().mult.cat), 'market:', JSON.stringify(L.params().mult.market));
 assert(rep.adopted && rep.learned.avgR > rep.current.avgR, 'adopted only because unseen days improved');
 assert(L.params().mult.cat.fda > 1.1 && L.params().mult.cat.none < 0.95, 'learned: FDA news predicts winners, no-news does not');

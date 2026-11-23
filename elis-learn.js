@@ -234,7 +234,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
       let ok = 0, vs = 0, trs = 0; for (let j = k - 14; j < k; j++) if (!isNaN(x.c[j])) { ok++; vs += x.v[j]; trs += Math.max(x.h[j] - x.l[j], Math.abs(x.h[j] - x.c[j - 1] || 0), Math.abs(x.l[j] - x.c[j - 1] || 0)); }
       const prev = x.c[k - 1]; if (ok < 13 || isNaN(prev) || isNaN(x.o[k])) continue;
       const avgVol = vs / ok, atr = trs / ok; if (prev < 5 || avgVol < 1e6 || atr <= 0.5) continue;
-      elig.push({ s, prev, atr });
+      elig.push({ s, prev, atr, avgVol });
     }
     const first = {}; const ask = [...elig.map(e => e.s), 'SPY'];
     for (let i = 0; i < ask.length; i += 100) {
@@ -248,7 +248,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
       if (win.length < 10 || d < from) continue;
       const rvol = fb.v / (win.reduce((a, b) => a + b, 0) / win.length), dir = fb.c > fb.o ? 'long' : fb.c < fb.o ? 'short' : null;
       if (!dir || rvol < 1) continue;
-      cands.push({ date: d, sym: e.s, dir, rvol: Math.round(rvol * 100) / 100, gapPct: Math.round((fb.o / e.prev - 1) * 1000) / 10, atr: e.atr, orHigh: fb.h, orLow: fb.l, open: fb.o, spyDir, cat: 'none', news: false, tone: 'none', intraday: [], hist: true });
+      cands.push({ date: d, sym: e.s, dir, rvol: Math.round(rvol * 100) / 100, gapPct: Math.round((fb.o / e.prev - 1) * 1000) / 10, atr: e.atr, avgVol: Math.round(e.avgVol), orHigh: fb.h, orLow: fb.l, open: fb.o, spyDir, cat: 'none', news: false, tone: 'none', intraday: [], hist: true });
     }
     if (d >= from) {
       cands.sort((a, b) => b.rvol - a.rvol); const top = cands.slice(0, PER_DAY);
@@ -297,6 +297,43 @@ async function streamWeights(days, byDayAll, p) {
   for (const d of days) { learnWeights(new Map([[d, byDayAll.get(d)]]), loadDayBars(d), p, A); await yieldNow(); }
   return finishWeights(A);
 }
+// ---------- "what would my money have done": compound a starting balance through every replayed day ----------
+// 1% of the account risked per trade, whole shares, leverage a real account of that size gets (2x margin from $2,000; cash, long-only below).
+export async function equityCurve(days, byDayAll, p, { start = 3000, riskPct = 1 } = {}) {
+  let eq = start, peak = start, maxDD = 0, trades = 0, wins = 0, winUsd = 0, lossUsd = 0, best = null, worst = null; const months = {};
+  for (const d of days) {
+    const barsOf = loadDayBars(d), cands = byDayAll.get(d) || [], lev = eq >= 2000 ? 2 : 1;
+    const e = evaluate(new Map([[d, cands]]), barsOf, lev === 1 ? { ...p } : p), dayStart = eq; let pnl = 0;
+    for (const t of e.list) {
+      const c = cands.find(x => x.sym === t.sym); if (!c || (lev === 1 && c.dir === 'short')) continue;
+      const stopDist = Math.max(0.02, c.atr * p.stopAtr), px = c.dir === 'long' ? c.orHigh : c.orLow;
+      const shares = Math.floor(Math.min(dayStart * riskPct / 100 / stopDist, dayStart * lev / Math.max(1, p.picks) / px, c.avgVol ? c.avgVol * 0.01 : Infinity)); if (shares < 1) continue;   // never more than 1% of normal daily volume
+      const usd = t.R * shares * stopDist; pnl += usd; trades++; if (usd > 0) { wins++; winUsd += usd; } else lossUsd -= usd;
+    }
+    eq = Math.max(0, eq + pnl); peak = Math.max(peak, eq); maxDD = Math.max(maxDD, peak ? (peak - eq) / peak : 0);
+    if (!best || pnl > best.usd) best = { day: d, usd: Math.round(pnl) }; if (!worst || pnl < worst.usd) worst = { day: d, usd: Math.round(pnl) };
+    months[d.slice(0, 7)] = Math.round(eq);
+    await yieldNow();
+  }
+  const ms = Object.entries(months), monthly = ms.map(([m, v], i) => ({ m, end: v, pct: Math.round(((v / (i ? ms[i - 1][1] : start)) - 1) * 1000) / 10 }));
+  return { from: days[0], to: days.at(-1), start, end: Math.round(eq), returnPct: Math.round((eq / start - 1) * 1000) / 10, maxDrawdownPct: Math.round(maxDD * 1000) / 10, trades, winRatePct: trades ? Math.round(wins / trades * 100) : 0,
+    avgWinUsd: wins ? Math.round(winUsd / wins) : 0, avgLossUsd: trades - wins ? Math.round(lossUsd / (trades - wins)) : 0, bestDay: best, worstDay: worst,
+    redMonths: monthly.filter(x => x.pct < 0).length, months: monthly.length, worstMonth: monthly.reduce((a, b) => (!a || b.pct < a.pct ? b : a), null), monthly };
+}
+
+// ---------- publish reports to the repo's elis-reports branch (no redeploy; Claude reads it from there) ----------
+export async function publish(file, text) {
+  const tok = process.env.GITHUB_TOKEN; if (!tok) return 'no GITHUB_TOKEN';
+  const repo = process.env.GITHUB_REPO || 'Elliot-H/Jarvis-2.0', B = 'elis-reports';
+  const gh = async (p, o = {}) => { const r = await fetch(`https://api.github.com/repos/${repo}${p}`, { ...o, headers: { Authorization: `Bearer ${tok}`, Accept: 'application/vnd.github+json', 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000) }); const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; } return { ok: r.ok, status: r.status, j }; };
+  try {
+    if ((await gh(`/git/ref/heads/${B}`)).status === 404) { const m = await gh('/git/ref/heads/main'); if (!m.ok) return 'no main ref'; await gh('/git/refs', { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${B}`, sha: m.j.object.sha }) }); }
+    const cur = await gh(`/contents/${file}?ref=${B}`);
+    const r = await gh(`/contents/${file}`, { method: 'PUT', body: JSON.stringify({ message: `elis: ${file}`, branch: B, content: Buffer.from(text).toString('base64'), ...(cur.ok ? { sha: cur.j.sha } : {}) }) });
+    return r.ok ? 'ok' : `github ${r.status}`;
+  } catch (e) { return e.message; }
+}
+
 export async function learn({ force = false, progress = null } = {}) {
   if (running) return { busy: true };
   running = true;
@@ -319,7 +356,10 @@ export async function learn({ force = false, progress = null } = {}) {
     const [newTest] = await streamEval(test, byDayAll, [cand]), allW = await streamWeights(days, byDayAll, cur);
     const better = newTest.trades >= 15 && newTest.totalR > curTest.totalR + Math.max(1, Math.abs(curTest.totalR) * 0.1) && newTest.avgR > curTest.avgR;
     const changes = Object.keys(GRID).filter(k => cand[k] !== cur[k]).map(k => `${k} ${cur[k]} -> ${cand[k]}`);
-    const report = { at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
+    progress?.('money replay: $3,000 from the first session, before vs after');
+    const money = { before: await equityCurve(days, byDayAll, cur), after: await equityCurve(days, byDayAll, cand),
+      unseenBefore: await equityCurve(test, byDayAll, cur), unseenAfter: await equityCurve(test, byDayAll, cand) };
+    const report = { money, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
       current: sum(curTest), learned: sum(newTest), adopted: !!better, changes, whatPredictsWins: allW.table, version: P.version + (better ? 1 : 0) };
     if (better) {
       P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);
@@ -357,6 +397,12 @@ export function summaryLine(rep) {   // phone push text for a learning run
     + `Unseen days: win rate ${c.winRatePct}% -> ${l.winRatePct}%, avg ${c.avgR}R -> ${l.avgR}R, avg win ${c.avgWinR}R -> ${l.avgWinR}R.\n`
     + (rep.changes.length ? `Changes: ${rep.changes.join(', ')}.\n` : '')
     + (best.length ? `Best info: ${best.slice(0, 4).join(', ')}.\n` : '') + (worst.length ? `Weakest: ${worst.slice(0, 4).join(', ')}.` : '');
+}
+export function moneyText(rep) {   // replay caps: 1% risk, whole shares, 2x margin from $2k (cash/long-only below), max 1% of average daily volume per position
+  const m = rep?.money; if (!m) return '';
+  const f = v => '$' + Math.round(v).toLocaleString('en-US'), line = (k, x) => `${k}: ${f(x.start)} -> ${f(x.end)} (${x.returnPct >= 0 ? '+' : ''}${x.returnPct}%), max drawdown ${x.maxDrawdownPct}%, ${x.trades} trades, ${x.winRatePct}% wins, avg win ${f(x.avgWinUsd)} / avg loss ${f(x.avgLossUsd)}, ${x.redMonths}/${x.months} red months`;
+  return `If Elis had started with $3,000 on ${m.before.from} (to ${m.before.to}):\n${line('BEFORE (current settings)', m.before)}\n${line('AFTER (learned settings)', m.after)}\n`
+    + `Honest check, only the ${rep.testSessions} sessions the learner never saw (${m.unseenBefore.from} to ${m.unseenBefore.to}), $3,000 start:\n${line('BEFORE', m.unseenBefore)}\n${line('AFTER', m.unseenAfter)}`;
 }
 export function status() {
   const rep = load(F.report, null), J = readJournal();
