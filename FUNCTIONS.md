@@ -7,7 +7,7 @@ Status: ✅ built · 🔧 next up · 💡 idea
 | # | Function | Status | Notes |
 |---|----------|--------|-------|
 | W1 | Calendar: read jobs, count by colour, add and change appointments | ✅ | Google Calendar (service account). Colour meanings taught by voice. |
-| W2 | Client follow-ups from the calendar | ✅ | Drafted each morning for jobs that ended 3 days ago (title "Name - job"). Sir approves by voice or on /followups (FOLLOW-UPS on the HUD). Sent from the **shop iPhone** by an Apple Shortcut (3x a day), matched to its Contacts by name. Needs the Shortcut set up once. |
+| W2 | Client follow-ups from the calendar | ✅ | Drafted each morning for jobs that ended 3 days ago (title "Name - job"). Sir approves by voice or on /followups (FOLLOW-UPS on the HUD). Sent from the **shop iPhone** by an Apple Shortcut (3x a day), matched to its Contacts by name. Needs the Shortcut set up once. Nov 23: announced by count only ("3 customer follow-ups are ready for your OK, sir..."), never listed aloud; details on /followups. |
 | W3 | Shop check-in: "Headed to the shop?" + today's jobs | ✅ | Shop days Mon-Sat mornings. |
 | W4 | Job log by voice | 💡 | "Log it: black Tahoe, 5% rears, 35 fronts, Mike." Searchable history. |
 | W5 | Missed-call catcher | 💡 | Shop line is an iPhone: apps can't read its call log. Possible via a Shortcut on missed-call notifications only in a limited way; revisit. |

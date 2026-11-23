@@ -1,5 +1,9 @@
 STATUS: done
-TIME: 2026-11-18T23:02:10Z
-REQUEST: Batch "Analyze Uploads" button on the app and site: many photos, screenshots and videos, a question per file plus one overall instruction, one answer per file, also by voice.
+TIME: 2026-11-23T08:26:32Z
+REQUEST: Announce customer follow-ups by count only, not the full list.
 RESULT:
-There is one Analyze Uploads button at the bottom now, the stacked-files icon. Pick several photos, screenshots or videos, or drop them on the web page, remove any you don't want, and add a question per file plus one instruction for all. Every file gets its own labelled answer on the screen; videos are checked across the clip and the sound is transcribed, long clips are capped at three minutes with a warning, and a file that fails is named with the reason while the others still come back. You can also tap "analyze when I say" and later say "analyze these uploads". It is live on the site now; reinstall the new app build to pick several files at once inside the app. The earlier simpler upload button from tonight was folded into this one, and the social and camera buttons are unchanged.
+Jarvis now just says how many follow-ups are ready, like "3 customer follow-ups are ready for your OK, sir. Say send the follow-ups if you're ready."
+No customer names, numbers or job details are read out in the greeting, when you ask about follow-ups, or when he confirms sending.
+The full detail is still on the follow-ups page.
+The rule is locked into the code, his instructions and the handoff notes so it sticks.
+It goes live once the server redeploys; no APK reinstall needed.

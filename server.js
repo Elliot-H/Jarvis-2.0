@@ -3050,17 +3050,24 @@ async function followupTick() {
   } catch (e) { console.warn('follow-ups:', e.message); }
 }
 if (!process.env.JARVIS_SMOKE) setInterval(followupTick, 5 * 60_000);
+const followupCountLine = n => `${n} customer follow-up${n > 1 ? 's are' : ' is'} ready for your OK, sir. Say "send the follow-ups" if you're ready.`;
 function followupNote() {
   const w = followupsWaiting(); if (!w.length || state.followupAnnounced === localClock().day) return '';
   state.followupAnnounced = localClock().day; saveState();
-  return ` ${w.length} customer follow-up${w.length > 1 ? 's are' : ' is'} ready for your OK: ${listJoin(w.map(f => f.customer))}. Say "send the follow-ups", or check them on the follow-ups page.`;
+  // Owner rule (2026-11-23, repeated): say only HOW MANY are ready and ask; never read names, numbers or job details aloud.
+  return ` ${followupCountLine(w.length)}`;   // spoken verbatim in the greeting
 }
 Object.assign(handlers, {
-  followup_list: async () => state.followups.filter(f => f.status !== 'sent' && f.status !== 'skipped').map(f => `${f.id} [${f.status}] ${f.customer}: "${f.text}"`).join('\n') || 'No follow-ups waiting.',
+  followup_list: async () => {
+    const open = state.followups.filter(f => f.status !== 'sent' && f.status !== 'skipped'); if (!open.length) return 'No follow-ups waiting.';
+    const w = followupsWaiting().length;
+    return `SPEAK ONLY THIS: "${w ? followupCountLine(w) : `${open.length} follow-up${open.length > 1 ? 's are' : ' is'} approved and queued for the shop phone, sir.`}" Never read the list below aloud (no names, numbers or job details) unless he asks about one customer by name; the full list is on the follow-ups page.\n`
+      + open.map(f => `${f.id} [${f.status}] ${f.customer}: "${f.text}"`).join('\n');
+  },
   followup_approve: async ({ ids, all }) => {
     const pick = all ? followupsWaiting() : state.followups.filter(f => (ids || []).includes(f.id));
     pick.forEach(f => { f.status = 'approved'; f.approvedAt = Date.now(); }); saveState();
-    return pick.length ? `Approved ${pick.length} (${pick.map(f => f.customer).join(', ')}). The shop iPhone sends them on its next run.` : 'Nothing matched.';
+    return pick.length ? `Approved ${pick.length}. The shop iPhone sends them on its next run. (Confirm with the count only; no names.)` : 'Nothing matched.';
   },
   followup_skip: async ({ ids }) => { const pick = state.followups.filter(f => (ids || []).includes(f.id)); pick.forEach(f => f.status = 'skipped'); saveState(); return `Skipped ${pick.length}.`; },
   followup_add: async ({ customer, text }) => {
