@@ -7,7 +7,7 @@
 //   4. Flat by 15:55 ET, daily report to the phone.
 // Unlike trade.js (which needs the Owner's spoken confirm), Elis places its own orders: the Owner asked for full automation.
 // Guards: paper endpoint unless ELIS_LIVE=1 AND ELIS_LIVE_CONFIRM=I_ACCEPT_REAL_MONEY_RISK; 1% risk; daily loss limit;
-// max-drawdown kill switch; PDT guard; never trades while a non-Elis position in the symbol exists; only touches its own orders.
+// max-drawdown kill switch; never trades while a non-Elis position in the symbol exists; only touches its own orders.
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const clean = v => String(v || '').trim().replace(/^["']|["']$/g, '').trim();
@@ -173,7 +173,7 @@ async function riskOk() {
     const peak = Math.max(eq, ...(h.equity || []).filter(Boolean));
     if (peak > 0 && (peak - eq) / peak * 100 >= CFG.maxDrawdownPct) { S.halted = true; return [false, `MAX DRAWDOWN ${CFG.maxDrawdownPct}% hit (equity ${eq.toFixed(2)}, peak ${peak.toFixed(2)}). Elis is OFF until redeployed or re-armed.`]; }
   } catch (e) { note('portfolio history unavailable: ' + e.message); }
-  if (eq < 25000 && Number(a.daytrade_count || 0) >= 3) return [false, 'PDT guard: 3 day trades in 5 days and equity under $25k'];
+  // No PDT guard: FINRA's pattern-day-trader rule and $25k minimum were replaced by intraday margin standards (SEC approval 2026-04-14, effective 2026-06-04). Alpaca enforces margin itself.
   return [true, '', a];
 }
 
