@@ -332,7 +332,9 @@ export async function summary(force = false) {
   const days = Object.keys(byDay).sort(); let cum = 0;
   const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
   const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;
-  hudCache = { at: Date.now(), v: { mode: mode(), running: !!timer && !S.halted, halted: S.halted, equity: +a.equity, accountToday: Math.round((+a.equity - +a.last_equity) * 100) / 100,
+  let netCash = 0;   // deposits/withdrawals today are not profit
+  try { const acts = await api(BASE, `/v2/account/activities?${new URLSearchParams({ activity_types: 'CSD,CSW,JNLC', date: et().date })}`); for (const x of acts || []) netCash += +x.net_amount || 0; } catch {}
+  hudCache = { at: Date.now(), v: { mode: mode(), running: !!timer && !S.halted, halted: S.halted, equity: +a.equity, accountToday: Math.round((+a.equity - +a.last_equity - netCash) * 100) / 100,
     elisToday: Math.round((byDay[today] || 0) * 100) / 100, elisLifetime: Math.round(cum * 100) / 100, tradeDays: trades, series: series.slice(-90),
     today: S.trade ? `${S.trade.side === 'buy' ? 'LONG' : 'SHORT'} ${S.trade.qty} ${CFG.symbol}` : S.day === et().date ? 'no trade yet' : 'waiting for the open' } };
   return hudCache.v;
