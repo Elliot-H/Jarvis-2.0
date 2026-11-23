@@ -20,6 +20,7 @@ import * as RD from './elis-read.js';
 import * as C from './elis-context.js';
 import * as PV from './elis-pivot.js';
 import * as JS from './elis-jumps.js';
+import * as OOS from './elis-oos.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -371,13 +372,24 @@ export async function jumpNow() {   // Owner's big-jump study: once, outside 9:1
     return txt;
   } catch (e) { await E.tellOut('big-jump study error', e.message); return e.message; } finally { learnBusy = false; }
 }
+export async function oosNow(year = process.env.ELIS_OOS_YEAR || '2023') {   // Owner: test the newest formulas on a year they never saw
+  if (learnBusy) return 'busy'; learnBusy = true;
+  try {
+    await E.tellOut('year test', `Replaying ${year} as if live with the formulas found on 2024-2025 (stocks in play every morning, every 5-min candle). About an hour.`);
+    const r = await OOS.run({ year, progress: m => note(m), shouldStop: marketHours }); if (r.paused) return 'paused';
+    OOS.saveReport(r); const txt = OOS.text(r); await E.tellOut(`year test ${year}`, txt);
+    note('oos publish: ' + await L.publish(`elis/year-test-${year}.md`, `# Elis year test ${year}\n\n${txt}\n\n\`\`\`json\n${JSON.stringify(r, null, 1)}\n\`\`\`\n`));
+    return txt;
+  } catch (e) { await E.tellOut('year test error', e.message); return e.message; } finally { learnBusy = false; }
+}
 async function learnTick() {
   try {
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
     if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');
-    if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();   // after the current learning run   // add market/sector/buzz context to the history and relearn
+    if (hs.learnedRev >= L.LEARN_REV && !OOS.lastReport()) return void oosNow();   // year test first (Owner's priority), then the jump study
+    if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();   // add market/sector/buzz context to the history and relearn
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
