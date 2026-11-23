@@ -1,6 +1,6 @@
 # Elis learning report
 
-2026-11-23T22:19:22.929Z
+2026-11-23T22:32:35.528Z
 
 Kept current settings (444 sessions, tested on the last 134 it did not learn from).
 Unseen days: win rate 40% -> 36%, avg -0.28R -> -0.38R, avg win 1.29R -> 1.09R.
@@ -14,6 +14,31 @@ AFTER (learned settings): $3,000 -> $1,956 (-34.8%), max drawdown 37.1%, 225 tra
 Honest check, only the 134 sessions the learner never saw (2025-03-28 to 2025-10-08), $3,000 start:
 BEFORE: $3,000 -> $2,097 (-30.1%), max drawdown 35.1%, 283 trades, 40% wins, avg win $20 / avg loss $19, 6/8 red months
 AFTER: $3,000 -> $2,299 (-23.4%), max drawdown 26.1%, 69 trades, 36% wins, avg win $27 / avg loss $31, 7/8 red months
+
+## Formula search
+
+Searched 12,226 formulas on strong 30-min moves (stop 0.4 x daily range, out after 30 min, costs included).
+Strong move alone, unseen days: going with it -0.07R avg (41% wins), against it -0.03R (44% wins), 6028 cases.
+1. go WITH the strong move when: t-midday + mkt-against-move + spy-flat
+   unseen: 0.52R avg, 44% wins, 71 cases | training: 0.12R, 53% wins, 219 cases
+2. go WITH the strong move when: no-indecision + t-midday + mkt-against-move
+   unseen: 0.33R avg, 43% wins, 98 cases | training: 0.16R, 55% wins, 302 cases
+3. go WITH the strong move when: t-midday + mkt-against-move + fear-calm
+   unseen: 0.34R avg, 40% wins, 89 cases | training: 0.1R, 53% wins, 245 cases
+4. go WITH the strong move when: vol-normal + t-midday + mkt-against-move
+   unseen: 0.41R avg, 33% wins, 61 cases | training: 0.16R, 53% wins, 166 cases
+5. go WITH the strong move when: vwap-with-move-far + t-midday + mkt-against-move
+   unseen: 0.42R avg, 40% wins, 58 cases | training: 0.15R, 54% wins, 207 cases
+6. go WITH the strong move when: t-midday + mkt-against-move
+   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases
+7. go WITH the strong move when: t-midday + mkt-against-move + no-recent-news
+   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases
+8. go WITH the strong move when: vwap-with-move-far + t-afternoon + with-sector
+   unseen: 0.12R avg, 51% wins, 228 cases | training: 0.11R, 44% wins, 422 cases
+9. go AGAINST the strong move when: bullish engulfing + t-midday
+   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases
+10. go AGAINST the strong move when: bullish engulfing + t-midday + no-recent-news
+   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases
 
 ## Pivot study
 
@@ -1181,7 +1206,283 @@ No new rule or process beat the current setup on the unseen days, so nothing to 
   },
   "text": "Warning signs before drops:\nDROP next 30 min: fear-calm + down-strong -> 33% on unseen days (normal 9%, 4166 cases; 31% in training, 10034 cases)\nDROP next 30 min: down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: no-recent-news + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: none/none + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: buzz-unknown + down-strong -> 32% on unseen days (normal 9%, 4831 cases; 31% in training, 11241 cases)\nDROP next 30 min: down-strong + mkt-flat -> 34% on unseen days (normal 9%, 3022 cases; 32% in training, 7311 cases)\nDROP next 30 min: no-indecision + down-strong -> 32% on unseen days (normal 9%, 4625 cases; 31% in training, 10729 cases)\nDROP next 30 min: up-strong -> 32% on unseen days (normal 9%, 5038 cases; 33% in training, 11062 cases)\n\nSigns before rises:\nRISE next 30 min: no-indecision + up-strong -> 32% on unseen days (normal 9%, 4804 cases; 32% in training, 10552 cases)\nRISE next 30 min: up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: no-recent-news + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: none/none + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: buzz-unknown + up-strong -> 31% on unseen days (normal 9%, 5038 cases; 32% in training, 11062 cases)\nRISE next 30 min: no-indecision + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2289 cases; 33% in training, 4977 cases)\nRISE next 30 min: vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)\nRISE next 30 min: no-recent-news + vol-fading + up-strong -> 34% on unseen days (normal 9%, 2438 cases; 33% in training, 5311 cases)"
  },
- "at": "2026-11-23T22:19:15.091Z",
+ "formula": {
+  "tested": 176,
+  "moments": 19575,
+  "baseTrain": {
+   "n": 13547,
+   "contR": -0.06,
+   "revR": -0.05,
+   "contWin": 42,
+   "revWin": 44
+  },
+  "baseTest": {
+   "n": 6028,
+   "contR": -0.07,
+   "revR": -0.03,
+   "contWin": 41,
+   "revWin": 44
+  },
+  "list": [
+   {
+    "trade": "go WITH the strong move",
+    "signs": "t-midday + mkt-against-move + spy-flat",
+    "keys": "time+market+mktGap",
+    "train": {
+     "n": 219,
+     "avgR": 0.12,
+     "winPct": 53
+    },
+    "unseen": {
+     "n": 71,
+     "avgR": 0.52,
+     "winPct": 44
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "no-indecision + t-midday + mkt-against-move",
+    "keys": "indecision+time+market",
+    "train": {
+     "n": 302,
+     "avgR": 0.16,
+     "winPct": 55
+    },
+    "unseen": {
+     "n": 98,
+     "avgR": 0.33,
+     "winPct": 43
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "t-midday + mkt-against-move + fear-calm",
+    "keys": "time+market+fear",
+    "train": {
+     "n": 245,
+     "avgR": 0.1,
+     "winPct": 53
+    },
+    "unseen": {
+     "n": 89,
+     "avgR": 0.34,
+     "winPct": 40
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "vol-normal + t-midday + mkt-against-move",
+    "keys": "vol+time+market",
+    "train": {
+     "n": 166,
+     "avgR": 0.16,
+     "winPct": 53
+    },
+    "unseen": {
+     "n": 61,
+     "avgR": 0.41,
+     "winPct": 33
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "vwap-with-move-far + t-midday + mkt-against-move",
+    "keys": "vwap+time+market",
+    "train": {
+     "n": 207,
+     "avgR": 0.15,
+     "winPct": 54
+    },
+    "unseen": {
+     "n": 58,
+     "avgR": 0.42,
+     "winPct": 40
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "t-midday + mkt-against-move",
+    "keys": "time+market",
+    "train": {
+     "n": 309,
+     "avgR": 0.15,
+     "winPct": 54
+    },
+    "unseen": {
+     "n": 101,
+     "avgR": 0.3,
+     "winPct": 42
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "t-midday + mkt-against-move + no-recent-news",
+    "keys": "time+market+newsRecent",
+    "train": {
+     "n": 309,
+     "avgR": 0.15,
+     "winPct": 54
+    },
+    "unseen": {
+     "n": 101,
+     "avgR": 0.3,
+     "winPct": 42
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "vwap-with-move-far + t-afternoon + with-sector",
+    "keys": "vwap+time+sector",
+    "train": {
+     "n": 422,
+     "avgR": 0.11,
+     "winPct": 44
+    },
+    "unseen": {
+     "n": 228,
+     "avgR": 0.12,
+     "winPct": 51
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "bullish engulfing + t-midday",
+    "keys": "pattern+time",
+    "train": {
+     "n": 179,
+     "avgR": 0.14,
+     "winPct": 49
+    },
+    "unseen": {
+     "n": 76,
+     "avgR": 0.18,
+     "winPct": 54
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "bullish engulfing + t-midday + no-recent-news",
+    "keys": "pattern+time+newsRecent",
+    "train": {
+     "n": 179,
+     "avgR": 0.14,
+     "winPct": 49
+    },
+    "unseen": {
+     "n": 76,
+     "avgR": 0.18,
+     "winPct": 54
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "bullish engulfing + no-indecision + t-midday",
+    "keys": "pattern+indecision+time",
+    "train": {
+     "n": 177,
+     "avgR": 0.15,
+     "winPct": 49
+    },
+    "unseen": {
+     "n": 74,
+     "avgR": 0.18,
+     "winPct": 54
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "mkt-with-move + with-sector + fear-rising",
+    "keys": "market+sector+fear",
+    "train": {
+     "n": 204,
+     "avgR": 0.13,
+     "winPct": 58
+    },
+    "unseen": {
+     "n": 278,
+     "avgR": 0.08,
+     "winPct": 43
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "bullish engulfing + no-indecision + vwap-with-move",
+    "keys": "pattern+indecision+vwap",
+    "train": {
+     "n": 204,
+     "avgR": 0.11,
+     "winPct": 52
+    },
+    "unseen": {
+     "n": 84,
+     "avgR": 0.14,
+     "winPct": 55
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "vwap-against-move + mkt-flat + against-sector",
+    "keys": "vwap+market+sector",
+    "train": {
+     "n": 255,
+     "avgR": 0.11,
+     "winPct": 52
+    },
+    "unseen": {
+     "n": 110,
+     "avgR": 0.1,
+     "winPct": 48
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "three black crows + vol-rising + vwap-with-move-far",
+    "keys": "pattern+vol+vwap",
+    "train": {
+     "n": 275,
+     "avgR": 0.11,
+     "winPct": 44
+    },
+    "unseen": {
+     "n": 124,
+     "avgR": 0.08,
+     "winPct": 47
+    }
+   },
+   {
+    "trade": "go AGAINST the strong move",
+    "signs": "bullish engulfing + t-midday + fear-calm",
+    "keys": "pattern+time+fear",
+    "train": {
+     "n": 161,
+     "avgR": 0.16,
+     "winPct": 49
+    },
+    "unseen": {
+     "n": 65,
+     "avgR": 0.11,
+     "winPct": 52
+    }
+   },
+   {
+    "trade": "go WITH the strong move",
+    "signs": "three black crows + t-afternoon + spy-flat",
+    "keys": "pattern+time+mktGap",
+    "train": {
+     "n": 205,
+     "avgR": 0.25,
+     "winPct": 43
+    },
+    "unseen": {
+     "n": 121,
+     "avgR": 0.08,
+     "winPct": 47
+    }
+   }
+  ],
+  "text": "Searched 12,226 formulas on strong 30-min moves (stop 0.4 x daily range, out after 30 min, costs included).\nStrong move alone, unseen days: going with it -0.07R avg (41% wins), against it -0.03R (44% wins), 6028 cases.\n1. go WITH the strong move when: t-midday + mkt-against-move + spy-flat\n   unseen: 0.52R avg, 44% wins, 71 cases | training: 0.12R, 53% wins, 219 cases\n2. go WITH the strong move when: no-indecision + t-midday + mkt-against-move\n   unseen: 0.33R avg, 43% wins, 98 cases | training: 0.16R, 55% wins, 302 cases\n3. go WITH the strong move when: t-midday + mkt-against-move + fear-calm\n   unseen: 0.34R avg, 40% wins, 89 cases | training: 0.1R, 53% wins, 245 cases\n4. go WITH the strong move when: vol-normal + t-midday + mkt-against-move\n   unseen: 0.41R avg, 33% wins, 61 cases | training: 0.16R, 53% wins, 166 cases\n5. go WITH the strong move when: vwap-with-move-far + t-midday + mkt-against-move\n   unseen: 0.42R avg, 40% wins, 58 cases | training: 0.15R, 54% wins, 207 cases\n6. go WITH the strong move when: t-midday + mkt-against-move\n   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases\n7. go WITH the strong move when: t-midday + mkt-against-move + no-recent-news\n   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases\n8. go WITH the strong move when: vwap-with-move-far + t-afternoon + with-sector\n   unseen: 0.12R avg, 51% wins, 228 cases | training: 0.11R, 44% wins, 422 cases\n9. go AGAINST the strong move when: bullish engulfing + t-midday\n   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases\n10. go AGAINST the strong move when: bullish engulfing + t-midday + no-recent-news\n   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases"
+ },
+ "at": "2026-11-23T22:32:27.193Z",
  "sessions": 444,
  "candidates": 6730,
  "firstDay": "2024-01-02",
