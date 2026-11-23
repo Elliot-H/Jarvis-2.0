@@ -9,12 +9,30 @@ import * as RD from './elis-read.js';
 import * as X from './elis-explain.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'oos-reports.json');
 export const reports = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return {}; } };
 export const lastReport = () => { const r = reports(); return Object.keys(r).length ? Object.fromEntries(Object.entries(r).map(([y, v]) => [y, { results: v.results, why: v.why?.text }])) : null; };
 export const saveReport = r => { const all = reports(); all[r.year] = r; try { fs.writeFileSync(SF, JSON.stringify(all)); } catch {} };
-export const YEARS = () => String(process.env.ELIS_OOS_YEARS || '2023,2020,2022').split(',').map(x => x.trim()).filter(Boolean);
-export const nextYear = () => YEARS().find(y => !reports()[y]);
+// first three: 2023, 2020 (COVID), 2022 (bear). If no rule proves consistent, Elis keeps adding older years (Alpaca SIP goes back to 2016)
+export const CORE = 3;
+export const YEARS = () => String(process.env.ELIS_OOS_YEARS || '2023,2020,2022,2021,2019,2018,2017,2016').split(',').map(x => x.trim()).filter(Boolean);
+const doneY = y => reports()[y] && fs.existsSync(TF(y));
+export const nextYear = (core = false) => (core ? YEARS().slice(0, CORE) : YEARS()).find(y => !doneY(y));
+const TF = y => path.join(DIR, `oos-trades-${y}.json.gz`);   // compact graded trades per year: the raw material the rules are built from
+export const saveTrades = (y, trades) => { try { fs.writeFileSync(TF(y), zlib.gzipSync(JSON.stringify(trades))); } catch {} };
+export const loadTrades = y => { try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(TF(y)))); } catch { return null; } };
+const RF = path.join(DIR, 'oos-rules.json');
+export const lastRules = () => { try { return JSON.parse(fs.readFileSync(RF, 'utf8')); } catch { return null; } };
+export function build() {   // turn the why into rules, proven leave-one-year-out
+  const byYear = {}; for (const y of YEARS()) { const t = loadTrades(y); if (t) byYear[y] = t; }
+  const r = X.buildRules(byYear, WHY_DIMS.map(d => ({ name: d.name, key: d.name }))); r.at = new Date().toISOString(); if (r.ready) try { fs.writeFileSync(RF, JSON.stringify(r)); } catch {} return r;
+}
+export function rulesText(r) {
+  if (!r?.ready) return r?.note || 'not built';
+  return r.proven.length ? `Proven on years it never saw (${r.years.join(', ')}):\n` + r.proven.slice(0, 5).map(p => `- ${p.rule}: ${p.heldR >= 0 ? '+' : ''}${p.heldR}R avg on unseen years, ${p.posMonths}% of months positive (${Object.entries(p.byYear).map(([y, v]) => `${y} ${v >= 0 ? '+' : ''}${v}R`).join(', ')}), ${p.heldN} trades`).join('\n')
+    : `No rule held up: ${r.tried} rules tried, the best picks from each pair of years averaged ${r.honestR}R on the year they never saw.`;
+}
 
 const pause = ms => new Promise(r => setTimeout(r, ms)), yieldNow = () => new Promise(r => setImmediate(r));
 async function A(base, p) { for (let i = 0; ; i++) { try { return await E.api(base, p, {}, true); } catch (e) { if (i >= 6 || (e.status && e.status !== 429 && e.status < 500)) throw e; await pause(Math.min(60e3, 2000 * 2 ** i)); } } }
@@ -122,11 +140,12 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
   const main = all.filter(t => /^strong move alone/.test(t.formula));   // every strong-move trade: the widest base for the why
   const why = X.explain(main, WHY_DIMS);
   const whyFormula = X.explain(all.filter(t => /^midday, stock strong against the market -> go/.test(t.formula)), WHY_DIMS, { minN: 15 });
+  saveTrades(year, main.map(t => { const o = { R: Math.round(t.R * 1000) / 1000 }; for (const d of WHY_DIMS) { const v = typeof d.get === 'function' ? d.get(t) : t[d.key]; if (v != null) o[d.name] = v; } return o; }));
   return { year, sessions, results: summarize(all), trades: all.length, why, whyFormula, sample: all.slice(-20) };
 }
 export function text(r) {
   const f = v => '$' + Math.round(v).toLocaleString('en-US');
   return `Out-of-sample year ${r.year} (${r.sessions} sessions, formulas found on 2024-2025, never on ${r.year}). Stop 0.4 x daily range, out after 30 min, costs included; $3,000 at 1% risk, max 3 trades/day:\n`
     + Object.entries(r.results).map(([n, x]) => `- ${n}: ${x.trades} trades, ${x.winPct}% wins, avg ${x.avgR}R, total ${x.totalR}R -> ${f(x.money3k.start)} became ${f(x.money3k.end)} (${x.money3k.returnPct >= 0 ? '+' : ''}${x.money3k.returnPct}%, max drawdown ${x.money3k.maxDrawdownPct}%)`).join('\n')
-    + (r.why ? `\n\nWHY (all strong-move trades in ${r.year}):\n${r.why.text}` : '') + (r.whyFormula ? `\n\nWHY (midday relative-strength formula):\n${r.whyFormula.text}` : '');
+;
 }

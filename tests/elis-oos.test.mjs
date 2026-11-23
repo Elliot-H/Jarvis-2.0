@@ -17,4 +17,13 @@ let sd = 3; const rr = () => ((sd = (sd * 16807) % 2147483647) / 2147483647 - 0.
 const fake = Array.from({ length: 400 }, (_, i) => ({ date: '2023-0' + (1 + (i % 9)) + '-10', dir: i % 2 ? 'long' : 'short', spyVol: i % 4 < 2 ? 30 : 10, minute: 100, R: (i % 2 && i % 4 < 2 ? 0.8 : -0.4) + rr() }));
 const w = X.explain(fake, O.WHY_DIMS); console.log(w.text);
 assert(/Made money when:[\s\S]*panicky market/.test(w.text) && /Lost most when:[\s\S]*(short|calm market)/.test(w.text), 'why names the winning and losing conditions');
+// build: 3 years; 'calm stock' + long wins a little every month in every year, everything else is noise -> proven
+let sd2 = 11; const r2 = () => ((sd2 = (sd2 * 16807) % 2147483647) / 2147483647 - 0.5);
+const yr = y => Array.from({ length: 1500 }, (_, i) => { const good = i % 3 === 0; return { R: (good ? 0.15 : -0.05) + r2() * 0.6, side: good ? 'long' : (i % 2 ? 'long' : 'short'), 'stock volatility': good ? 'calm stock' : (i % 2 ? 'jumpy stock' : 'normal stock'), 'time of day': ['first hour', '11:30-1:00'][i % 2], month: `${y}-${String(1 + (i % 12)).padStart(2, '0')}` }; });
+const D2 = [{ name: 'side', key: 'side' }, { name: 'stock volatility', key: 'stock volatility' }, { name: 'time of day', key: 'time of day' }, { name: 'month', key: 'month' }];
+const b = X.buildRules({ 2020: yr(2020), 2022: yr(2022), 2023: yr(2023) }, D2);
+console.log(b.proven.slice(0, 3), b.honestR);
+assert(b.ready && b.proven.length && /calm stock/.test(b.proven[0].rule) && b.proven[0].posMonths >= 60, 'the consistent condition is found, noise is not');
+const n2 = X.buildRules({ 2020: yr(2020).map(t => ({ ...t, R: r2() - 0.02 })), 2022: yr(2022).map(t => ({ ...t, R: r2() - 0.02 })), 2023: yr(2023).map(t => ({ ...t, R: r2() - 0.02 })) }, D2);
+assert(n2.ready && !n2.proven.length, 'pure noise proves nothing');
 console.log('OOS TEST PASSED'); process.exit(0);
