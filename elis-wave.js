@@ -182,6 +182,19 @@ async function cancelStops(sym, t) {   // cancel every protective stop of this t
   if (t.legId) await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'DELETE' }).catch(() => {});
   for (let i = 0; i < 3; i++) { const o = await openStop(sym, t).catch(() => null); if (!o) break; await E.api(E.BASE, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {}); }
 }
+// safety net: an open, filled Elis trade must always have a live stop. If Alpaca shows none (leg canceled/expired/lost),
+// place a fresh stop at the trade's current stop level (initial or trailed), sized to the actual position.
+async function ensureStop(date, sym, t, px) {
+  if (!t.sentFill || t.sentExit || Date.now() - (t.ensureAt || 0) < 60e3) return; t.ensureAt = Date.now();
+  if (await openStop(sym, t).catch(() => 'err')) return;   // a stop exists (or we could not check): nothing to do
+  let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {} if (!pos) return;
+  const long = +pos.qty > 0, q = Math.abs(+pos.qty);
+  let level = t.stop; if (t.entry && t.r) { if (t.best == null) t.best = t.entry; const ns = trailStop(t, px || +pos.current_price); if (ns) level = ns; }
+  const cur = px || +pos.current_price; if (!level || (long ? level >= cur : level <= cur)) level = Math.round((long ? cur - t.r : cur + t.r) * 100) / 100;   // never a stop that would fire instantly
+  const o = await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, qty: String(q), side: long ? 'sell' : 'buy', type: 'stop', stop_price: level.toFixed(2), time_in_force: 'day', client_order_id: `${tag(date, sym)}-stop-${Date.now().toString(36)}` }) });
+  t.legId = o.id; t.stop = level; t.qty = q; t.amendFails = 0; t.amendWarned = false; t.amendAt = 0;
+  await E.tellOut(`wave stop restored ${sym}`, `No live stop was found for the ${long ? 'long' : 'short'} (${q} sh). New protective stop at ${level}.`);
+}
 async function closeOne(date, sym, t, reason) {
   t.exitWhy = reason.slice(0, 80);
   const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
@@ -202,6 +215,7 @@ async function contextExit(date, now) {
   for (const [sym, t] of live) {
     const px = j.trades?.[sym]?.p; if (!px) continue;
     if (W.marketExit > 0 && t.spy0 && spyNow) { const mv = (spyNow / t.spy0 - 1) * 100 * (t.dir === 'long' ? 1 : -1); if (mv <= -W.marketExit) { await closeOne(date, sym, t, `market turned against it (SPY ${mv.toFixed(2)}% since entry)`); continue; } }
+    await ensureStop(date, sym, t, px).catch(e => note(`${sym}: stop restore failed ${e.message}`));
     const ns = trailStop(t, px);
     if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
       try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
