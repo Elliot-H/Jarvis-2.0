@@ -45,7 +45,8 @@ const rF = L.simulate(bar('FDA1'), rows.find(r => r.date === d0 && r.sym === 'FD
 console.log('replay FDA1', rF?.toFixed(2), 'NON1', rN?.toFixed(2)); assert(rF > 1 && rN < 0, 'replay wins/losses');
 
 const rep = await L.learn({ minRuleN: 20 });
-console.log(L.summaryLine(rep)); console.log(L.moneyText(rep)); console.log('PROPOSALS:\n' + L.proposalsText(rep));
+console.log(L.summaryLine(rep)); console.log(L.moneyText(rep)); console.log('PROPOSALS:\n' + L.proposalsText(rep)); console.log(L.experimentsText(rep));
+assert(rep.experiments.length === 5 && rep.experiments.every(x => x.unseen.trades >= 0), 'experiments reported');
 assert(rep.money.before.start === 3000 && rep.money.after.end > rep.money.before.end && rep.money.unseenAfter.trades > 0, 'money replay before/after from $3,000');
 assert(rep.money.after.monthly.length >= 2 && rep.money.after.maxDrawdownPct >= 0, 'monthly curve + drawdown');
 console.log('weights cat:', JSON.stringify(L.params().mult.cat), 'market:', JSON.stringify(L.params().mult.market));
@@ -64,4 +65,7 @@ if (rep.proposals.some(x => x.kind === 'rule')) { const v0 = L.version(); consol
 // rollback: 15 live trades far worse than promised -> previous settings restored
 let msg = null; for (let i = 0; i < 15; i++) msg = L.recordLive(-0.8) || msg;
 console.log(msg); assert(msg && /Rolled back/.test(msg), 'rollback to previous settings');
+// study-rules exit: holds to the close, no trailing
+const o3 = {}, R3 = L.simulate(nb, nr, { ...L.DEFAULTS, exitMode: 'close', newsExit: false }, o3); console.log('study exit on NWS1', R3?.toFixed(1), o3.why);
+assert(/stop|closed 15:55/.test(o3.why) && !/trailing|11:00|VWAP/.test(o3.why), 'study exit mode ignores trailing/11:00/VWAP');
 console.log('ALL LEARN TESTS PASSED'); process.exit(0);

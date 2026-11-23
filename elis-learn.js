@@ -46,7 +46,7 @@ export function features(c) {
 export const FEATURE_NAMES = ['cat', 'gap', 'gapDir', 'rvol', 'orAtr', 'market', 'side', 'newsTone', 'comboNewsMarket', 'mktGap', 'fear', 'regime', 'sector', 'buzz', 'comboSectorNews', 'comboFearSide'];
 
 // ---------- settings: defaults, bounds, steps (risk per trade is NOT here on purpose) ----------
-export const DEFAULTS = { picks: 3, stopAtr: 0.10, trailR: 1, keepMinR: 1, entryEnd: 660, minRvol: 1, entryGate: 0, newsExit: true, marketExit: 0, newsDelay: 1, mult: {}, emult: {}, skip: [] };
+export const DEFAULTS = { picks: 3, stopAtr: 0.10, trailR: 1, keepMinR: 1, entryEnd: 660, minRvol: 1, entryGate: 0, newsExit: true, marketExit: 0, newsDelay: 1, exitMode: 'smart', mult: {}, emult: {}, skip: [] };
 const GRID = { picks: [1, 2, 3, 4, 5], stopAtr: [0.05, 0.075, 0.10, 0.15, 0.20], trailR: [0.5, 0.75, 1, 1.5, 2], keepMinR: [0.5, 1, 1.5, 2], entryEnd: [600, 630, 660, 690], minRvol: [1, 1.5, 2, 3],
   entryGate: [0, 0.85, 0.95, 1.05], newsExit: [false, true], marketExit: [0, 0.3, 0.5, 0.8] };
 const MULT_MIN = 0.5, MULT_MAX = 1.6, SHRINK = 25;
@@ -101,6 +101,7 @@ export function simulate(bars, c, p, out = {}, spy = null) {
     if (long ? b.l <= stop : b.h >= stop) return done(gain(long ? Math.min(stop, b.o) : Math.max(stop, b.o)), stop === entry - (long ? r : -r) ? 'stop' : 'trailing stop');   // a gap through the stop fills at the gap
     if (ev && p.newsExit) return done(gain(b.c), 'bad news: ' + ev.h);
     if (p.marketExit > 0 && spy0 && spyAt?.get(b.t)) { const mv = (spyAt.get(b.t) / spy0 - 1) * 100 * (long ? 1 : -1); if (mv <= -p.marketExit) return done(gain(b.c), `market turned (SPY ${mv.toFixed(2)}%)`); }
+    if (p.exitMode === 'close') continue;   // the research study's exit: fixed stop, otherwise hold to the close
     best = long ? Math.max(best, b.h) : Math.min(best, b.l);
     if ((long ? best - entry : entry - best) / r >= p.trailR) { const ns = long ? Math.max(entry, best - p.trailR * r) : Math.min(entry, best + p.trailR * r); stop = long ? Math.max(stop, ns) : Math.min(stop, ns); }
     if (!decided && b.t + 60e3 >= decideT) {
@@ -201,7 +202,8 @@ const expand = (date, arr) => arr && arr.length ? arr.map(([m, o, h, l, c, v]) =
 const HF = path.join(DIR, 'history-state.json'), PER_DAY = Number(process.env.ELIS_HISTORY_PER_DAY || 15);   // 15/day keeps the bar files ~38 MB on the 500 MB volume
 export const HS = { phase: 'idle', startedAt: null, rate: null };   // live progress for the report page
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
-export function markLearnedAfterStop() { const st = historyState(); st.learnedAfterStop = true; save(HF, st); }
+export const LEARN_REV = 2;   // bump to make the disk-limited study relearn once after a learner upgrade
+export function markLearnedAfterStop() { const st = historyState(); st.learnedAfterStop = true; st.learnedRev = LEARN_REV; save(HF, st); }
 export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
   const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
   // free space first: uncompressed bar files from the first (core-only) study are ~5x larger than needed
@@ -411,12 +413,27 @@ export async function learn({ force = false, progress = null, minRuleN = 80 } = 
         why: `Mid-day headlines that went against open trades: selling within seconds of the headline (instead of up to a minute later${final.newsExit ? '' : ', or not at all'}) was tested on the ${test.length} unseen sessions.`, settings: { newsExit: true },
         evidence: { before: sum(base), after: sum(fast) }, effort: 'No cost (free Alpaca news stream). Claude builds it in a session when you say "build it".' });
     }
+    // experiments: the research study's own rules vs Elis's changes (always reported; proposed only if proven on unseen days)
+    const study = { ...DEFAULTS, exitMode: 'close', stopAtr: 0.10, newsExit: false, marketExit: 0, entryGate: 0, mult: {}, emult: {}, skip: [], minRvol: 1 };
+    const variants = [
+      ['study rules (hold to close, 10% ATR stop), top 3, entries to 11:00', { ...study, picks: 3, entryEnd: 660 }],
+      ['study rules, top 5, entries to 11:00', { ...study, picks: 5, entryEnd: 660 }],
+      ['study rules, top 3, entries all day', { ...study, picks: 3, entryEnd: 955 }],
+      ['study rules + sell on bad news, top 3', { ...study, picks: 3, entryEnd: 660, newsExit: true }],
+      ['Elis exits, but 10% ATR stop', { ...final, stopAtr: 0.10 }]
+    ];
+    const experiments = [];
+    for (const [name, v] of variants) {
+      const [e] = await streamEval(test, byDayAll, [v]); experiments.push({ name, unseen: sum(e) }); progress?.(`experiment: ${name}`);
+      if (proven(e, base)) proposals.push({ id: 'exp-' + experiments.length, kind: 'settings', settings: Object.fromEntries(Object.entries(v).filter(([k]) => ['exitMode', 'stopAtr', 'picks', 'entryEnd', 'newsExit', 'marketExit', 'entryGate', 'trailR', 'keepMinR'].includes(k))), title: `Switch Wave to: ${name}`,
+        why: `Tested as a whole system on the ${test.length} unseen sessions against Elis's current setup.`, evidence: { before: sum(base), after: sum(e) }, effort: 'None. Say "adopt Elis proposal" - applies at the next 9:15 scan.' });
+    }
     const gaps = []; const mt = allW.table['outcome:midTradeNews']?.['bad news hit during trade']; if (mt) gaps.push(`${mt.trades} graded trades had bad news hit mid-trade (avg ${mt.avgR}R).`);
     progress?.('money replay: $3,000 from the first session, before vs after');
     const money = { before: await equityCurve(days, byDayAll, cur), after: await equityCurve(days, byDayAll, cand),
       unseenBefore: await equityCurve(test, byDayAll, cur), unseenAfter: await equityCurve(test, byDayAll, cand) };
     P.proposals = proposals; save(F.params, P);
-    const report = { money, proposals, gaps, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
+    const report = { money, proposals, gaps, experiments, at: new Date().toISOString(), sessions: days.length, candidates: J.length, firstDay: days[0], lastDay: days.at(-1), trainSessions: cut, testSessions: days.length - cut,
       current: sum(curTest), learned: sum(newTest), adopted: !!better, changes, whatPredictsWins: allW.table, version: P.version + (better ? 1 : 0) };
     if (better) {
       P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);
@@ -461,6 +478,10 @@ export function moneyText(rep) {   // replay caps: 1% risk, whole shares, 2x mar
   return `If Elis had started with $3,000 on ${m.before.from} (to ${m.before.to}):\n${line('BEFORE (current settings)', m.before)}\n${line('AFTER (learned settings)', m.after)}\n`
     + `Honest check, only the ${rep.testSessions} sessions the learner never saw (${m.unseenBefore.from} to ${m.unseenBefore.to}), $3,000 start:\n${line('BEFORE', m.unseenBefore)}\n${line('AFTER', m.unseenAfter)}`;
 }
+export function experimentsText(rep) {
+  const ex = rep?.experiments || []; if (!ex.length) return '';
+  const c = rep.current; return `Experiments on the ${rep.testSessions} unseen sessions (current: ${c.trades} trades, ${c.winRatePct}% wins, avg ${c.avgR}R, total ${c.totalR}R):\n` + ex.map(x => `- ${x.name}: ${x.unseen.trades} trades, ${x.unseen.winRatePct}% wins, avg ${x.unseen.avgR}R, total ${x.unseen.totalR}R`).join('\n');
+}
 export function proposalsText(rep) {
   const ps = rep?.proposals || []; if (!ps.length) return 'No new rule or process beat the current setup on the unseen days, so nothing to change.' + (rep?.gaps?.length ? ' ' + rep.gaps.join(' ') : '');
   return ps.map((x, i) => `${i + 1}. ${x.title}\nWhy: ${x.why}\nProof (unseen days): avg ${x.evidence.before.avgR}R -> ${x.evidence.after.avgR}R, total ${x.evidence.before.totalR}R -> ${x.evidence.after.totalR}R, win rate ${x.evidence.before.winRatePct}% -> ${x.evidence.after.winRatePct}%, trades ${x.evidence.before.trades} -> ${x.evidence.after.trades}\nFrom you: ${x.effort}`).join('\n\n');
@@ -468,9 +489,10 @@ export function proposalsText(rep) {
 export function adoptProposal(id) {   // Owner said yes (via Jarvis); rules apply at the next 9:15 scan
   const x = (P.proposals || []).find(p => !id || p.id === id || p.title.toLowerCase().includes(String(id).toLowerCase()));
   if (!x) return 'No matching Elis proposal.';
-  if (x.kind !== 'rule') return `"${x.title}" needs code: Claude builds it in a session when the Owner says "build it".`;
+  if (x.kind === 'build') return `"${x.title}" needs code: Claude builds it in a session when the Owner says "build it".`;
   P.history.unshift({ version: P.version, params: P.params, at: P.adoptedAt }); P.history = P.history.slice(0, 10);
-  P = { ...P, version: P.version + 1, params: { ...P.params, skip: [...(P.params.skip || []), x.rule] }, adoptedAt: new Date().toISOString(), liveRs: [], proposals: P.proposals.filter(p => p !== x) };
+  const np = x.kind === 'settings' ? { ...P.params, ...x.settings, ...(x.settings.exitMode === 'close' ? { mult: {}, emult: {} } : {}) } : { ...P.params, skip: [...(P.params.skip || []), x.rule] };
+  P = { ...P, version: P.version + 1, params: np, adoptedAt: new Date().toISOString(), liveRs: [], proposals: P.proposals.filter(p => p !== x) };
   save(F.params, P); return `Adopted: ${x.title}. Elis v${P.version} applies it from the next scan. It rolls back on its own if live paper results disappoint.`;
 }
 export const proposals = () => P.proposals || [];

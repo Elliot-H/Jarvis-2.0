@@ -60,7 +60,7 @@ const atr14 = d => { const tr = d.slice(1).map((b, i) => Math.max(b.h - b.l, Mat
 
 // ---- pre-open scan: universe + daily stats + 14-day average opening-5-minute volume (IEX, same feed as the live bar)
 async function scan(date) {
-  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit', 'skip']) if (lp[k] !== undefined) W[k] = lp[k];
+  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit', 'skip', 'exitMode']) if (lp[k] !== undefined) W[k] = lp[k];
   const syms = new Set(CORE), news = {};
   try { const a = await E.api(E.DATA, '/v1beta1/screener/stocks/most-actives?by=volume&top=100'); for (const x of a.most_actives || []) syms.add(x.symbol); } catch (e) { note('most-actives unavailable: ' + e.message); }
   try { const m = await E.api(E.DATA, '/v1beta1/screener/stocks/movers?top=50'); for (const x of [...(m.gainers || []), ...(m.losers || [])]) syms.add(x.symbol); } catch (e) { note('movers unavailable: ' + e.message); }
@@ -231,7 +231,7 @@ async function contextExit(date, now) {
     const px = j.trades?.[sym]?.p; if (!px) continue;
     if (W.marketExit > 0 && t.spy0 && spyNow) { const mv = (spyNow / t.spy0 - 1) * 100 * (t.dir === 'long' ? 1 : -1); if (mv <= -W.marketExit) { await closeOne(date, sym, t, `market turned against it (SPY ${mv.toFixed(2)}% since entry)`); continue; } }
     await ensureStop(date, sym, t, px).catch(e => note(`${sym}: stop restore failed ${e.message}`));
-    const ns = trailStop(t, px);
+    const ns = W.exitMode === 'close' ? null : trailStop(t, px);   // study rules: fixed stop
     if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
       try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
       catch (e) {
@@ -241,7 +241,7 @@ async function contextExit(date, now) {
       }
     }
   }
-  if (!W.smartExit || now.min < W.decideAt || now.min === S.lastMinute) return;
+  if (!W.smartExit || W.exitMode === 'close' || now.min < W.decideAt || now.min === S.lastMinute) return;   // study rules: hold to 15:55
   S.lastMinute = now.min;
   const bars = await multiBars(live.map(([s]) => s), '1Min', E.etMs(date, 570), Date.now(), 'iex');
   for (const [sym, t] of live) {
@@ -336,8 +336,10 @@ export async function learnNow(reason = 'on request') {
     if (!L.ctxDone()) { const n = await L.enrich(m => note(m)); note(`context added to ${n} graded candidates`); }
     const rep = await L.learn({ progress: m => note(m) }); if (L.historyState().diskStop) L.markLearnedAfterStop(); const line = L.summaryLine(rep), money = L.moneyText(rep);
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
+    const exps = L.experimentsText(rep); if (exps) await E.tellOut('experiments', exps);
+    let sweepBt = null; try { sweepBt = await E.backtest(Number(process.env.ELIS_SWEEP_BT_DAYS || 400)); await E.tellOut('QQQ strategy history', `${sweepBt.sessions} sessions: ${sweepBt.trades} trades, ${sweepBt.winRatePct}% wins, total ${sweepBt.totalR}R, return ${sweepBt.returnPct}% at 1% risk, max drawdown ${sweepBt.maxDrawdownPct}%`); } catch (e) { note('sweep backtest failed: ' + e.message); }
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
-    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Experiments\n\n${L.experimentsText(rep)}\n\n## QQQ strategy history\n\n${sweepBt ? JSON.stringify({ ...sweepBt, last: undefined }) : 'n/a'}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
     return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }
@@ -348,7 +350,7 @@ async function learnTick() {
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
     if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');   // add market/sector/buzz context to the history and relearn
-    if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
+    if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
   } catch {}
