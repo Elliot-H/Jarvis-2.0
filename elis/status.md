@@ -1,1 +1,1 @@
-2026-11-23T16:56:30.647Z history: 14607 symbols, 726 sessions since 2024-01-02 (444 already done)
+2026-11-23T17:01:40.390Z history paused: 444 sessions
