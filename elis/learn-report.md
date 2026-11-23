@@ -1,12 +1,21 @@
 # Elis learning report
 
-2026-11-23T22:32:35.528Z
+2026-11-23T23:31:42.266Z
 
 Kept current settings (444 sessions, tested on the last 134 it did not learn from).
 Unseen days: win rate 40% -> 36%, avg -0.28R -> -0.38R, avg win 1.29R -> 1.09R.
 Changes: picks 3 -> 1, keepMinR 1 -> 0.5, entryEnd 630 -> 600, entryGate 0 -> 0.95, newsExit true -> false.
 Best info: gap1-3% -0.11R, gap<1% -0.12R, rvol2-4 -0.12R, normal-range -0.06R.
 Weakest: gap8%+ -0.35R, rvol8+ -0.33R, fear-falling -0.33R, fear-falling+short -0.36R.
+
+## Why (unseen days)
+
+Overall -0.28R avg over 283 trades.
+Made money when:
+  + how it exited = trailing stop: +1.22R avg, 91% wins, 114 trades
+Lost most when:
+  - how it exited = stopped on the entry candle: -1.83R avg, 0% wins, 75 trades
+  - how it exited = stop: -1.05R avg, 0% wins, 81 trades
 
 If Elis had started with $3,000 on 2024-01-02 (to 2025-10-08):
 BEFORE (current settings): $3,000 -> $1,691 (-43.6%), max drawdown 46.9%, 532 trades, 34% wins, avg win $13 / avg loss $10, 16/22 red months
@@ -86,6 +95,321 @@ No new rule or process beat the current setup on the unseen days, so nothing to 
 
 ```json
 {
+ "why": {
+  "n": 283,
+  "overall": -0.28,
+  "findings": [
+   {
+    "dim": "how it exited",
+    "value": "trailing stop",
+    "n": 114,
+    "avgR": 1.22,
+    "winPct": 91,
+    "z": 9.66,
+    "better": true
+   },
+   {
+    "dim": "how it exited",
+    "value": "stopped on the entry candle",
+    "n": 75,
+    "avgR": -1.83,
+    "winPct": 0,
+    "z": -8.06,
+    "better": false
+   },
+   {
+    "dim": "how it exited",
+    "value": "stop",
+    "n": 81,
+    "avgR": -1.05,
+    "winPct": 0,
+    "z": -4.15,
+    "better": false
+   }
+  ],
+  "tables": {
+   "how it exited": {
+    "11": {
+     "n": 13,
+     "avgR": 0.26,
+     "winPct": 69
+    },
+    "trailing stop": {
+     "n": 114,
+     "avgR": 1.22,
+     "winPct": 91
+    },
+    "stopped on the entry candle": {
+     "n": 75,
+     "avgR": -1.83,
+     "winPct": 0
+    },
+    "stop": {
+     "n": 81,
+     "avgR": -1.05,
+     "winPct": 0
+    }
+   },
+   "news type": {
+    "none": {
+     "n": 283,
+     "avgR": -0.28,
+     "winPct": 40
+    }
+   },
+   "news tone": {
+    "none": {
+     "n": 283,
+     "avgR": -0.28,
+     "winPct": 40
+    }
+   },
+   "S&P direction at the open": {
+    "with-market": {
+     "n": 154,
+     "avgR": -0.07,
+     "winPct": 46
+    },
+    "against-market": {
+     "n": 129,
+     "avgR": -0.54,
+     "winPct": 33
+    }
+   },
+   "S&P gap": {
+    "spy-flat": {
+     "n": 208,
+     "avgR": -0.36,
+     "winPct": 37
+    },
+    "spy-gap-down": {
+     "n": 45,
+     "avgR": 0.13,
+     "winPct": 58
+    },
+    "spy-gap-up": {
+     "n": 30,
+     "avgR": -0.38,
+     "winPct": 37
+    }
+   },
+   "fear gauge": {
+    "fear-calm": {
+     "n": 230,
+     "avgR": -0.33,
+     "winPct": 37
+    },
+    "fear-rising": {
+     "n": 33,
+     "avgR": -0.02,
+     "winPct": 58
+    },
+    "fear-falling": {
+     "n": 20,
+     "avgR": -0.2,
+     "winPct": 40
+    }
+   },
+   "trend regime": {
+    "with-trend": {
+     "n": 140,
+     "avgR": -0.4,
+     "winPct": 36
+    },
+    "against-trend": {
+     "n": 143,
+     "avgR": -0.17,
+     "winPct": 44
+    }
+   },
+   "sector": {
+    "with-sector": {
+     "n": 146,
+     "avgR": -0.18,
+     "winPct": 44
+    },
+    "against-sector": {
+     "n": 111,
+     "avgR": -0.56,
+     "winPct": 33
+    },
+    "sector-flat": {
+     "n": 5,
+     "avgR": 0.36,
+     "winPct": 40
+    },
+    "sector-unknown": {
+     "n": 21,
+     "avgR": 0.33,
+     "winPct": 48
+    }
+   },
+   "side": {
+    "short": {
+     "n": 169,
+     "avgR": -0.14,
+     "winPct": 44
+    },
+    "long": {
+     "n": 114,
+     "avgR": -0.5,
+     "winPct": 33
+    }
+   },
+   "stock gap": {
+    "gap8%+": {
+     "n": 113,
+     "avgR": -0.59,
+     "winPct": 31
+    },
+    "gap3-8%": {
+     "n": 73,
+     "avgR": -0.22,
+     "winPct": 45
+    },
+    "gap<1%": {
+     "n": 38,
+     "avgR": -0.03,
+     "winPct": 47
+    },
+    "gap1-3%": {
+     "n": 59,
+     "avgR": 0.05,
+     "winPct": 46
+    }
+   },
+   "opening volume surge": {
+    "rvol8+": {
+     "n": 257,
+     "avgR": -0.31,
+     "winPct": 39
+    },
+    "rvol4-8": {
+     "n": 26,
+     "avgR": -0.01,
+     "winPct": 50
+    }
+   },
+   "opening range": {
+    "wide-range": {
+     "n": 229,
+     "avgR": -0.37,
+     "winPct": 37
+    },
+    "normal-range": {
+     "n": 44,
+     "avgR": -0.02,
+     "winPct": 52
+    },
+    "tight-range": {
+     "n": 10,
+     "avgR": 0.45,
+     "winPct": 50
+    }
+   },
+   "candle read at entry": {
+    "candle-none": {
+     "n": 207,
+     "avgR": -0.34,
+     "winPct": 39
+    },
+    "candle-with": {
+     "n": 53,
+     "avgR": -0.1,
+     "winPct": 42
+    },
+    "candle-mild": {
+     "n": 12,
+     "avgR": -0.65,
+     "winPct": 33
+    },
+    "candle-against": {
+     "n": 11,
+     "avgR": 0.32,
+     "winPct": 55
+    }
+   },
+   "volume at entry": {
+    "vol-weak": {
+     "n": 197,
+     "avgR": -0.4,
+     "winPct": 39
+    },
+    "vol-normal": {
+     "n": 62,
+     "avgR": -0.05,
+     "winPct": 45
+    },
+    "vol-strong": {
+     "n": 24,
+     "avgR": 0.08,
+     "winPct": 38
+    }
+   },
+   "VWAP at entry": {
+    "vwap-with": {
+     "n": 274,
+     "avgR": -0.24,
+     "winPct": 41
+    },
+    "vwap-against": {
+     "n": 9,
+     "avgR": -1.46,
+     "winPct": 22
+    }
+   },
+   "mid-trade news": {
+    "no bad news mid-trade": {
+     "n": 283,
+     "avgR": -0.28,
+     "winPct": 40
+    }
+   },
+   "month": {
+    "2025-03": {
+     "n": 6,
+     "avgR": 0.78,
+     "winPct": 67
+    },
+    "2025-04": {
+     "n": 46,
+     "avgR": 0.07,
+     "winPct": 48
+    },
+    "2025-05": {
+     "n": 43,
+     "avgR": -0.7,
+     "winPct": 28
+    },
+    "2025-06": {
+     "n": 44,
+     "avgR": -0.32,
+     "winPct": 41
+    },
+    "2025-07": {
+     "n": 44,
+     "avgR": -0.35,
+     "winPct": 36
+    },
+    "2025-08": {
+     "n": 44,
+     "avgR": -0.19,
+     "winPct": 41
+    },
+    "2025-09": {
+     "n": 44,
+     "avgR": -0.51,
+     "winPct": 39
+    },
+    "2025-10": {
+     "n": 12,
+     "avgR": 0.2,
+     "winPct": 50
+    }
+   }
+  },
+  "text": "Overall -0.28R avg over 283 trades.\nMade money when:\n  + how it exited = trailing stop: +1.22R avg, 91% wins, 114 trades\nLost most when:\n  - how it exited = stopped on the entry candle: -1.83R avg, 0% wins, 75 trades\n  - how it exited = stop: -1.05R avg, 0% wins, 81 trades"
+ },
  "money": {
   "before": {
    "from": "2024-01-02",
@@ -1482,7 +1806,7 @@ No new rule or process beat the current setup on the unseen days, so nothing to 
   ],
   "text": "Searched 12,226 formulas on strong 30-min moves (stop 0.4 x daily range, out after 30 min, costs included).\nStrong move alone, unseen days: going with it -0.07R avg (41% wins), against it -0.03R (44% wins), 6028 cases.\n1. go WITH the strong move when: t-midday + mkt-against-move + spy-flat\n   unseen: 0.52R avg, 44% wins, 71 cases | training: 0.12R, 53% wins, 219 cases\n2. go WITH the strong move when: no-indecision + t-midday + mkt-against-move\n   unseen: 0.33R avg, 43% wins, 98 cases | training: 0.16R, 55% wins, 302 cases\n3. go WITH the strong move when: t-midday + mkt-against-move + fear-calm\n   unseen: 0.34R avg, 40% wins, 89 cases | training: 0.1R, 53% wins, 245 cases\n4. go WITH the strong move when: vol-normal + t-midday + mkt-against-move\n   unseen: 0.41R avg, 33% wins, 61 cases | training: 0.16R, 53% wins, 166 cases\n5. go WITH the strong move when: vwap-with-move-far + t-midday + mkt-against-move\n   unseen: 0.42R avg, 40% wins, 58 cases | training: 0.15R, 54% wins, 207 cases\n6. go WITH the strong move when: t-midday + mkt-against-move\n   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases\n7. go WITH the strong move when: t-midday + mkt-against-move + no-recent-news\n   unseen: 0.3R avg, 42% wins, 101 cases | training: 0.15R, 54% wins, 309 cases\n8. go WITH the strong move when: vwap-with-move-far + t-afternoon + with-sector\n   unseen: 0.12R avg, 51% wins, 228 cases | training: 0.11R, 44% wins, 422 cases\n9. go AGAINST the strong move when: bullish engulfing + t-midday\n   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases\n10. go AGAINST the strong move when: bullish engulfing + t-midday + no-recent-news\n   unseen: 0.18R avg, 54% wins, 76 cases | training: 0.14R, 49% wins, 179 cases"
  },
- "at": "2026-11-23T22:32:27.193Z",
+ "at": "2026-11-23T23:31:33.893Z",
  "sessions": 444,
  "candidates": 6730,
  "firstDay": "2024-01-02",
