@@ -2844,6 +2844,8 @@ handlers.elis_backtest = async ({ days, rr, noShort }) => {
   catch (e) { return `Backtest failed: ${e.message}`; }
 };
 handlers.elis_learning = async () => JSON.stringify({ ...elisLearn.status(), guide: 'Explain plainly: what information has been predicting winners vs losers (highest/lowest weights and avg R), what settings changed and whether the last run was adopted (it only adopts when unseen days improve). Never claim certainty about future results.' });
+handlers.elis_proposals = async () => { const ps = elisLearn.proposals(); return ps.length ? JSON.stringify({ proposals: ps, guide: 'Read each: title, why, proof (unseen days, before -> after), what is needed from him. Ask which to adopt; adopt only after a clear yes in a later message.' }) : 'Elis has no proven proposals right now.'; };
+handlers.elis_adopt_proposal = async ({ id }) => elisLearn.adoptProposal(id);
 handlers.elis_learn_now = async () => {
   const n = elis.et(); const dow = new Date(elis.etMs(n.date, 720)).getUTCDay();
   if (dow >= 1 && dow <= 5 && n.min >= 9 * 60 && n.min < 16 * 60 + 30) return 'Not during market hours (9:00-16:30 ET on weekdays); Elis is trading. It learns automatically every Saturday; ask again after 16:30.';

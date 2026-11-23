@@ -59,7 +59,7 @@ const atr14 = d => { const tr = d.slice(1).map((b, i) => Math.max(b.h - b.l, Mat
 
 // ---- pre-open scan: universe + daily stats + 14-day average opening-5-minute volume (IEX, same feed as the live bar)
 async function scan(date) {
-  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit']) if (lp[k] !== undefined) W[k] = lp[k];
+  const lp = L.params(); for (const k of ['picks', 'stopAtr', 'trailR', 'keepMinR', 'entryEnd', 'minRvol', 'mult', 'emult', 'entryGate', 'newsExit', 'marketExit', 'skip']) if (lp[k] !== undefined) W[k] = lp[k];
   const syms = new Set(CORE), news = {};
   try { const a = await E.api(E.DATA, '/v1beta1/screener/stocks/most-actives?by=volume&top=100'); for (const x of a.most_actives || []) syms.add(x.symbol); } catch (e) { note('most-actives unavailable: ' + e.message); }
   try { const m = await E.api(E.DATA, '/v1beta1/screener/stocks/movers?top=50'); for (const x of [...(m.gainers || []), ...(m.losers || [])]) syms.add(x.symbol); } catch (e) { note('movers unavailable: ' + e.message); }
@@ -115,7 +115,7 @@ async function pick(date) {
   const first = await multiBars([...syms, 'SPY'], '5Min', E.etMs(date, 570), E.etMs(date, 575), 'iex'), fb = {};
   for (const [s, arr] of Object.entries(first)) if (arr[0] && arr[0].t === E.etMs(date, 570)) fb[s] = arr[0];
   const spy = fb.SPY; delete fb.SPY; const spyDir = spy ? (spy.c > spy.o ? 'long' : spy.c < spy.o ? 'short' : null) : null;
-  const all = rankAll(S.info, fb, W, spyDir); S.picks = all.slice(0, W.picks);
+  const all = rankAll(S.info, fb, W, spyDir).filter(c => !(W.skip || []).some(r => !r.chart && L.features(c)[r.k] === r.v)); S.picks = all.slice(0, W.picks);
   for (const p of S.picks) p.traded = true;
   L.journal(date, all, spyDir);
   S.spyDir = spyDir; S.jrows = all.slice(0, 15); S.newsSince = Date.now() - 60e3;
@@ -132,7 +132,8 @@ async function enter(date, p, px) {
   let rd = null;
   try { const bars = (await multiBars([p.sym], '1Min', E.etMs(date, 570), Date.now(), 'iex'))[p.sym] || []; rd = RD.read(bars.filter(b => b.t + 60e3 <= Date.now()), p.dir, E.etMs(date, 570), p.atr); } catch (e) { note(`${p.sym}: chart read failed ${e.message}`); }
   if (rd) { let m = 1; for (const k of RD.ENTRY_FEATURES) m *= W.emult?.[k]?.[rd.feat[k]] ?? 1;
-    if (W.entryGate > 0 && m < W.entryGate) { p.done = true; return E.tellOut(`wave skipped ${p.sym}`, `breakout came, but the chart read is weak (score ${m.toFixed(2)} < ${W.entryGate}): ${rd.text}`); } }
+    if (W.entryGate > 0 && m < W.entryGate) { p.done = true; return E.tellOut(`wave skipped ${p.sym}`, `breakout came, but the chart read is weak (score ${m.toFixed(2)} < ${W.entryGate}): ${rd.text}`); }
+    const rule = (W.skip || []).find(r => r.chart && rd.feat[r.k] === r.v); if (rule) { p.done = true; return E.tellOut(`wave skipped ${p.sym}`, `adopted rule: never trade "${rule.v}" (${rd.text})`); } }
   const stopDist = Math.max(0.02, Math.round(p.atr * W.stopAtr * 100) / 100), long = p.dir === 'long';
   const stop = Math.round((long ? px - stopDist : px + stopDist) * 100) / 100;
   const perPos = (+a.buying_power * 0.95) / Math.max(1, W.picks);
@@ -288,7 +289,8 @@ export async function learnNow(reason = 'on request') {
     }
     const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep), money = L.moneyText(rep);
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
-    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
+    const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
+    const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
     return line;
   } catch (e) { await E.tellOut('learning error', e.message); return 'Learning failed: ' + e.message; }
   finally { learnBusy = false; }

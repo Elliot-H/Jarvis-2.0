@@ -19,7 +19,7 @@ for (const d of days) {
       if (s === 'NWS1' && m === 61) p -= sg * 6;   // bad news at 10:30 -> the next candle opens far lower (gap through any stop)
       const o = p;
       if (s === 'NWS1' && m === 61) {}
-      else if (m < 5) p += sg * 0.04; else if (good) p += sg * (0.012 + (rnd() - 0.5) * 0.02); else p += (m < 6 ? sg * 0.05 : -sg * 0.03) + (rnd() - 0.5) * 0.02;
+      else if (m < 5) p += sg * 0.04; else if (s === 'NWS1' && m < 61) p += sg * 0.09; else if (good) p += sg * (0.012 + (rnd() - 0.5) * 0.02); else p += (m < 6 ? sg * 0.05 : -sg * 0.03) + (rnd() - 0.5) * 0.02;
       bars.push([m, o, Math.max(o, p) + 0.01, Math.min(o, p) - 0.01, p, 1000]);
     }
     (PATHS[d] ||= {})[s] = bars;
@@ -44,8 +44,8 @@ const d0 = days[0], bar = s => PATHS[d0][s].map(([m, o, h, l, c, v]) => ({ t: E.
 const rF = L.simulate(bar('FDA1'), rows.find(r => r.date === d0 && r.sym === 'FDA1'), L.DEFAULTS), rN = L.simulate(bar('NON1'), rows.find(r => r.date === d0 && r.sym === 'NON1'), L.DEFAULTS);
 console.log('replay FDA1', rF?.toFixed(2), 'NON1', rN?.toFixed(2)); assert(rF > 1 && rN < 0, 'replay wins/losses');
 
-const rep = await L.learn();
-console.log(L.summaryLine(rep)); console.log(L.moneyText(rep));
+const rep = await L.learn({ minRuleN: 20 });
+console.log(L.summaryLine(rep)); console.log(L.moneyText(rep)); console.log('PROPOSALS:\n' + L.proposalsText(rep));
 assert(rep.money.before.start === 3000 && rep.money.after.end > rep.money.before.end && rep.money.unseenAfter.trades > 0, 'money replay before/after from $3,000');
 assert(rep.money.after.monthly.length >= 2 && rep.money.after.maxDrawdownPct >= 0, 'monthly curve + drawdown');
 console.log('weights cat:', JSON.stringify(L.params().mult.cat), 'market:', JSON.stringify(L.params().mult.market));
@@ -54,12 +54,14 @@ assert(L.params().mult.cat.fda > 1.1 && L.params().mult.cat.none < 0.95, 'learne
 assert(L.params().mult.market['against-market'] < 1, 'learned: against-market is weaker');
 for (const v of Object.values(L.params().mult).flatMap(Object.values)) assert(v >= 0.5 && v <= 1.6, 'weights bounded');
 assert(!('riskPct' in L.params()), 'learner never touches risk per trade');
-assert(L.params().newsExit === true, 'learned: selling on bad mid-day news pays');
+assert(rep.proposals.some(x => x.id === 'news-stream'), 'proposal: real-time news stream proven (headline at 10:30, crash the next minute)');
 const o1 = {}, o2 = {}, nb = PATHS[d0].NWS1.map(([m, o, h, l, c, v]) => ({ t: E.etMs(d0, 570) + m * 60e3, o, h, l, c, v })), nr = rows.find(r => r.date === d0 && r.sym === 'NWS1');
-const withExit = L.simulate(nb, nr, { ...L.DEFAULTS, newsExit: true }, o1), noExit = L.simulate(nb, nr, { ...L.DEFAULTS, newsExit: false }, o2);
+const withExit = L.simulate(nb, nr, { ...L.DEFAULTS, newsExit: true, newsDelay: 0 }, o1), noExit = L.simulate(nb, nr, { ...L.DEFAULTS, newsExit: false }, o2);
 console.log('NWS1 news exit', withExit.toFixed(1), o1.why, '| holding', noExit.toFixed(1), o2.why); assert(withExit > noExit + 3, 'news exit beats holding through the gap');
 assert(rep.whatPredictsWins['outcome:midTradeNews'] && rep.whatPredictsWins['chart:candle'], 'report covers mid-trade news and chart reads');
+assert(Array.isArray(rep.proposals) && rep.proposals.every(x => x.evidence.after.totalR > x.evidence.before.totalR && x.effort), 'proposals carry unseen-day proof and effort');
+if (rep.proposals.some(x => x.kind === 'rule')) { const v0 = L.version(); console.log(L.adoptProposal(rep.proposals.find(x => x.kind === 'rule').id)); assert(L.version() === v0 + 1 && L.params().skip.length === 1, 'adopt applies the rule'); }
 // rollback: 15 live trades far worse than promised -> previous settings restored
 let msg = null; for (let i = 0; i < 15; i++) msg = L.recordLive(-0.8) || msg;
-console.log(msg); assert(msg && /Rolled back/.test(msg) && Object.keys(L.params().mult).length === 0, 'rollback to previous settings');
+console.log(msg); assert(msg && /Rolled back/.test(msg), 'rollback to previous settings');
 console.log('ALL LEARN TESTS PASSED'); process.exit(0);
