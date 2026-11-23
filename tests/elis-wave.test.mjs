@@ -15,7 +15,7 @@ function path(s, t) {   // price path during the day
   return sp.px + sp.dir * (0.25 + (m - 5) * 0.02);                 // breakout then trend
 }
 let NOW = T(9, 0); Date.now = () => NOW;
-const orders = [], pos = {}, pushes = [];
+const orders = [], pos = {}, pushes = [], stops = []; let rid = 0;
 global.fetch = async (url, opts = {}) => {
   const u = new URL(url), p = u.pathname, m = opts.method || 'GET', sp = u.searchParams;
   const J = (o, s = 200) => ({ ok: s < 300, status: s, text: async () => JSON.stringify(o) });
@@ -50,9 +50,15 @@ global.fetch = async (url, opts = {}) => {
     if (nq === 0) delete pos[b.symbol]; else pos[b.symbol] = { qty: String(nq), entry: px, market_value: String(nq * px), unrealized_pl: '0' };
     return J(o);
   }
-  if (p.startsWith('/v2/orders/') && m === 'PATCH') { const id = p.split('/').pop(), b = JSON.parse(opts.body); for (const o of orders) for (const x of o.legs) if (x.id === id) x.stop_price = b.stop_price; return J({}); }
-  if (p.startsWith('/v2/orders/') && m === 'DELETE') { const id = p.split('/').pop(); for (const o of orders) for (const x of [o, ...o.legs]) if (x.id === id) x.status = 'canceled'; return J({}); }
-  if (p.startsWith('/v2/orders/')) return J(orders.find(o => o.id === p.split('/').pop()));
+  if (p.startsWith('/v2/orders/') && m === 'PATCH') {   // real Alpaca: a replace creates a NEW order; the old one becomes 'replaced'
+    const id = p.split('/').pop(), b = JSON.parse(opts.body), old = [...orders.flatMap(o => o.legs.map(l => [o, l])), ...stops.map(x => [x.parent, x])].find(([, x]) => x.id === id);
+    if (!old || !['new', 'accepted'].includes(old[1].status)) return J({ message: 'order is not open' }, 422);
+    const nw = { id: 'rp' + (++rid), parent: old[0], symbol: old[0].symbol, type: 'stop', side: old[1].side, qty: old[0].qty, status: 'new', stop_price: b.stop_price, submitted_at: new Date(NOW).toISOString() };
+    Object.assign(old[1], { status: 'replaced', replaced_by: nw.id }); stops.push(nw); return J(nw);
+  }
+  if (p.startsWith('/v2/orders/') && m === 'DELETE') { const id = p.split('/').pop(); for (const x of [...orders, ...orders.flatMap(o => o.legs), ...stops]) if (x.id === id && ['new', 'accepted', 'held'].includes(x.status)) x.status = 'canceled'; return J({}); }
+  if (p.startsWith('/v2/orders/')) { const id = p.split('/').pop(); return J(orders.find(o => o.id === id) || orders.flatMap(o => o.legs).find(l => l.id === id) || stops.find(x => x.id === id)); }
+  if (p === '/v2/orders' && sp.get('status') === 'open') return J(stops.filter(x => x.status === 'new' && (!sp.get('symbols') || x.symbol === sp.get('symbols'))).map(({ parent, ...x }) => x));
   if (p === '/v2/orders') return J(orders);
   throw new Error('unmocked ' + p);
 };
@@ -62,7 +68,7 @@ assert(r[0].sym === 'X' && r[0].dir === 'long' && r[1].dir === 'short', 'rank: n
 
 E.start({ push: async (t, b) => { pushes.push(`${t} | ${b}`); }, hud: () => {} }); WV.start();
 for (; NOW < T(16, 0); NOW += 15e3) {
-  for (const o of orders) for (const l of o.legs) if (l.status === 'new' && pos[o.symbol]) {   // broker: stop legs
+  for (const [o, l] of [...orders.flatMap(o => o.legs.map(l => [o, l])), ...stops.map(x => [x.parent, x])]) if (l.status === 'new' && pos[o.symbol]) {   // broker: live stops
     const px = path(o.symbol, NOW), hit = l.side === 'sell' ? px <= +l.stop_price : px >= +l.stop_price;
     if (hit) { Object.assign(l, { status: 'filled', filled_qty: o.qty, filled_avg_price: l.stop_price }); delete pos[o.symbol]; }
   }
@@ -75,11 +81,12 @@ assert(pushes.some(x => x.includes('wave HOLDING AAA')), 'AAA kept at 11:00 (tre
 assert(pushes.some(x => /wave SOLD EEE \| bad news for the long: "EEE receives Complete Response Letter/.test(x)), 'EEE sold on mid-day bad news');
 assert(pushes.some(x => /daily review/.test(x) && /EEE long/.test(x) && /news during trade: neg/.test(x)), 'daily review explains the EEE loss with the headline');
 assert(pushes.some(x => /Chart: /.test(x)), 'entries carry the chart read');
-const bLeg = orders.find(o => o.symbol === 'BBB' && o.order_class === 'oto').legs[0];
+const bLeg = [...orders.find(o => o.symbol === 'BBB' && o.order_class === 'oto').legs, ...stops.filter(x => x.symbol === 'BBB')].find(x => x.status === 'filled');
 assert(+bLeg.filled_avg_price < +orders.find(o => o.symbol === 'BBB' && o.order_class === 'oto').filled_avg_price, 'BBB trailing stop locked profit on the short');
 assert(!orders.some(o => ['CCC', 'DDD'].includes(o.symbol)), 'CCC (not in play) and DDD (< $5) never traded');
 assert(pushes.some(x => x.includes('TRAIL STOP (profit) BBB')), 'BBB stopped out');
 const k = WV.keepAtDecision({ dir: 'long', entry: 10, r: 0.2 }, Array.from({ length: 60 }, (_, i) => ({ h: 10 + i * 0.01, l: 10 + i * 0.01, c: 10 + i * 0.01, v: 100 }))); assert(k.keep, 'keep rule unit');
 assert(orders.some(o => o.symbol === 'AAA' && /-flat-/.test(o.client_order_id)) && !pos.AAA, 'AAA flattened at the close');
 assert(ent.every(o => /^elisw-20261118-/.test(o.client_order_id)), 'tagged orders');
+assert(stops.length >= 2, 'trailing kept moving after the first replace'); assert(!stops.some(x => x.status === 'new') && !orders.flatMap(o => o.legs).some(l => l.status === 'new'), 'no stray stop order left open after the close');
 console.log('ALL WAVE TESTS PASSED'); process.exit(0);

@@ -150,7 +150,8 @@ async function manage() {
     if (t.sentExit) continue;
     const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
     if (+o.filled_qty > 0 && !t.sentFill) { t.sentFill = true; t.entry = +o.filled_avg_price; t.r = Math.abs(t.entry - t.stop) || t.r || 0.01; t.qty = +o.filled_qty; t.best = t.entry; t.legId = (o.legs || []).find(l => l.type === 'stop')?.id; note(`${sym} filled ${o.filled_qty} @ ${o.filled_avg_price}`); }
-    const ex = (o.legs || []).find(l => l.status === 'filled');
+    let ex = (o.legs || []).find(l => l.status === 'filled');
+    if (!ex && t.legId && t.sentFill) { try { const lg = await E.api(E.BASE, `/v2/orders/${t.legId}`); if (lg.status === 'filled') ex = lg; else if (lg.status === 'replaced' && lg.replaced_by) t.legId = lg.replaced_by; } catch {} }   // stop after replacements
     if (ex) { t.sentExit = true; t.exitWhy ||= 'stop'; const pnl = (t.dir === 'long' ? 1 : -1) * (+ex.filled_avg_price - +o.filled_avg_price) * +ex.filled_qty; liveDone(t, pnl); await E.tellOut(`wave ${pnl > 0 ? "TRAIL STOP (profit)" : "STOP"} ${sym}`, `out @ ${ex.filled_avg_price}, ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`); }
     if (['canceled', 'expired', 'rejected'].includes(o.status) && +o.filled_qty === 0) { t.sentExit = true; note(`${sym} entry ${o.status}`); }
   }
@@ -172,10 +173,20 @@ export function keepAtDecision(t, bars, w = W) {   // bars = today's 1-min bars 
   const keep = gainR >= w.keepMinR && sideOk && momentum;
   return { keep, why: `${gainR >= 0 ? '+' : ''}${gainR.toFixed(1)}R, ${sideOk ? 'right side of' : 'wrong side of'} VWAP ${vw?.toFixed(2)}, last 30 min ${momentum ? 'with' : 'against'} it` };
 }
+// the live protective stop for this trade (after replacements it is no longer a leg of the entry order)
+async function openStop(sym, t) {
+  const side = t.dir === 'long' ? 'sell' : 'buy', open = await E.api(E.BASE, `/v2/orders?status=open&symbols=${sym}&limit=100`);
+  return open.filter(o => o.symbol === sym && o.side === side && /stop/.test(o.type) && (!t.qty || +o.qty === +t.qty)).sort((a, b) => Date.parse(b.submitted_at) - Date.parse(a.submitted_at))[0] || null;
+}
+async function cancelStops(sym, t) {   // cancel every protective stop of this trade, including replaced versions
+  if (t.legId) await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'DELETE' }).catch(() => {});
+  for (let i = 0; i < 3; i++) { const o = await openStop(sym, t).catch(() => null); if (!o) break; await E.api(E.BASE, `/v2/orders/${o.id}`, { method: 'DELETE' }).catch(() => {}); }
+}
 async function closeOne(date, sym, t, reason) {
   t.exitWhy = reason.slice(0, 80);
   const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
   for (const x of [o, ...(o.legs || [])]) if (['new', 'accepted', 'held', 'pending_new', 'partially_filled'].includes(x.status)) await E.api(E.BASE, `/v2/orders/${x.id}`, { method: 'DELETE' }).catch(() => {});
+  await cancelStops(sym, t);
   let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
   t.sentExit = true;
   if (!pos) return;
@@ -193,8 +204,8 @@ async function contextExit(date, now) {
     if (W.marketExit > 0 && t.spy0 && spyNow) { const mv = (spyNow / t.spy0 - 1) * 100 * (t.dir === 'long' ? 1 : -1); if (mv <= -W.marketExit) { await closeOne(date, sym, t, `market turned against it (SPY ${mv.toFixed(2)}% since entry)`); continue; } }
     const ns = trailStop(t, px);
     if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
-      try { await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
-      catch (e) { note(`${sym}: stop amend failed ${e.message}`); }
+      try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
+      catch (e) { note(`${sym}: stop amend failed ${e.message}`); if (e.status === 422) { const cur = await openStop(sym, t).catch(() => null); if (cur) t.legId = cur.id; } }
     }
   }
   if (!W.smartExit || now.min < W.decideAt || now.min === S.lastMinute) return;
@@ -220,6 +231,7 @@ async function flatten(date) {
     try {
       const o = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
       for (const x of [o, ...(o.legs || [])]) if (['new', 'accepted', 'held', 'pending_new', 'partially_filled'].includes(x.status)) await E.api(E.BASE, `/v2/orders/${x.id}`, { method: 'DELETE' }).catch(() => {});
+      await cancelStops(sym, t);   // no stray stop may survive the close (it could open a new position)
       let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
       if (pos && +o.filled_qty > 0) {
         await E.api(E.BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, qty: String(Math.abs(+pos.qty)), side: +pos.qty > 0 ? 'sell' : 'buy', type: 'market', time_in_force: 'day', client_order_id: `${tag(date, sym)}-flat-${Date.now().toString(36)}` }) });
@@ -312,10 +324,12 @@ async function recover(date) {
   if (!orders.length) return;
   for (const o of orders.filter(o => !/-flat-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
     const sym = o.symbol, leg = (o.legs || []).find(l => l.type === 'stop'), flat = orders.some(x => x.symbol === sym && /-flat-/.test(x.client_order_id) && +x.filled_qty > 0);
-    const entry = +o.filled_avg_price || null, stop = leg ? +leg.stop_price : null;
+    const entry = +o.filled_avg_price || null;
     let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
-    S.trades[sym] = { id: o.id, qty: +o.filled_qty || +o.qty, stop, dir: o.side === 'buy' ? 'long' : 'short', sentFill: +o.filled_qty > 0, entry, legId: leg?.id,
-      r: entry && stop ? Math.abs(entry - stop) : 0.01, best: entry, at: Date.parse(o.submitted_at), events: [], recovered: true,
+    const live = pos ? await openStop(sym, { dir: o.side === 'buy' ? 'long' : 'short', qty: +o.filled_qty }).catch(() => null) : null;
+    S.trades[sym] = { id: o.id, qty: +o.filled_qty || +o.qty, dir: o.side === 'buy' ? 'long' : 'short', sentFill: +o.filled_qty > 0, entry,
+      stop: live ? +live.stop_price : leg ? +leg.stop_price : null, legId: live?.id || leg?.id,
+      r: entry && leg ? Math.abs(entry - +leg.stop_price) || 0.01 : 0.01, best: entry, at: Date.parse(o.submitted_at), events: [], recovered: true,
       ...(E.et().min >= W.decideAt ? { decided: true, runner: true } : {}),   // still open after 11:00 = it already passed the keep rule
       sentExit: flat || leg?.status === 'filled' || (+o.filled_qty > 0 && !pos) || (['canceled', 'expired', 'rejected'].includes(o.status) && +o.filled_qty === 0) };
   }

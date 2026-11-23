@@ -197,6 +197,9 @@ export const HS = { phase: 'idle', startedAt: null, rate: null };   // live prog
 export const historyState = () => load(HF, { done: [], finished: false, from: null });
 export async function history({ from = '2024-01-02', progress = null, shouldStop = () => false, gap = 0 } = {}) {
   const runStart = Date.now(), done0 = (historyState().done || []).length; HS.phase = 'starting'; HS.startedAt = runStart;
+  // free space first: uncompressed bar files from the first (core-only) study are ~5x larger than needed
+  try { let freed = 0; for (const f of fs.readdirSync(BAR_DIR)) if (f.endsWith('.json')) { const fp = path.join(BAR_DIR, f); freed += fs.statSync(fp).size; fs.unlinkSync(fp); } if (freed) progress?.(`freed ${Math.round(freed / 1e6)} MB of old uncompressed bars`); } catch {}
+  HS.diskFreeMB = Math.round(freeMB());
   const st = historyState(); if (st.finished && st.from === from) return { finished: true, sessions: st.done.length };
   st.from = from; st.done ||= []; st.win ||= {};
   const today = E.et().date, warm = new Date(Date.parse(from) - 45 * 86400e3).toISOString().slice(0, 10);
@@ -230,7 +233,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   for (const d of cal) {
     if (d < warm || (done.has(d) && d >= from) || (d < from && st.done.length)) continue;   // on resume the volume window is restored from the saved state
     if (shouldStop()) { save(HF, st); HS.phase = 'paused (market hours)'; return { paused: true, sessions: st.done.length }; }
-    if (freeMB() < 120) { save(HF, st); return { paused: true, diskLow: true, sessions: st.done.length }; }
+    if (freeMB() < 60) { save(HF, st); HS.phase = 'stopped: disk nearly full'; return { paused: true, diskLow: true, sessions: st.done.length }; }
     const k = di.get(d), elig = [];
     for (const [s, x] of D) {
       if (k < 15) break;
