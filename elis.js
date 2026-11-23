@@ -274,6 +274,7 @@ export function start(opts = {}) {
   if (opts.push) push = opts.push;
   if (opts.hud) hud = opts.hud;
   if (!enabled() || timer) return false;
+  if (!strategyOn('sweep')) { setInterval(() => sendHud(), 60e3); setTimeout(() => sendHud(true), 12e3); timer = 'hud-only'; return true; }
   if (!LIVE && /^AK/.test(KEY())) { console.warn('[elis] ALPACA keys are LIVE keys but Elis is paper-only: set ELIS_KEY_ID/ELIS_SECRET to paper keys.'); return false; }
   timer = setInterval(() => tick(), 15e3); setTimeout(() => tick(), 10e3);
   setInterval(() => sendHud(), 60e3); setTimeout(() => sendHud(true), 12e3);
@@ -310,15 +311,16 @@ export function runBacktest(all, dates, cfg = CFG) {
 
 // ---------------- HUD panel: P/L graph + today / lifetime numbers ----------------
 // Elis P/L = cash flow of its own fills (client_order_id elis-*: entries, bracket exits, EOD flatten) + any open Elis position.
-let hudCache = { at: 0, v: null };
+let hudCache = { at: 0, v: null }, extraOpen = () => [];
+export const setExtraOpen = f => { extraOpen = f; };
 export async function summary(force = false) {
   if (!force && hudCache.v && Date.now() - hudCache.at < 55e3) return hudCache.v;
   const a = await api(BASE, '/v2/account');
   const fills = []; let until = '';
   for (let page = 0; page < 10; page++) {
-    const q = new URLSearchParams({ status: 'closed', nested: 'true', limit: '500', symbols: CFG.symbol, direction: 'desc' }); if (until) q.set('until', until);
+    const q = new URLSearchParams({ status: 'closed', nested: 'true', limit: '500', direction: 'desc' }); if (until) q.set('until', until);
     const list = await api(BASE, `/v2/orders?${q}`);
-    for (const o of list) for (const x of [o, ...(o.legs || [])]) if (/^elis-\d{8}/.test(o.client_order_id || '') && +x.filled_qty > 0) fills.push({ day: o.client_order_id.slice(5, 13), side: x.side, qty: +x.filled_qty, px: +x.filled_avg_price });
+    for (const o of list) { const mt = (o.client_order_id || '').match(/^elisw?-(\d{8})/); if (mt) for (const x of [o, ...(o.legs || [])]) if (+x.filled_qty > 0) fills.push({ day: mt[1], side: x.side, qty: +x.filled_qty, px: +x.filled_avg_price }); }
     if (list.length < 500) break; until = list.at(-1).submitted_at;
   }
   const byDay = {};
@@ -326,6 +328,7 @@ export async function summary(force = false) {
   const today = et().date.replace(/-/g, '');
   const pos = await position().catch(() => null);
   if (pos && S.orderId) byDay[today] = (byDay[today] || 0) + +pos.market_value;   // open Elis trade marked to market (short = negative value)
+  for (const v of extraOpen()) byDay[today] = (byDay[today] || 0) + v;            // open Wave positions marked to market
   const days = Object.keys(byDay).sort(); let cum = 0;
   const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
   const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;
@@ -339,3 +342,8 @@ async function sendHud(force = false) {
 }
 export const lastHud = () => (hudCache.v ? { type: 'elis', ...hudCache.v } : null);
 export const _tick = () => tick();
+// shared with elis-wave.js
+export { api, BASE, DATA, riskOk };
+export const tellOut = (t, b) => tell(t, b);
+export const noteOut = m => note(m);
+export const strategyOn = name => (clean(env.ELIS_STRATEGIES) || 'sweep,wave').split(',').map(x => x.trim()).includes(name);

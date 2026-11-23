@@ -190,7 +190,7 @@ export const SIGNAL_TOOLS = [
 ];
 
 export const ELIS_TOOLS = [
-  { name: 'elis_status', description: 'Elis, the fully automated day-trading bot (paper account unless the Owner set the live switches): running or halted, mode, today\'s Asia/London/pre-market levels, today\'s trade, recent trades, last errors and its rules. Use for "how is Elis doing", "did Elis trade today", "is Elis on".', shape: {} },
+  { name: 'elis_status', description: 'Elis, the fully automated day-trading bot (paper account unless the Owner set the live switches). Two strategies: sweep (QQQ levels + fair value gap) and wave (morning breakout on the top 3 stocks in play by opening volume and news). Running or halted, mode, today\'s levels, today\'s wave picks with headlines, trades, recent results, last errors and rules. Use for "how is Elis doing", "what did Elis pick today", "did Elis trade today", "is Elis on".', shape: {} },
   { name: 'elis_backtest', description: 'Backtest Elis\'s strategy on real Alpaca QQQ history (default 120 trading days, max 500). Returns trades, win rate, total R, profit factor, return at 1% risk and max drawdown. Takes up to a minute. Use for "backtest Elis", "would Elis have made money".', shape: { days: z.number().int().positive().max(500).optional(), rr: z.number().positive().optional(), noShort: z.boolean().optional() } }
 ];
 export const TRADE_TOOLS = [
