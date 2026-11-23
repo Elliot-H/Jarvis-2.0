@@ -347,7 +347,7 @@ async function recover(date) {
   const after = new Date(E.etMs(date, 0)).toISOString(), pre = `elisw-${date.replace(/-/g, '')}-`;
   const orders = (await E.api(E.BASE, `/v2/orders?status=all&nested=true&limit=500&after=${encodeURIComponent(after)}`)).filter(o => (o.client_order_id || '').startsWith(pre));
   if (!orders.length) return;
-  for (const o of orders.filter(o => !/-flat-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
+  for (const o of orders.filter(o => !/-(flat|stop)-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
     const sym = o.symbol, leg = (o.legs || []).find(l => l.type === 'stop'), flat = orders.some(x => x.symbol === sym && /-flat-/.test(x.client_order_id) && +x.filled_qty > 0);
     const entry = +o.filled_avg_price || null;
     let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}

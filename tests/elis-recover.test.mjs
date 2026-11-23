@@ -7,8 +7,10 @@ const date = '2026-11-18', T = (h, m) => E.etMs(date, h * 60 + m); let NOW = T(1
 const orders = [
   { id: 'a1', symbol: 'AAA', side: 'buy', qty: '100', filled_qty: '100', filled_avg_price: '50.30', status: 'filled', order_class: 'oto', submitted_at: new Date(T(9, 40)).toISOString(), client_order_id: 'elisw-20261118-AAA-x1', legs: [{ id: 'aL', type: 'stop', side: 'sell', status: 'canceled', stop_price: '50.10' }] },   // stop lost, like MNRO on 2026-11-23
   { id: 'b1', symbol: 'BBB', side: 'sell', qty: '50', filled_qty: '50', filled_avg_price: '79.70', status: 'filled', order_class: 'oto', submitted_at: new Date(T(9, 41)).toISOString(), client_order_id: 'elisw-20261118-BBB-x2', legs: [{ id: 'bL', type: 'stop', side: 'buy', status: 'filled', filled_qty: '50', filled_avg_price: '79.90', stop_price: '79.90' }] },
+  { id: 'c1', symbol: 'CCC', side: 'sell', qty: '10', filled_qty: '10', filled_avg_price: '20', status: 'filled', order_class: 'oto', submitted_at: new Date(T(9, 42)).toISOString(), client_order_id: 'elisw-20261118-CCC-x3', legs: [{ id: 'cL', type: 'stop', side: 'buy', status: 'canceled', stop_price: '20.4' }] },
+  { id: 'c2', symbol: 'CCC', side: 'buy', qty: '10', filled_qty: '0', status: 'new', type: 'stop', stop_price: '19.9', submitted_at: new Date(T(10, 15)).toISOString(), client_order_id: 'elisw-20261118-CCC-stop-abc', legs: [] },
   { id: 'z9', symbol: 'MINE', side: 'buy', qty: '5', filled_qty: '5', filled_avg_price: '10', status: 'filled', submitted_at: new Date(T(9, 50)).toISOString(), client_order_id: 'owner-manual', legs: [] }];
-const pos = { AAA: { qty: '100', unrealized_pl: '150', market_value: '5045', current_price: '51.5' }, MINE: { qty: '5', unrealized_pl: '1', market_value: '51' } }, pushes = [], posted = [];
+const pos = { CCC: { qty: '-10', unrealized_pl: '3', market_value: '-197', current_price: '19.7' }, AAA: { qty: '100', unrealized_pl: '150', market_value: '5045', current_price: '51.5' }, MINE: { qty: '5', unrealized_pl: '1', market_value: '51' } }, pushes = [], posted = [];
 global.fetch = async (url, opts = {}) => {
   const u = new URL(url), p = u.pathname, m = opts.method || 'GET', J = (o, s = 200) => ({ ok: s < 300, status: s, text: async () => JSON.stringify(o) });
   if (p === '/v2/clock') return J({ is_open: NOW < T(16, 0), next_open: new Date(T(9, 30) + 86400e3).toISOString(), next_close: new Date(T(16, 0)).toISOString() });
@@ -34,4 +36,5 @@ assert(st && st.side === 'sell' && +st.stop_price < 51.5 && +st.stop_price >= 50
 assert(pushes.some(x => /stop restored AAA/.test(x)), 'Owner is told the stop was restored');
 assert(posted.filter(b => b.symbol === 'AAA' && b.type === 'stop').length === 1, 'restored once, not every tick');
 assert(st.canceled, 'restored stop cancelled at the close (no stray order)');
+assert(pushes.some(x => /still managing .*CCC/.test(x)), 'a restored stop is not mistaken for a new trade; CCC short is still managed');
 console.log('RECOVER TEST PASSED'); process.exit(0);
