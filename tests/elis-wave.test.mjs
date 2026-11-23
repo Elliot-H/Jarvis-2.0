@@ -4,7 +4,7 @@ const E = await import('../elis.js'), WV = await import('../elis-wave.js');
 const assert = (c, m) => { if (!c) { console.error('FAIL', m); process.exit(1); } };
 const date = '2026-11-18', T = (h, m, d = date) => E.etMs(d, h * 60 + m);
 // symbols: AAA strong long + news, BBB strong short, CCC normal volume (not in play), DDD cheap (filtered)
-const SPEC = { AAA: { px: 50, dir: 1, rv: 4, news: 'AAA wins FDA approval for lead drug' }, BBB: { px: 80, dir: -1, rv: 3 }, EEE: { px: 40, dir: 1, rv: 2 }, CCC: { px: 30, dir: 1, rv: 0.6 }, DDD: { px: 3, dir: 1, rv: 9 } };
+const SPEC = { AAA: { px: 50, dir: 1, rv: 4, news: 'AAA wins FDA approval for lead drug' }, BBB: { px: 80, dir: -1, rv: 3 }, EEE: { px: 40, dir: 1, rv: 2 }, CCC: { px: 30, dir: 1, rv: 0.6 }, DDD: { px: 3, dir: 1, rv: 9 }, SPY: { px: 500, dir: 1, rv: 1 } };
 const past = ['2026-10-27','2026-10-28','2026-10-29','2026-10-30','2026-10-31','2026-11-03','2026-11-04','2026-11-05','2026-11-06','2026-11-07','2026-11-10','2026-11-11','2026-11-12','2026-11-13','2026-11-14','2026-11-17'];
 function dailyBars(s) { const p = SPEC[s].px; return past.concat(['2026-11-16']).sort().map((d, i) => ({ t: new Date(T(0, 0, d)).toISOString(), o: p, h: p + 1, l: p - 1, c: p, v: 2e6 })); }
 function path(s, t) {   // price path during the day
@@ -22,7 +22,10 @@ global.fetch = async (url, opts = {}) => {
   if (p === '/v2/clock') return J({ is_open: NOW >= T(9, 30) && NOW < T(16, 0), next_open: new Date(NOW < T(9, 30) ? T(9, 30) : T(9, 30) + 86400e3).toISOString(), next_close: new Date(T(16, 0)).toISOString() });
   if (p.includes('most-actives')) return J({ most_actives: [{ symbol: 'AAA' }, { symbol: 'CCC' }, { symbol: 'EEE' }] });
   if (p.includes('movers')) return J({ gainers: [{ symbol: 'DDD' }], losers: [{ symbol: 'BBB' }] });
-  if (p === '/v1beta1/news') return J({ news: [{ headline: SPEC.AAA.news, symbols: ['AAA'] }], next_page_token: null });
+  if (p === '/v1beta1/news') {
+    const st = Date.parse(sp.get('start') || 0), items = [{ id: 1, headline: SPEC.AAA.news, symbols: ['AAA'], created_at: new Date(T(8, 0)).toISOString() }, { id: 2, headline: 'EEE receives Complete Response Letter from FDA', symbols: ['EEE'], created_at: new Date(T(10, 20)).toISOString() }];
+    return J({ news: items.filter(n => Date.parse(n.created_at) >= st && Date.parse(n.created_at) <= NOW), next_page_token: null });
+  }
   if (p === '/v2/calendar') return J(past.map(d => ({ date: d })).concat([{ date }]));
   if (p === '/v2/stocks/bars') {
     const syms = sp.get('symbols').split(',').filter(s => SPEC[s]), tf = sp.get('timeframe'), st = Date.parse(sp.get('start')), bars = {};
@@ -69,7 +72,9 @@ console.log(pushes.join('\n')); console.log(JSON.stringify(WV.status().picks));
 const ent = orders.filter(o => o.order_class === 'oto');
 assert(ent.length === 3 && ent.some(o => o.symbol === 'AAA' && o.side === 'buy') && ent.some(o => o.symbol === 'BBB' && o.side === 'sell') && ent.some(o => o.symbol === 'EEE'), 'entries AAA long, BBB short, EEE long');
 assert(pushes.some(x => x.includes('wave HOLDING AAA')), 'AAA kept at 11:00 (trending)');
-assert(pushes.some(x => /wave SOLD EEE \| 11:00 exit/.test(x)), 'EEE sold at 11:00 (stalled)');
+assert(pushes.some(x => /wave SOLD EEE \| bad news for the long: "EEE receives Complete Response Letter/.test(x)), 'EEE sold on mid-day bad news');
+assert(pushes.some(x => /daily review/.test(x) && /EEE long/.test(x) && /news during trade: neg/.test(x)), 'daily review explains the EEE loss with the headline');
+assert(pushes.some(x => /Chart: /.test(x)), 'entries carry the chart read');
 const bLeg = orders.find(o => o.symbol === 'BBB' && o.order_class === 'oto').legs[0];
 assert(+bLeg.filled_avg_price < +orders.find(o => o.symbol === 'BBB' && o.order_class === 'oto').filled_avg_price, 'BBB trailing stop locked profit on the short');
 assert(!orders.some(o => ['CCC', 'DDD'].includes(o.symbol)), 'CCC (not in play) and DDD (< $5) never traded');

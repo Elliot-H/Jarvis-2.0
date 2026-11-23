@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as E from './elis.js';
+import * as RD from './elis-read.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(path.dirname(new URL(import.meta.url).pathname), 'data'), 'elis');
 const F = { journal: path.join(DIR, 'journal.jsonl'), params: path.join(DIR, 'params.json'), report: path.join(DIR, 'learn-report.json') };
@@ -30,14 +31,17 @@ export function features(c) {
     rvol: r < 2 ? 'rvol1-2' : r < 4 ? 'rvol2-4' : r < 8 ? 'rvol4-8' : 'rvol8+',
     orAtr: ora < 0.15 ? 'tight-range' : ora < 0.35 ? 'normal-range' : 'wide-range',
     market: !c.spyDir ? 'mkt-flat' : c.spyDir === c.dir ? 'with-market' : 'against-market',
-    side: c.dir
+    side: c.dir,
+    newsTone: c.tone || (c.news ? 'news-neutral' : 'none'),
+    comboNewsMarket: `${c.tone || (c.news ? 'news-neutral' : 'none')}+${!c.spyDir ? 'mkt-flat' : c.spyDir === c.dir ? 'with-market' : 'against-market'}`
   };
 }
-export const FEATURE_NAMES = ['cat', 'gap', 'gapDir', 'rvol', 'orAtr', 'market', 'side'];
+export const FEATURE_NAMES = ['cat', 'gap', 'gapDir', 'rvol', 'orAtr', 'market', 'side', 'newsTone', 'comboNewsMarket'];
 
 // ---------- settings: defaults, bounds, steps (risk per trade is NOT here on purpose) ----------
-export const DEFAULTS = { picks: 3, stopAtr: 0.10, trailR: 1, keepMinR: 1, entryEnd: 660, minRvol: 1, mult: {} };
-const GRID = { picks: [1, 2, 3, 4, 5], stopAtr: [0.05, 0.075, 0.10, 0.15, 0.20], trailR: [0.5, 0.75, 1, 1.5, 2], keepMinR: [0.5, 1, 1.5, 2], entryEnd: [600, 630, 660, 690], minRvol: [1, 1.5, 2, 3] };
+export const DEFAULTS = { picks: 3, stopAtr: 0.10, trailR: 1, keepMinR: 1, entryEnd: 660, minRvol: 1, entryGate: 0, newsExit: true, marketExit: 0, mult: {}, emult: {} };
+const GRID = { picks: [1, 2, 3, 4, 5], stopAtr: [0.05, 0.075, 0.10, 0.15, 0.20], trailR: [0.5, 0.75, 1, 1.5, 2], keepMinR: [0.5, 1, 1.5, 2], entryEnd: [600, 630, 660, 690], minRvol: [1, 1.5, 2, 3],
+  entryGate: [0, 0.85, 0.95, 1.05], newsExit: [false, true], marketExit: [0, 0.3, 0.5, 0.8] };
 const MULT_MIN = 0.5, MULT_MAX = 1.6, SHRINK = 25;
 
 let P = load(F.params, { version: 0, params: { ...DEFAULTS }, history: [], adoptedAt: null, baselineAvgR: null });
@@ -48,8 +52,12 @@ export const version = () => P.version;
 
 // ---------- journal ----------
 export function journal(date, cands, spyDir) {
-  const lines = cands.slice(0, 15).map(c => JSON.stringify({ date, sym: c.sym, dir: c.dir, rvol: c.rvol, gapPct: c.gapPct, atr: c.atr, orHigh: c.orHigh, orLow: c.orLow, open: c.open, cat: c.cat, news: !!c.headline, spyDir, traded: !!c.traded, v: P.version })).join('\n');
+  const lines = cands.slice(0, 15).map(c => JSON.stringify(row(date, c, spyDir))).join('\n');
   if (lines) try { fs.appendFileSync(F.journal, lines + '\n'); } catch (e) { E.noteOut('journal write failed ' + e.message); }
+}
+export const row = (date, c, spyDir) => ({ date, sym: c.sym, dir: c.dir, rvol: c.rvol, gapPct: c.gapPct, atr: c.atr, orHigh: c.orHigh, orLow: c.orLow, open: c.open, cat: c.cat, news: !!c.headline, tone: c.tone, spyDir, traded: !!c.traded, intraday: c.intraday || [], post: c.post || null, v: P.version });
+export function journalUpdate(rows) {   // end of day: same rows again with mid-day news + post-mortem (last write wins)
+  if (rows.length) try { fs.appendFileSync(F.journal, rows.map(r => JSON.stringify(r)).join('\n') + '\n'); } catch {}
 }
 export function readJournal() {
   let rows = []; try { rows = fs.readFileSync(F.journal, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
@@ -58,29 +66,41 @@ export function readJournal() {
 }
 
 // ---------- replay one candidate with the Wave rules (pure; mirrors elis-wave.js live logic) ----------
-export function simulate(bars, c, p) {
-  const long = c.dir === 'long', lvl = long ? c.orHigh : c.orLow, slip = 0.01, startT = E.etMs(c.date, 575), entryEndT = E.etMs(c.date, p.entryEnd), decideT = E.etMs(c.date, 660), flatT = E.etMs(c.date, 955);
-  let entry = null, stop, r, best, decided = false, runner = false, pv = 0, vv = 0;
+export function simulate(bars, c, p, out = {}, spy = null) {
+  const long = c.dir === 'long', lvl = long ? c.orHigh : c.orLow, slip = 0.01, t0 = E.etMs(c.date, 570), startT = E.etMs(c.date, 575), entryEndT = E.etMs(c.date, p.entryEnd), decideT = E.etMs(c.date, 660), flatT = E.etMs(c.date, 955);
+  const news = (c.intraday || []).map(e => ({ t: t0 + e.m * 60e3, adverse: RD.adverse(e.tone, c.dir), h: e.headline })).filter(e => e.adverse).sort((a, b) => a.t - b.t);
+  const spyAt = spy ? new Map(spy.map(b => [b.t, b.c])) : null;
+  let entry = null, entryT, spy0, stop, r, best, decided = false, runner = false, pv = 0, vv = 0;
+  const done = (R, why) => { out.R = R; out.why = why; return R; };
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i]; pv += (b.h + b.l + b.c) / 3 * b.v; vv += b.v; const vwap = vv ? pv / vv : b.c;
     if (b.t < startT) continue;
     if (entry === null) {
       if (b.t >= entryEndT) return null;
-      if (long ? b.h > lvl : b.l < lvl) { entry = (long ? Math.max(lvl, b.o) : Math.min(lvl, b.o)) + (long ? slip : -slip); r = Math.max(0.02, c.atr * p.stopAtr); stop = long ? entry - r : entry + r; best = entry;
-        if (long ? b.l <= stop : b.h >= stop) return -1 - 2 * slip / r; }   // stopped in the entry bar (conservative)
+      if (long ? b.h > lvl : b.l < lvl) {
+        const rd = RD.read(bars.slice(0, i), c.dir, t0, c.atr); out.ef = rd.feat; out.read = rd.text;   // what the chart said at the breakout
+        let m = 1; for (const k of RD.ENTRY_FEATURES) m *= p.emult?.[k]?.[rd.feat[k]] ?? 1;
+        if (p.entryGate > 0 && m < p.entryGate) { out.skipped = true; return null; }
+        entry = (long ? Math.max(lvl, b.o) : Math.min(lvl, b.o)) + (long ? slip : -slip); entryT = b.t; spy0 = spyAt?.get(b.t); r = Math.max(0.02, c.atr * p.stopAtr); stop = long ? entry - r : entry + r; best = entry;
+        if (long ? b.l <= stop : b.h >= stop) return done(-1 - 2 * slip / r, 'stopped on the entry candle');
+      }
       continue;
     }
-    if (b.t >= flatT) return (long ? b.o - entry : entry - b.o) / r - slip / r;
-    if (long ? b.l <= stop : b.h >= stop) return (long ? stop - entry : entry - stop) / r - slip / r;
+    const gain = px => (long ? px - entry : entry - px) / r - slip / r;
+    if (b.t >= flatT) return done(gain(b.o), 'closed 15:55');
+    if (long ? b.l <= stop : b.h >= stop) return done(gain(long ? Math.min(stop, b.o) : Math.max(stop, b.o)), stop === entry - (long ? r : -r) ? 'stop' : 'trailing stop');   // a gap through the stop fills at the gap
+    const ev = news.find(e => e.t > entryT && e.t <= b.t);
+    if (ev) { out.adverseNews = ev.h; if (p.newsExit) return done(gain(b.c), 'bad news: ' + ev.h); }
+    if (p.marketExit > 0 && spy0 && spyAt?.get(b.t)) { const mv = (spyAt.get(b.t) / spy0 - 1) * 100 * (long ? 1 : -1); if (mv <= -p.marketExit) return done(gain(b.c), `market turned (SPY ${mv.toFixed(2)}%)`); }
     best = long ? Math.max(best, b.h) : Math.min(best, b.l);
     if ((long ? best - entry : entry - best) / r >= p.trailR) { const ns = long ? Math.max(entry, best - p.trailR * r) : Math.min(entry, best + p.trailR * r); stop = long ? Math.max(stop, ns) : Math.min(stop, ns); }
     if (!decided && b.t + 60e3 >= decideT) {
       decided = true;
       const gainR = (long ? b.c - entry : entry - b.c) / r, ago = bars[Math.max(0, i - 30)].c, mom = long ? b.c > ago : b.c < ago, side = long ? b.c > vwap : b.c < vwap;
-      if (gainR >= p.keepMinR && side && mom) runner = true; else return gainR - slip / r;
-    } else if (runner && (long ? b.c < vwap : b.c > vwap)) return (long ? b.c - entry : entry - b.c) / r - slip / r;
+      if (gainR >= p.keepMinR && side && mom) runner = true; else return done(gainR - slip / r, '11:00 exit');
+    } else if (runner && (long ? b.c < vwap : b.c > vwap)) return done(gain(b.c), 'closed through VWAP');
   }
-  return entry === null ? null : ((long ? bars.at(-1).c - entry : entry - bars.at(-1).c) / r);
+  return entry === null ? null : done((long ? bars.at(-1).c - entry : entry - bars.at(-1).c) / r, 'data end');
 }
 
 // ---------- evaluate a settings set over days ----------
@@ -89,28 +109,35 @@ export function evaluate(byDay, barsOf, p) {
   let n = 0, sum = 0, wins = 0, winR = 0, lossR = 0; const trades = [];
   for (const [date, cands] of byDay) {
     const pick = cands.filter(c => c.rvol >= p.minRvol).sort((a, b) => score(b, p) - score(a, p)).slice(0, p.picks);
-    for (const c of pick) { const b = barsOf(date, c.sym); if (!b) continue; const R = simulate(b, c, p); if (R === null) continue; n++; sum += R; if (R > 0) { wins++; winR += R; } else lossR -= R; trades.push({ date, sym: c.sym, R }); }
+    for (const c of pick) { const b = barsOf(date, c.sym); if (!b) continue; const R = simulate(b, c, p, {}, barsOf(date, 'SPY')); if (R === null) continue; n++; sum += R; if (R > 0) { wins++; winR += R; } else lossR -= R; trades.push({ date, sym: c.sym, R }); }
   }
   return { trades: n, totalR: sum, avgR: n ? sum / n : 0, winRate: n ? wins / n : 0, avgWinR: wins ? winR / wins : 0, avgLossR: n - wins ? lossR / (n - wins) : 0, list: trades };
 }
 
 // ---------- learn which information predicts winners (shrunk bucket expectancy) ----------
 export function learnWeights(byDay, barsOf, p) {
-  const acc = {};
+  const acc = {}, eacc = {}, why = {}, pOpen = { ...p, entryGate: 0 };
+  const bump = (A, k, v, R) => { const a = ((A[k] ||= {})[v] ||= { n: 0, sum: 0, wins: 0 }); a.n++; a.sum += R; if (R > 0) a.wins++; };
   for (const [date, cands] of byDay) for (const c of cands) {
-    if (c.rvol < p.minRvol) continue; const b = barsOf(date, c.sym); if (!b) continue; const R = simulate(b, c, p); if (R === null) continue;
-    const f = features(c); for (const k of FEATURE_NAMES) { const a = ((acc[k] ||= {})[f[k]] ||= { n: 0, sum: 0, wins: 0 }); a.n++; a.sum += R; if (R > 0) a.wins++; }
+    if (c.rvol < p.minRvol) continue; const b = barsOf(date, c.sym); if (!b) continue;
+    const o = {}, R = simulate(b, c, pOpen, o, barsOf(date, 'SPY')); if (R === null) continue;
+    const f = features(c); for (const k of FEATURE_NAMES) bump(acc, k, f[k], R);
+    if (o.ef) for (const k of RD.ENTRY_FEATURES) bump(eacc, k, o.ef[k], R);
+    bump(why, 'exit', String(o.why || '').replace(/:.*/, ''), R);
+    if (o.adverseNews) bump(why, 'midTradeNews', 'bad news hit during trade', R);
   }
-  const mult = {}, table = {};
-  for (const [k, buckets] of Object.entries(acc)) {
-    const all = Object.values(buckets).reduce((x, y) => ({ n: x.n + y.n, sum: x.sum + y.sum }), { n: 0, sum: 0 }), base = all.n ? all.sum / all.n : 0;
-    for (const [v, a] of Object.entries(buckets)) {
-      const edge = (a.sum - base * a.n) / (a.n + SHRINK);   // how much better than average this bucket is, shrunk toward 0 when the sample is small
-      (mult[k] ||= {})[v] = Math.round(Math.min(MULT_MAX, Math.max(MULT_MIN, Math.exp(edge))) * 100) / 100;
-      (table[k] ||= {})[v] = { trades: a.n, avgR: Math.round(a.sum / a.n * 100) / 100, winRate: Math.round(a.wins / a.n * 100), weight: mult[k][v] };
+  const toMult = A => { const mult = {}, table = {};
+    for (const [k, buckets] of Object.entries(A)) {
+      const all = Object.values(buckets).reduce((x, y) => ({ n: x.n + y.n, sum: x.sum + y.sum }), { n: 0, sum: 0 }), base = all.n ? all.sum / all.n : 0;
+      for (const [v, a] of Object.entries(buckets)) {
+        const edge = (a.sum - base * a.n) / (a.n + SHRINK);   // better/worse than average, shrunk toward 0 on small samples
+        (mult[k] ||= {})[v] = Math.round(Math.min(MULT_MAX, Math.max(MULT_MIN, Math.exp(edge))) * 100) / 100;
+        (table[k] ||= {})[v] = { trades: a.n, avgR: Math.round(a.sum / a.n * 100) / 100, winRate: Math.round(a.wins / a.n * 100), weight: mult[k][v] };
+      }
     }
-  }
-  return { mult, table };
+    return { mult, table }; };
+  const a = toMult(acc), e = toMult(eacc), w = toMult(why);
+  return { mult: a.mult, emult: e.mult, table: { ...a.table, ...Object.fromEntries(Object.entries(e.table).map(([k, v]) => ['chart:' + k, v])), ...Object.fromEntries(Object.entries(w.table).map(([k, v]) => ['outcome:' + k, v])) } };
 }
 
 // ---------- data: bars per candidate-day (1-min, 09:30-16:00), cached on disk ----------
@@ -175,7 +202,9 @@ export async function bootstrap(core, days = 120) {
     if (top.length) {   // news in the 18 h before the open, for the top candidates
       try {
         const j = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: top.map(c => c.sym).join(','), start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 570)).toISOString(), limit: '50' })}`); await pause(350);
-        for (const c of top) { const n = (j.news || []).filter(x => (x.symbols || []).includes(c.sym)); if (n.length) { c.news = true; c.cat = catOf(n.map(x => x.headline).join(' '), true); } }
+        for (const c of top) { const n = (j.news || []).filter(x => (x.symbols || []).includes(c.sym)); if (n.length) { c.news = true; c.cat = catOf(n.map(x => x.headline).join(' '), true); c.tone = RD.toneOf(n.map(x => x.headline)); } }
+        const k = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: top.map(c => c.sym).join(','), start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), limit: '50', sort: 'asc' })}`); await pause(350);
+        for (const x of k.news || []) for (const c of top) if ((x.symbols || []).includes(c.sym)) (c.intraday ||= []).push({ m: Math.round((Date.parse(x.created_at) - E.etMs(d, 570)) / 60e3), tone: RD.tone(x.headline), headline: String(x.headline).slice(0, 140) });
       } catch {}
     }
     rows.push(...top);
@@ -195,12 +224,12 @@ export async function learn({ force = false } = {}) {
     const days = [...byDayAll.keys()].sort();
     if (days.length < 30) return { skipped: `only ${days.length} sessions in the journal; need 30` };
     const bars = {};
-    for (const d of days) { bars[d] = await barsForDay(d, byDayAll.get(d).map(c => c.sym)); }
+    for (const d of days) { bars[d] = await barsForDay(d, [...byDayAll.get(d).map(c => c.sym), 'SPY']); }
     const memo = new Map(), barsOf = (d, s) => { const k = d + s; if (!memo.has(k)) memo.set(k, expand(d, bars[d]?.[s])); return memo.get(k); };
     const cut = Math.floor(days.length * 0.7), trainDays = new Map(days.slice(0, cut).map(d => [d, byDayAll.get(d)])), testDays = new Map(days.slice(cut).map(d => [d, byDayAll.get(d)]));
     const cur = params(), curTest = evaluate(testDays, barsOf, cur);
     // 1) weights from TRAIN data, 2) settings one step at a time on TRAIN data
-    let cand = { ...cur, mult: learnWeights(trainDays, barsOf, cur).mult };
+    const lw0 = learnWeights(trainDays, barsOf, cur); let cand = { ...cur, mult: lw0.mult, emult: lw0.emult };
     for (let pass = 0; pass < 2; pass++) for (const [k, vals] of Object.entries(GRID)) {
       const i = vals.indexOf(cand[k]), opts = [vals[i - 1], cand[k], vals[i + 1]].filter(v => v !== undefined);
       let bestV = cand[k], bestR = -Infinity;
@@ -242,7 +271,7 @@ export function recordLive(R) {   // a finished live Wave trade, in R
 export function summaryLine(rep) {   // phone push text for a learning run
   if (!rep || rep.skipped) return rep?.skipped || 'no report';
   const best = [], worst = [];
-  for (const [k, b] of Object.entries(rep.whatPredictsWins || {})) for (const [v, x] of Object.entries(b)) if (x.trades >= 10) (x.weight >= 1.1 ? best : x.weight <= 0.9 ? worst : []).push(`${v} ${x.avgR >= 0 ? '+' : ''}${x.avgR}R`);
+  for (const [k, b] of Object.entries(rep.whatPredictsWins || {})) if (!k.startsWith('outcome:')) for (const [v, x] of Object.entries(b)) if (x.trades >= 10) (x.weight >= 1.1 ? best : x.weight <= 0.9 ? worst : []).push(`${v} ${x.avgR >= 0 ? '+' : ''}${x.avgR}R`);
   const c = rep.current, l = rep.learned;
   return `${rep.adopted ? `ADOPTED v${rep.version}` : 'Kept current settings'} (${rep.sessions} sessions, tested on the last ${rep.testSessions} it did not learn from).\n`
     + `Unseen days: win rate ${c.winRatePct}% -> ${l.winRatePct}%, avg ${c.avgR}R -> ${l.avgR}R, avg win ${c.avgWinR}R -> ${l.avgWinR}R.\n`
