@@ -175,7 +175,14 @@ export function keepAtDecision(t, bars, w = W) {   // bars = today's 1-min bars 
 }
 // the live protective stop for this trade (after replacements it is no longer a leg of the entry order)
 async function openStop(sym, t) {
-  const side = t.dir === 'long' ? 'sell' : 'buy', open = await E.api(E.BASE, `/v2/orders?status=open&symbols=${sym}&limit=100`);
+  const side = t.dir === 'long' ? 'sell' : 'buy', live = ['new', 'accepted', 'held', 'pending_new', 'pending_replace'];
+  if (t.id) {   // first the entry order's own stop leg (open lists may not include legs)
+    const p = await E.api(E.BASE, `/v2/orders/${t.id}?nested=true`);
+    const leg = (p.legs || []).find(l => /stop/.test(l.type) && live.includes(l.status)); if (leg) return leg;
+    for (const l of p.legs || []) if (l.status === 'replaced' && l.replaced_by) { try { const r = await E.api(E.BASE, `/v2/orders/${l.replaced_by}`); if (live.includes(r.status)) return r; } catch {} }
+  }
+  if (t.legId) { try { const r = await E.api(E.BASE, `/v2/orders/${t.legId}`); if (live.includes(r.status) && /stop/.test(r.type)) return r; } catch {} }
+  const open = await E.api(E.BASE, `/v2/orders?status=open&symbols=${sym}&limit=100`);
   return open.filter(o => o.symbol === sym && o.side === side && /stop/.test(o.type) && (!t.qty || +o.qty === +t.qty)).sort((a, b) => Date.parse(b.submitted_at) - Date.parse(a.submitted_at))[0] || null;
 }
 async function cancelStops(sym, t) {   // cancel every protective stop of this trade, including replaced versions

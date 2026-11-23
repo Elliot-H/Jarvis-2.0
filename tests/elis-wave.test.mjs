@@ -89,4 +89,5 @@ const k = WV.keepAtDecision({ dir: 'long', entry: 10, r: 0.2 }, Array.from({ len
 assert(orders.some(o => o.symbol === 'AAA' && /-flat-/.test(o.client_order_id)) && !pos.AAA, 'AAA flattened at the close');
 assert(ent.every(o => /^elisw-20261118-/.test(o.client_order_id)), 'tagged orders');
 assert(stops.length >= 2, 'trailing kept moving after the first replace'); assert(!stops.some(x => x.status === 'new') && !orders.flatMap(o => o.legs).some(l => l.status === 'new'), 'no stray stop order left open after the close');
+assert(!pushes.some(x => /stop restored/.test(x)), 'never adds a second stop while the OTO leg is live');
 console.log('ALL WAVE TESTS PASSED'); process.exit(0);
