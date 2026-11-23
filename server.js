@@ -3112,6 +3112,11 @@ app.post('/login', (req, res) => {
 });
 const diag = { locAt: 0, locN: 0, pollAt: 0, lock: 0, lockAt: 0 };
 const ago = t => t ? Math.round((Date.now() - t) / 1000) + 's' : 'never';
+// Elis read-only report (Owner approved 2026-11-23 09:47: private-link page, no PIN, so Claude sessions can read Elis's results). No actions, no keys.
+app.get('/elis-report/53abe9106b7dd258d82e91e8', async (_req, res) => {
+  try { res.json({ at: new Date().toISOString(), sweep: elis.status(), wave: elisWave.status(), learning: elisLearn.status(), history: (({ done, finished, from }) => ({ sessions: (done || []).length, finished, from, last: (done || []).at(-1) }))(elisLearn.historyState()), proposals: elisLearn.proposals(), hud: elis.lastHud() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/health', (_req, res) => res.type('text').send(`ok up=${Math.round(process.uptime())}s busy=${busy}${busySince ? ' for=' + Math.round((Date.now() - busySince) / 1000) + 's' : ''} queue=${queue.length} screens=${clients.size} deviceApps=${deviceClients.size} brain=${BRAIN} | phoneLoc=${ago(diag.locAt)} (${diag.locN} since boot) phonePoll=${ago(diag.pollAt)} blockedPhone=${diag.lock}${diag.lockAt ? ' last ' + ago(diag.lockAt) : ''} data=${dataMB}MB places=${(state.places || []).length} at=${state.at || '-'} atInit=${!!state.atInit} pendingQ=${state.pendingQ ? state.pendingQ.type : '-'}`));   // read on the phone to see whether Jarvis is wedged
 // Alert "Buy" button target: hand off to the Jarvis APP (jarvis://open?buy=SYM via an Android intent); with no app installed, fall back to the web page.
 app.get('/open', (req, res) => {
