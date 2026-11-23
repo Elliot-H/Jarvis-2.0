@@ -203,6 +203,7 @@ async function contextExit(date, now) {
   for (const [sym, t] of live) {
     const b = (bars[sym] || []).filter(x => x.t + 60e3 <= Date.now());
     if (!t.decided) {
+      if (!b.length) continue;   // no bars yet: decide next minute instead of selling blind
       t.decided = true; const d = keepAtDecision(t, b);
       if (d.keep) { t.runner = true; await E.tellOut(`wave HOLDING ${sym}`, `still running at 11:00: ${d.why}. Trailing stop ${t.stop}.`); }
       else await closeOne(date, sym, t, `11:00 exit: ${d.why}`);
@@ -303,6 +304,27 @@ async function learnTick() {
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
   } catch {}
 }
+// restart-safe: rebuild today's Wave trades from Alpaca (orders tagged elisw-YYYYMMDD-SYM-*), so a mid-day redeploy
+// never leaves a position unmanaged (trail, 11:00 rule, news exit, 15:55 flatten).
+async function recover(date) {
+  const after = new Date(E.etMs(date, 0)).toISOString(), pre = `elisw-${date.replace(/-/g, '')}-`;
+  const orders = (await E.api(E.BASE, `/v2/orders?status=all&nested=true&limit=500&after=${encodeURIComponent(after)}`)).filter(o => (o.client_order_id || '').startsWith(pre));
+  if (!orders.length) return;
+  for (const o of orders.filter(o => !/-flat-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
+    const sym = o.symbol, leg = (o.legs || []).find(l => l.type === 'stop'), flat = orders.some(x => x.symbol === sym && /-flat-/.test(x.client_order_id) && +x.filled_qty > 0);
+    const entry = +o.filled_avg_price || null, stop = leg ? +leg.stop_price : null;
+    let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
+    S.trades[sym] = { id: o.id, qty: +o.filled_qty || +o.qty, stop, dir: o.side === 'buy' ? 'long' : 'short', sentFill: +o.filled_qty > 0, entry, legId: leg?.id,
+      r: entry && stop ? Math.abs(entry - stop) : 0.01, best: entry, at: Date.parse(o.submitted_at), events: [], recovered: true,
+      ...(E.et().min >= W.decideAt ? { decided: true, runner: true } : {}),   // still open after 11:00 = it already passed the keep rule
+      sentExit: flat || leg?.status === 'filled' || (+o.filled_qty > 0 && !pos) || (['canceled', 'expired', 'rejected'].includes(o.status) && +o.filled_qty === 0) };
+  }
+  Object.assign(S, { scanned: true, picked: true, picks: Object.keys(S.trades).map(sym => ({ sym, done: true, dir: S.trades[sym].dir })) });
+  const open = Object.entries(S.trades).filter(([, t]) => !t.sentExit).map(([s]) => s);
+  note(`recovered ${Object.keys(S.trades).length} Wave trade(s) after restart; managing ${open.join(', ') || 'none'}`);
+  if (open.length) await E.tellOut('wave resumed', `Server restarted; still managing ${open.join(', ')} (stops, 11:00 rule, news exit, 15:55 close).`);
+}
+export const _recover = recover;
 let busy = false, timer = null;
 async function tick() {
   if (busy) return; busy = true;
@@ -311,6 +333,7 @@ async function tick() {
     const tradingDay = c.is_open || (Date.parse(c.next_open) - Date.now() < 4 * 3600e3 && E.et(Date.parse(c.next_open)).date === date);
     if (!tradingDay) return;
     if (S.day !== date) Object.assign(S, { day: date, lastMinute: -1, newsMinute: -1, info: {}, picks: [], trades: {}, jrows: [], seenNews: new Set(), flattened: false, reviewed: false, scanned: false, picked: false });
+    if (!S.recovered) { S.recovered = true; await recover(date).catch(e => note('recover failed: ' + e.message)); }
     if (!S.scanned && now.min >= W.scanAt && now.min < W.entryEnd) await scan(date);
     if (!c.is_open) return;
     const closingSoon = Date.parse(c.next_close) - Date.now() < 5 * 60e3;
