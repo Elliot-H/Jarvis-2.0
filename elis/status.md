@@ -1,1 +1,1 @@
-2026-11-23T19:09:06.306Z history: 14607 symbols, 726 sessions since 2024-01-02 (444 already done)
+2026-11-23T19:14:15.526Z history: 4528 symbols were liquid at some point; replaying sessions
