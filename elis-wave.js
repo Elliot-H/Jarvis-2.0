@@ -317,7 +317,7 @@ export async function learnNow(reason = 'on request') {
   if (learnBusy) return 'Elis is already learning.'; learnBusy = true;
   try {
     const hs = L.historyState();
-    if (!hs.finished) {
+    if (!hs.finished && !(hs.diskStop && L.freeMB() < 300)) {   // a disk-limited study only resumes once there is room (volume raised)
       await E.tellOut('history study', hs.done?.length ? `Resuming the 2024-to-now replay (${hs.done.length} sessions done).` : 'Replaying every session from Jan 2024 to now, whole market, as if live. About 1.5 hours; it pauses during market hours and resumes after.');
       let lastPub = 0; const prog = m => { note(m); if (Date.now() - lastPub > 15 * 60e3 || /replaying|symbols/.test(m)) { lastPub = Date.now(); L.publish('elis/status.md', `${new Date().toISOString()} ${m}\n`).catch(() => {}); } };
       const h = await L.history({ from: process.env.ELIS_HISTORY_FROM || '2024-01-02', progress: prog, shouldStop: marketHours });
@@ -325,7 +325,7 @@ export async function learnNow(reason = 'on request') {
       if (h.paused) { await E.tellOut('history study paused', h.diskLow ? `${h.sessions} sessions done; stopped because the server disk has under 90 MB free. Learning from what it has.` : `${h.sessions} sessions done; resumes at 9:45.`); if (!h.diskLow) return 'paused'; }
       await E.tellOut('history study done', `${h.sessions} sessions, ${h.candidates} candidates graded. Learning from them now.`);
     }
-    const rep = await L.learn({ progress: m => note(m) }); const line = L.summaryLine(rep), money = L.moneyText(rep);
+    const rep = await L.learn({ progress: m => note(m) }); if (L.historyState().diskStop) L.markLearnedAfterStop(); const line = L.summaryLine(rep), money = L.moneyText(rep);
     await E.tellOut(`learned (${reason})`, line); if (money) await E.tellOut('money replay', money);
     const props = L.proposalsText(rep); await E.tellOut(rep.proposals?.length ? `${rep.proposals.length} proven proposal(s) for you` : 'proposals', props);
     const pub = await L.publish('elis/learn-report.md', `# Elis learning report\n\n${new Date().toISOString()}\n\n${line}\n\n${money}\n\n## Proposals\n\n${L.proposalsText(rep)}\n\n\`\`\`json\n${JSON.stringify(rep, null, 1)}\n\`\`\`\n`); note('report publish: ' + pub);
@@ -337,7 +337,9 @@ async function learnTick() {
   try {
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
-    if (!L.historyState().finished) return void learnNow('history');
+    const hs = L.historyState();
+    if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
+    else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
   } catch {}
 }
