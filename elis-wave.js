@@ -21,6 +21,7 @@ import * as C from './elis-context.js';
 import * as PV from './elis-pivot.js';
 import * as JS from './elis-jumps.js';
 import * as OOS from './elis-oos.js';
+import * as WHY from './elis-why.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -382,6 +383,16 @@ export async function oosNow(year = process.env.ELIS_OOS_YEAR || '2023') {   // 
     return txt;
   } catch (e) { await E.tellOut('year test error', e.message); return e.message; } finally { learnBusy = false; }
 }
+export async function whyNow() {   // Owner: where does the moving information come from, and how much does each source weigh
+  if (learnBusy) return 'busy'; learnBusy = true;
+  try {
+    await E.tellOut('why-it-moved study', 'Checking every big intraday move of 2024-2025 for the news (outlet, warning time), SEC filings, market and sector moves that came before it.');
+    const r = await WHY.run({ progress: m => note(m), shouldStop: marketHours }); if (r.paused) return 'paused';
+    const txt = WHY.text(r); await E.tellOut('why-it-moved', txt);
+    note('why publish: ' + await L.publish('elis/why-it-moved.md', `# Elis why-it-moved study\n\n${txt}\n\n\`\`\`json\n${JSON.stringify(r, null, 1)}\n\`\`\`\n`));
+    return txt;
+  } catch (e) { await E.tellOut('why-it-moved error', e.message); return e.message; } finally { learnBusy = false; }
+}
 async function learnTick() {
   try {
     if (marketHours() || learnBusy) return;
@@ -389,7 +400,8 @@ async function learnTick() {
     const hs = L.historyState();
     if ((hs.finished || hs.diskStop) && !L.ctxDone()) return void learnNow('new context data');
     if (hs.learnedRev >= L.LEARN_REV && !OOS.lastReport()) return void oosNow();   // year test first (Owner's priority), then the jump study
-    if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();   // add market/sector/buzz context to the history and relearn
+    if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();
+    if (hs.learnedRev >= L.LEARN_REV && !WHY.lastReport()) return void whyNow();   // add market/sector/buzz context to the history and relearn
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
