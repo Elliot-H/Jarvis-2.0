@@ -149,6 +149,13 @@ export function finishWeights({ acc, eacc, why }) {
 // ---------- data: bars per candidate-day (1-min, 09:30-16:00), cached on disk ----------
 const BAR_DIR = path.join(DIR, 'bars'); try { fs.mkdirSync(BAR_DIR, { recursive: true }); } catch {}
 const pause = ms => new Promise(r => setTimeout(r, ms));
+// Alpaca call with retries: rate limits (429), server errors and network blips back off instead of stopping the study
+async function A(base, p) {
+  for (let i = 0; ; i++) {
+    try { return await E.api(base, p); }
+    catch (e) { if (i >= 6 || (e.status && e.status !== 429 && e.status < 500)) throw e; await pause(Math.min(60e3, 2000 * 2 ** i)); }
+  }
+}
 // bars on disk: gzip JSON, prices in cents (the Railway volume is only 500 MB)
 const barFile = d => path.join(BAR_DIR, d + '.json.gz');
 export function readBars(date) {
@@ -167,7 +174,7 @@ async function barsForDay(date, syms) {
       do {
         const qs = new URLSearchParams({ symbols: need.slice(i, i + 50).join(','), timeframe: '1Min', start: new Date(E.etMs(date, 570)).toISOString(), end: new Date(E.etMs(date, 960)).toISOString(), feed: 'sip', limit: '10000', adjustment: 'split' });
         if (token) qs.set('page_token', token);
-        const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(350);
+        const j = await A(E.DATA, `/v2/stocks/bars?${qs}`); await pause(350);
         for (const [s, arr] of Object.entries(j.bars || {})) (have[s] ||= []).push(...arr.map(b => [Math.round((Date.parse(b.t) - E.etMs(date, 570)) / 60e3), Math.round(b.o * 100), Math.round(b.h * 100), Math.round(b.l * 100), Math.round(b.c * 100), Math.round(b.v)]));
         token = j.next_page_token || '';
       } while (token);
@@ -190,11 +197,11 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
   const st = historyState(); if (st.finished && st.from === from) return { finished: true, sessions: st.done.length };
   st.from = from; st.done ||= []; st.win ||= {};
   const today = E.et().date, warm = new Date(Date.parse(from) - 45 * 86400e3).toISOString().slice(0, 10);
-  const cal = (await E.api(E.BASE, `/v2/calendar?start=${warm}&end=${today}`)).map(c => c.date).filter(d => d < today);
+  const cal = (await A(E.BASE, `/v2/calendar?start=${warm}&end=${today}`)).map(c => c.date).filter(d => d < today);
   const sessions = cal.filter(d => d >= from), di = new Map(cal.map((d, i) => [d, i])), N = cal.length;
   // 1) universe: every US common-stock-like symbol, active and delisted
   const assets = [];
-  for (const status of ['active', 'inactive']) { try { assets.push(...(await E.api(E.BASE, `/v2/assets?status=${status}&asset_class=us_equity`))); } catch {} await pause(gap); }
+  for (const status of ['active', 'inactive']) { try { assets.push(...(await A(E.BASE, `/v2/assets?status=${status}&asset_class=us_equity`))); } catch {} await pause(gap); }
   const syms = [...new Set(assets.filter(a => /^[A-Z]{1,5}$/.test(a.symbol) && ['NASDAQ', 'NYSE', 'ARCA', 'AMEX', 'BATS'].includes(a.exchange)).map(a => a.symbol))];
   progress?.(`history: ${syms.length} symbols, ${sessions.length} sessions since ${from} (${st.done.length} already done)`);
   // 2) daily bars for all of them, kept only for symbols that are ever liquid enough (typed arrays by session index)
@@ -204,7 +211,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
     const part = syms.slice(i, i + 100), raw = {}; let token = '';
     do {
       const qs = new URLSearchParams({ symbols: part.join(','), timeframe: '1Day', start: warm, end: cal.at(-1), feed: 'sip', limit: '10000', adjustment: 'split' }); if (token) qs.set('page_token', token);
-      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
+      const j = await A(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
       for (const [s, arr] of Object.entries(j.bars || {})) (raw[s] ||= []).push(...arr); token = j.next_page_token || '';
     } while (token);
     for (const [s, arr] of Object.entries(raw)) {
@@ -232,7 +239,7 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
     const first = {}; const ask = [...elig.map(e => e.s), 'SPY'];
     for (let i = 0; i < ask.length; i += 100) {
       const qs = new URLSearchParams({ symbols: ask.slice(i, i + 100).join(','), timeframe: '5Min', start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 575)).toISOString(), feed: 'sip', limit: '10000' });
-      const j = await E.api(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
+      const j = await A(E.DATA, `/v2/stocks/bars?${qs}`); await pause(gap);
       for (const [s, arr] of Object.entries(j.bars || {})) if (arr[0]) first[s] = arr[0];
     }
     const spyB = first.SPY, spyDir = spyB ? (spyB.c > spyB.o ? 'long' : spyB.c < spyB.o ? 'short' : null) : null, cands = [];
@@ -248,12 +255,12 @@ export async function history({ from = '2024-01-02', progress = null, shouldStop
       if (top.length) {
         const list = top.map(c => c.sym).join(',');
         try {   // pre-open news (18 h before the bell) -> type + tone
-          const j = await E.api(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: list, start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 570)).toISOString(), limit: '50' })}`); await pause(gap);
+          const j = await A(E.DATA, `/v1beta1/news?${new URLSearchParams({ symbols: list, start: new Date(E.etMs(d, 570) - 18 * 3600e3).toISOString(), end: new Date(E.etMs(d, 570)).toISOString(), limit: '50' })}`); await pause(gap);
           for (const c of top) { const hs = (j.news || []).filter(x => (x.symbols || []).includes(c.sym)).map(x => x.headline); if (hs.length) { c.news = true; c.cat = catOf(hs.join(' '), true); c.tone = RD.toneOf(hs); } }
           let token = '', pages = 0;   // mid-day news (09:30-16:00), the part Elis must learn to react to
           do {
             const q = new URLSearchParams({ symbols: list, start: new Date(E.etMs(d, 570)).toISOString(), end: new Date(E.etMs(d, 960)).toISOString(), limit: '50', sort: 'asc' }); if (token) q.set('page_token', token);
-            const k2 = await E.api(E.DATA, `/v1beta1/news?${q}`); await pause(gap);
+            const k2 = await A(E.DATA, `/v1beta1/news?${q}`); await pause(gap);
             for (const x of k2.news || []) for (const c of top) if ((x.symbols || []).includes(c.sym)) c.intraday.push({ m: Math.round((Date.parse(x.created_at) - E.etMs(d, 570)) / 60e3), tone: RD.tone(x.headline), headline: String(x.headline).slice(0, 140) });
             token = k2.next_page_token || ''; pages++;
           } while (token && pages < 4);
