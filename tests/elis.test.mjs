@@ -52,7 +52,7 @@ global.fetch = async (url, opts = {}) => {
   if (p.startsWith('/v2/orders/')) return J(orders[0]);
   throw new Error('unmocked ' + p);
 };
-E.start({ push: async (t, b) => { pushes.push(`${t} | ${b}`); } });
+const huds = []; E.start({ push: async (t, b) => { pushes.push(`${t} | ${b}`); }, hud: m => huds.push(m) });
 for (; NOW < E.etMs(date, 16 * 60); NOW += 60e3) {
   const o = orders[0], bar = DAY.find(b => b.t === NOW - 4e3 - 60e3);   // bar that just closed
   if (o && bar) {   // broker simulation
@@ -66,4 +66,6 @@ for (; NOW < E.etMs(date, 16 * 60); NOW += 60e3) {
 console.log(pushes.join('\n'));
 assert(orders.length === 1 && orders[0].order_class === 'bracket' && orders[0].side === 'sell', 'one bracket short order');
 assert(pushes.some(x => x.includes('TARGET hit')) && pushes.some(x => x.includes('daily report')), 'target + report pushed');
+const sm = await E.summary(true); console.log('hud', JSON.stringify(sm));
+assert(Math.abs(sm.elisLifetime - 90.86) < 0.01 && Math.abs(sm.elisToday - 90.86) < 0.01 && sm.tradeDays === 1 && sm.series.length === 1, 'HUD P/L numbers');
 console.log('ALL ELIS TESTS PASSED'); process.exit(0);

@@ -2839,7 +2839,7 @@ handlers.watch_status = async () => {
   const ago = watch.lastOk ? Math.round((Date.now() - watch.lastOk) / 1000) : null;
   return JSON.stringify({ running: watch.running, intervalSeconds: WATCH_SEC, lastGoodCheckSecondsAgo: ago, error: watch.error, watching: watch.seen, hours: 'stocks 9:30 to 16:00 Eastern on weekdays; crypto around the clock', alerts: { stopHit: 'price at or under the stop (signal_watch stop or a resting broker stop order)', suddenDrop: `${acfg().dropPct}% fall within ${acfg().dropWindowMin} minutes`, downOnDay: `${acfg().dropDayPct}% under yesterday's close`, repeatEveryMinutes: acfg().cooldownMin, moreAlerts: 'see live_status: live quote freshness plus alert rules' }, upTrendRules: 'checked every 15 minutes by the sell-warning scan', marketSweep: { everyMinutes: acfg().sweepEveryMin, hours: 'market hours, about 21 a day', today: state.sweepCount?.day === new Date().toDateString() ? state.sweepCount.n : 0, last: state.sweep || null, covers: 'top gainers, most active, and a broad liquid universe, scored for new uptick setups; alerts as BUY-WATCH' }, restingBrokerStops: (watch.items || []).filter(i => i.brokerStop).map(i => ({ symbol: i.sym, shares: i.brokerStop.qty, type: i.brokerStop.type, stopPrice: i.brokerStop.stopPrice ?? null, trailPercent: i.brokerStop.trailPercent ?? null, trailPrice: i.brokerStop.trailPrice ?? null })), heldWithoutBrokerStop: (watch.items || []).filter(i => i.held && !i.brokerStop && !isDustVal(i.value)).map(i => i.sym), alertLevels: (watch.items || []).filter(i => i.stop).map(i => ({ symbol: i.sym, alertLevel: i.stop })), guide: 'Answer the interval as a real number (every N seconds). Report the resting broker stops (real orders at the broker, they execute on their own) separately from the alert levels (Jarvis only alerts the phone and the user must act). Positions in heldWithoutBrokerStop have no broker protection. To add one use stop_propose.' });
 };
-if (!process.env.JARVIS_SMOKE) elis.start({ push: (t, b) => push(t, b, undefined, true) });   // Elis: automated paper day-trading (elis.js)
+if (!process.env.JARVIS_SMOKE) elis.start({ push: (t, b) => push(t, b, undefined, true), hud: m => broadcast(m) });   // Elis: automated paper day-trading (elis.js)
 if (!process.env.JARVIS_SMOKE) { watch.running = true; setInterval(() => watchTick().catch(() => {}), WATCH_SEC * 1000); setTimeout(() => watchTick().catch(() => {}), 5000); }
 // ---------- Live quote stream + real-time alerts (livefeed.js feeds, alerts.js rules) ----------
 // Priority symbols = open Alpaca positions + signal_watch list. Quotes come from Finnhub (live pulse) with Twelve Data as backup/cross-check.
@@ -4074,6 +4074,7 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({ type: 'stats', stats: state.stats }));
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
   if (watch.holdings) ws.send(JSON.stringify(holdingsOut()));
+  if (elis.lastHud()) ws.send(JSON.stringify(elis.lastHud()));   // Elis P/L panel
   ws.send(JSON.stringify(watchlistMsg()));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });

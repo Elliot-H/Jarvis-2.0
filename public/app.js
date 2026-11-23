@@ -215,6 +215,7 @@
       case 'social_preview': showSocialPreview(m.url); break;
       case 'batch_pick': showBatch(); break;   // "analyze these uploads" with nothing queued: open the batch screen (picking files needs a tap)
       case 'holdings': renderHoldings(m); break;
+      case 'elis': renderElis(m); break;
       case 'watchlist': renderWatchlist(m); break;
       case 'connections': renderConns(m.connections); break;
       case 'meta': break;
@@ -349,6 +350,25 @@
     box.querySelectorAll('.wbtn').forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await fetch(`/watch-add?s=${encodeURIComponent(b.dataset.s)}&k=${b.dataset.k}`); b.textContent = r.ok ? 'watching' : 'failed'; } catch { b.textContent = 'failed'; b.disabled = false; } });
     fr.style.display = '';
     ageHoldings();
+  }
+  // Elis panel: lifetime P/L curve + today / lifetime numbers. Peek-only, no talk needed.
+  function renderElis(m) {
+    const fr = $('#elisFrame'), box = $('#elis'); if (!fr || !box) return;
+    const usd = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const sg = n => (n >= 0 ? '+' : '') + usd(n), cl = n => (n > 0 ? 'up' : n < 0 ? 'dn' : '');
+    const pts = [0, ...(m.series || []).map(x => x.cum)], W = 240, H = 56;
+    let svg = '<div class="elis-empty">No closed trades yet</div>';
+    if (pts.length > 1) {
+      const lo = Math.min(0, ...pts), hi = Math.max(0, ...pts), r = hi - lo || 1, y = v => (H - 3 - (v - lo) / r * (H - 6)).toFixed(1), x = i => (i * W / (pts.length - 1)).toFixed(1);
+      const line = pts.map((v, i) => x(i) + ',' + y(v)).join(' '), col = pts.at(-1) >= 0 ? '#4dff9a' : '#ff6b6b';
+      svg = `<svg class="elis-g" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="rgba(120,200,255,.25)" stroke-dasharray="3 3"/><polygon fill="${col}22" points="0,${y(0)} ${line} ${W},${y(0)}"/><polyline fill="none" stroke="${col}" stroke-width="1.6" points="${line}"/></svg>`;
+    }
+    $('#elisMode').textContent = (m.halted ? 'OFF · ' : '') + (m.mode || '').toLowerCase();
+    box.innerHTML = svg +
+      `<div class="elis-n"><span>ELIS TODAY <b class="${cl(m.elisToday)}">${sg(m.elisToday || 0)}</b></span><span>LIFETIME <b class="${cl(m.elisLifetime)}">${sg(m.elisLifetime || 0)}</b></span></div>` +
+      `<div class="elis-n"><span>ACCOUNT <b>${usd(m.equity || 0)}</b></span><span>TODAY <b class="${cl(m.accountToday)}">${sg(m.accountToday || 0)}</b></span></div>` +
+      `<div class="elis-s"><small>${esc(m.today || '')} · ${m.tradeDays || 0} trade day${m.tradeDays === 1 ? '' : 's'}</small></div>`;
+    fr.style.display = '';
   }
   function renderWatchlist(m) {
     const fr = $('#watchFrame'), box = $('#watchlist'); if (!fr || !box) return;

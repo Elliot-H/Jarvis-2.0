@@ -151,9 +151,9 @@ export async function bars(startMs, endMs, feed = CFG.feed) {
 
 // ---------------- live engine ----------------
 const S = { day: null, levels: null, traded: false, orderId: null, placedAt: 0, filledSent: false, closedSent: false, flattened: false, halted: false, lastMinute: -1, lastError: null, lastTick: 0, log: [], history: [] };
-let push = async () => {}, busy = false, timer = null;
+let push = async () => {}, hud = () => {}, busy = false, timer = null;
 const note = m => { S.log.unshift(`${new Date().toISOString().slice(11, 16)}Z ${m}`); S.log.length = Math.min(S.log.length, 30); console.log('[elis]', m); };
-const tell = (title, body) => { note(`${title}: ${body}`); return push(`Elis: ${title}`, body).catch(() => {}); };
+const tell = (title, body) => { note(`${title}: ${body}`); setTimeout(() => sendHud(true), 3000); return push(`Elis: ${title}`, body).catch(() => {}); };
 const tag = date => `elis-${date.replace(/-/g, '')}`;
 
 async function todaysOrders(date) {
@@ -224,7 +224,8 @@ async function flatten() {
       for (const x of [o, ...(o.legs || [])]) if (['new', 'accepted', 'held', 'pending_new', 'partially_filled'].includes(x.status)) await api(BASE, `/v2/orders/${x.id}`, { method: 'DELETE' }).catch(() => {});
       if (+o.filled_qty > 0 && !S.closedSent && await position()) {
         await new Promise(r => setTimeout(r, 1500));
-        await api(BASE, `/v2/positions/${CFG.symbol}`, { method: 'DELETE' });
+        const ps = await position();
+        if (ps) await api(BASE, '/v2/orders', { method: 'POST', body: JSON.stringify({ symbol: CFG.symbol, qty: String(Math.abs(+ps.qty)), side: +ps.qty > 0 ? 'sell' : 'buy', type: 'market', time_in_force: 'day', client_order_id: `${tag(S.day)}-flat-${Date.now().toString(36)}` }) });
         await tell('closed at end of day', `${CFG.symbol} position flattened before the close`);
       }
     }
@@ -271,9 +272,11 @@ async function tick() {
 
 export function start(opts = {}) {
   if (opts.push) push = opts.push;
+  if (opts.hud) hud = opts.hud;
   if (!enabled() || timer) return false;
   if (!LIVE && /^AK/.test(KEY())) { console.warn('[elis] ALPACA keys are LIVE keys but Elis is paper-only: set ELIS_KEY_ID/ELIS_SECRET to paper keys.'); return false; }
   timer = setInterval(() => tick(), 15e3); setTimeout(() => tick(), 10e3);
+  setInterval(() => sendHud(), 60e3); setTimeout(() => sendHud(true), 12e3);
   tell('online', `${mode()} mode, ${CFG.symbol}, ${CFG.riskPct}% risk per trade, 1 trade/day.`);
   return true;
 }
@@ -304,4 +307,35 @@ export function runBacktest(all, dates, cfg = CFG) {
   let eq = 1, peak = 1, dd = 0; for (const r of R) { eq *= 1 + r * cfg.riskPct / 100; peak = Math.max(peak, eq); dd = Math.min(dd, eq / peak - 1); }
   return { sessions: dates.length, trades: trades.length, winRatePct: trades.length ? Math.round(wins.length / trades.length * 1000) / 10 : 0, totalR: Math.round(R.reduce((a, b) => a + b, 0) * 100) / 100, profitFactor: loss.length ? Math.round(wins.reduce((a, b) => a + b, 0) / -loss.reduce((a, b) => a + b, 0) * 100) / 100 : null, returnPct: Math.round((eq - 1) * 1000) / 10, maxDrawdownPct: Math.round(dd * 1000) / 10, last: trades.slice(-10) };
 }
+
+// ---------------- HUD panel: P/L graph + today / lifetime numbers ----------------
+// Elis P/L = cash flow of its own fills (client_order_id elis-*: entries, bracket exits, EOD flatten) + any open Elis position.
+let hudCache = { at: 0, v: null };
+export async function summary(force = false) {
+  if (!force && hudCache.v && Date.now() - hudCache.at < 55e3) return hudCache.v;
+  const a = await api(BASE, '/v2/account');
+  const fills = []; let until = '';
+  for (let page = 0; page < 10; page++) {
+    const q = new URLSearchParams({ status: 'closed', nested: 'true', limit: '500', symbols: CFG.symbol, direction: 'desc' }); if (until) q.set('until', until);
+    const list = await api(BASE, `/v2/orders?${q}`);
+    for (const o of list) for (const x of [o, ...(o.legs || [])]) if (/^elis-\d{8}/.test(o.client_order_id || '') && +x.filled_qty > 0) fills.push({ day: o.client_order_id.slice(5, 13), side: x.side, qty: +x.filled_qty, px: +x.filled_avg_price });
+    if (list.length < 500) break; until = list.at(-1).submitted_at;
+  }
+  const byDay = {};
+  for (const f of fills) byDay[f.day] = (byDay[f.day] || 0) + (f.side === 'sell' ? 1 : -1) * f.qty * f.px;
+  const today = et().date.replace(/-/g, '');
+  const pos = await position().catch(() => null);
+  if (pos && S.orderId) byDay[today] = (byDay[today] || 0) + +pos.market_value;   // open Elis trade marked to market (short = negative value)
+  const days = Object.keys(byDay).sort(); let cum = 0;
+  const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
+  const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;
+  hudCache = { at: Date.now(), v: { mode: mode(), running: !!timer && !S.halted, halted: S.halted, equity: +a.equity, accountToday: Math.round((+a.equity - +a.last_equity) * 100) / 100,
+    elisToday: Math.round((byDay[today] || 0) * 100) / 100, elisLifetime: Math.round(cum * 100) / 100, tradeDays: trades, series: series.slice(-90),
+    today: S.trade ? `${S.trade.side === 'buy' ? 'LONG' : 'SHORT'} ${S.trade.qty} ${CFG.symbol}` : S.day === et().date ? 'no trade yet' : 'waiting for the open' } };
+  return hudCache.v;
+}
+async function sendHud(force = false) {
+  try { hud({ type: 'elis', ...(await summary(force)) }); } catch (e) { note('hud summary failed: ' + e.message); }
+}
+export const lastHud = () => (hudCache.v ? { type: 'elis', ...hudCache.v } : null);
 export const _tick = () => tick();
