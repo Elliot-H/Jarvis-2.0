@@ -5,7 +5,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
 - midday, against the market, S&P flat at the open -> go with the stock: 61 trades, 21% wins, avg -0.3R, total -18.4R -> $3,000 became $2,520 (-16%, max drawdown 21.8%)
 - midday, against the market, normal volume -> go with the stock: 78 trades, 37% wins, avg -0.1R, total -7.7R -> $3,000 became $2,697 (-10.1%, max drawdown 19.7%)
 - afternoon, far from VWAP in the move direction -> go with the stock: 181 trades, 42% wins, avg -0.08R, total -14.6R -> $3,000 became $2,945 (-1.8%, max drawdown 7.6%)
-- strong move alone (control) -> go with the stock: 2489 trades, 44% wins, avg -0.06R, total -151.8R -> $3,000 became $2,242 (-25.3%, max drawdown 37%)
+- strong move alone (control) -> go with the stock: 2488 trades, 44% wins, avg -0.06R, total -153.6R -> $3,000 became $2,242 (-25.3%, max drawdown 37%)
 
 ```json
 {
@@ -61,10 +61,10 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    }
   },
   "strong move alone (control) -> go with the stock": {
-   "trades": 2489,
+   "trades": 2488,
    "winPct": 44,
    "avgR": -0.06,
-   "totalR": -151.8,
+   "totalR": -153.6,
    "money3k": {
     "start": 3000,
     "end": 2242,
@@ -73,9 +73,9 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    }
   }
  },
- "trades": 2934,
+ "trades": 2933,
  "why": {
-  "n": 2489,
+  "n": 2488,
   "overall": -0.06,
   "findings": [
    {
@@ -84,7 +84,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
     "n": 590,
     "avgR": 0.05,
     "winPct": 49,
-    "z": 3.16,
+    "z": 3.18,
     "better": true
    },
    {
@@ -97,31 +97,31 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
     "better": false
    },
    {
-    "dim": "month",
-    "value": "2022-06",
-    "n": 149,
-    "avgR": -0.22,
-    "winPct": 34,
-    "z": -2.28,
-    "better": false
-   },
-   {
     "dim": "price vs VWAP",
     "value": "against the move",
     "n": 27,
     "avgR": 0.31,
     "winPct": 52,
-    "z": 2.26,
+    "z": 2.27,
     "better": true
    },
    {
-    "dim": "S&P gap at the open",
-    "value": "S&P flat",
-    "n": 685,
-    "avgR": 0.01,
-    "winPct": 49,
-    "z": 2.18,
-    "better": true
+    "dim": "month",
+    "value": "2022-06",
+    "n": 149,
+    "avgR": -0.22,
+    "winPct": 34,
+    "z": -2.27,
+    "better": false
+   },
+   {
+    "dim": "month",
+    "value": "2022-01",
+    "n": 225,
+    "avgR": -0.19,
+    "winPct": 39,
+    "z": -2.26,
+    "better": false
    },
    {
     "dim": "S&P gap at the open",
@@ -129,16 +129,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
     "n": 517,
     "avgR": -0.14,
     "winPct": 40,
-    "z": -2.11,
-    "better": false
-   },
-   {
-    "dim": "month",
-    "value": "2022-01",
-    "n": 226,
-    "avgR": -0.18,
-    "winPct": 39,
-    "z": -2.1,
+    "z": -2.09,
     "better": false
    }
   ],
@@ -150,14 +141,14 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 45
     },
     "market downtrend": {
-     "n": 1451,
+     "n": 1450,
      "avgR": -0.08,
      "winPct": 43
     }
    },
    "market volatility": {
     "normal market (12-18%)": {
-     "n": 446,
+     "n": 445,
      "avgR": -0.12,
      "winPct": 41
     },
@@ -179,8 +170,8 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "S&P flat": {
-     "n": 685,
-     "avgR": 0.01,
+     "n": 684,
+     "avgR": 0,
      "winPct": 49
     },
     "S&P gapped down": {
@@ -206,7 +197,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 41
     },
     "first hour": {
-     "n": 1863,
+     "n": 1862,
      "avgR": -0.04,
      "winPct": 45
     },
@@ -233,14 +224,14 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 44
     },
     "short": {
-     "n": 1214,
-     "avgR": -0.07,
+     "n": 1213,
+     "avgR": -0.08,
      "winPct": 44
     }
    },
    "moving against the market": {
     "no": {
-     "n": 2084,
+     "n": 2083,
      "avgR": -0.05,
      "winPct": 45
     },
@@ -252,7 +243,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    },
    "volume on the signal candle": {
     "normal": {
-     "n": 1091,
+     "n": 1090,
      "avgR": -0.05,
      "winPct": 45
     },
@@ -274,9 +265,9 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    },
    "price vs VWAP": {
     "with the move, far": {
-     "n": 1164,
+     "n": 1163,
      "avgR": -0.05,
-     "winPct": 46
+     "winPct": 45
     },
     "against the move": {
      "n": 27,
@@ -301,7 +292,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 44
     },
     "0.8-1.2x range": {
-     "n": 642,
+     "n": 641,
      "avgR": -0.04,
      "winPct": 46
     },
@@ -323,8 +314,8 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 42
     },
     "no gap": {
-     "n": 470,
-     "avgR": -0.05,
+     "n": 469,
+     "avgR": -0.06,
      "winPct": 44
     },
     "gap down 4%+": {
@@ -345,7 +336,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 45
     },
     "2-4x": {
-     "n": 1004,
+     "n": 1003,
      "avgR": -0.09,
      "winPct": 43
     },
@@ -367,7 +358,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 41
     },
     "calm stock": {
-     "n": 651,
+     "n": 650,
      "avgR": -0.1,
      "winPct": 43
     },
@@ -384,35 +375,35 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    },
    "news in the last hour": {
     "none": {
-     "n": 2489,
+     "n": 2488,
      "avgR": -0.06,
      "winPct": 44
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 2489,
+     "n": 2488,
      "avgR": -0.06,
      "winPct": 44
     }
    },
    "overnight news": {
     "none": {
-     "n": 2489,
+     "n": 2488,
      "avgR": -0.06,
      "winPct": 44
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 2489,
+     "n": 2488,
      "avgR": -0.06,
      "winPct": 44
     }
    },
    "sector": {
     "sector with the move": {
-     "n": 1750,
+     "n": 1749,
      "avgR": -0.06,
      "winPct": 45
     },
@@ -439,7 +430,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "candle-with": {
-     "n": 1338,
+     "n": 1337,
      "avgR": -0.08,
      "winPct": 44
     },
@@ -456,8 +447,8 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    },
    "chart structure": {
     "trend-with": {
-     "n": 1525,
-     "avgR": -0.07,
+     "n": 1524,
+     "avgR": -0.08,
      "winPct": 44
     },
     "range": {
@@ -493,8 +484,8 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
      "winPct": 43
     },
     "three black crows": {
-     "n": 527,
-     "avgR": -0.08,
+     "n": 526,
+     "avgR": -0.09,
      "winPct": 43
     },
     "bearish marubozu": {
@@ -620,8 +611,8 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
    },
    "month": {
     "2022-01": {
-     "n": 226,
-     "avgR": -0.18,
+     "n": 225,
+     "avgR": -0.19,
      "winPct": 39
     },
     "2022-02": {
@@ -681,7 +672,7 @@ Out-of-sample year 2022 (251 sessions, formulas found on 2024-2025, never on 202
     }
    }
   },
-  "text": "Overall -0.06R avg over 2489 trades.\nMade money when:\n  + stock volatility = jumpy stock: +0.05R avg, 49% wins, 590 trades\n  + price vs VWAP = against the move: +0.31R avg, 52% wins, 27 trades\n  + S&P gap at the open = S&P flat: +0.01R avg, 49% wins, 685 trades\nLost most when:\n  - volume on the signal candle = surging: -0.28R avg, 37% wins, 79 trades\n  - month = 2022-06: -0.22R avg, 34% wins, 149 trades\n  - S&P gap at the open = S&P gapped up: -0.14R avg, 40% wins, 517 trades\n  - month = 2022-01: -0.18R avg, 39% wins, 226 trades"
+  "text": "Overall -0.06R avg over 2488 trades.\nMade money when:\n  + stock volatility = jumpy stock: +0.05R avg, 49% wins, 590 trades\n  + price vs VWAP = against the move: +0.31R avg, 52% wins, 27 trades\nLost most when:\n  - volume on the signal candle = surging: -0.28R avg, 37% wins, 79 trades\n  - month = 2022-06: -0.22R avg, 34% wins, 149 trades\n  - month = 2022-01: -0.19R avg, 39% wins, 225 trades\n  - S&P gap at the open = S&P gapped up: -0.14R avg, 40% wins, 517 trades"
  },
  "whyFormula": {
   "n": 125,
