@@ -3,26 +3,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 const DD = fs.mkdtempSync('/tmp/hunt-'); process.env.DATA_DIR = DD; fs.mkdirSync(path.join(DD, 'elis'), { recursive: true });
 const H = await import('../elis-hunt.js');
-// 4 years; "falling market + candle against" really leads to 'down' 72% of the time, the rest is a coin flip
+// planted world, 5 years: a reliable analyst (pos -> up 78%), the market falling (-> down 66%), and a loud influencer who is
+// right one year and wrong the next (must get NO weight). Everything else is noise.
 let sd = 9; const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
-const year = () => Array.from({ length: 6000 }, () => { const sig = r() < 0.25, f = Object.fromEntries(H.KEYS.map(k => [k, 'v' + Math.floor(r() * 3)]));
-  if (sig) { f.market = 'market falling'; f.candle = 'candle-against'; } const down = sig ? r() < 0.72 : r() < 0.5, t = down ? 'down' : 'up';
-  return { v: H.KEYS.map(k => f[k]), t: [t, t, t], r: [[down ? -1 : 0.5, down ? 0.5 : -1], [down ? -1 : 0.5, down ? 0.5 : -1], [down ? -1 : 0.5, down ? 0.5 : -1]], m: 0 }; });
-for (const y of ['2020', '2021', '2022', '2023']) H.saveSamples(y, year());
-assert.deepEqual(H.years(), ['2020', '2021', '2022', '2023']);
-const good = await H.score({ h: 6, why: false, P: { mode: 'best', minP: 0.65, minN: 150, abstain: [], drop: [] } }, H.years());
-const loose = await H.score({ h: 6, why: false, P: { mode: 'best', minP: 0.55, minN: 40, abstain: [], drop: [] } }, H.years());
-console.log('selective', good.minAcc, good.calls, '| loose', loose.minAcc, loose.calls);
-assert(good.ok && good.minAcc > 66 && good.minAcc > loose.minAcc, 'selective config finds the real signal in every unseen year');
-const why = await H.score({ h: 6, why: true, P: { mode: 'best', minP: 0.55, minN: 80, abstain: [], drop: [] } }, H.years());
-assert(why.ok, 'why-tuned path runs');
-console.log(H.text({ tested: 3, board: [{ d: 'test', minAcc: good.minAcc, avgAcc: good.avgAcc, avgR: good.avgR, per: good.per }], finalChecks: 0, years: H.years() }));
-// factor refinement: mutate toggles exactly one factor or one setting
-const [m2, fx] = H.mutate({ h: 6, why: false, P: { mode: 'best', minP: 0.6, minN: 80, abstain: [], drop: ['dow'] } });
-assert(fx ? (fx.on ? !m2.P.drop.includes(fx.k) : m2.P.drop.includes(fx.k)) : true, 'one factor toggled');
-assert(H.KEYS.includes('trend5d') && H.KEYS.includes('openCandle'), 'new factors in the search');
-const O = await import('../elis-oos.js');
-const fake = { c: Float32Array.from({ length: 30 }, (_, i) => 100 + i), o: Float32Array.from({ length: 30 }, (_, i) => 99.5 + i) };
-const df = O.dailyF(fake, 25, '2023-03-06'); console.log(df);
-assert(df.range20 === 'near 20-day high' && df.sma20 === 'above 20-day average' && df.dow === 'Monday', 'daily factors');
+const year = yi => Array.from({ length: 8000 }, () => {
+  const f = Object.fromEntries(H.KEYS.map(k => [k, 'v' + Math.floor(r() * 3)])); let pUp = 0.5;
+  const q = r(); if (q < 0.12) { f.newsBy = 'wire/Good Analyst: pos'; pUp = 0.78; } else if (q < 0.3) { f.newsBy = 'social/Loud Influencer: pos'; pUp = yi % 2 ? 0.62 : 0.38; } else f.newsBy = 'no news';
+  if (r() < 0.3) { f.market = 'market falling'; pUp = Math.max(0.05, pUp - 0.16); } else f.market = 'market flat';
+  const t = r() < pUp ? 'up' : 'down'; return { v: H.KEYS.map(k => f[k]), t: [t, t, t], r: [[0, 0], [0, 0], [0, 0]], m: 0 };
+});
+['2019', '2020', '2021', '2022', '2023'].forEach((y, i) => H.saveSamples(y, year(i)));
+const st = { formulas: {}, years: [], tested: 0, finalChecks: 0, bestHist: [], log: [] }, logs = [];
+await H.climb(st, 1, H.years(), H.years(), { paused: () => false, log: m => logs.push(m), tell: async () => {} });
+const F = st.formulas[6]; console.log(logs.join('\n')); console.log(F.vars, F.score.avgAcc, F.score.minAcc); console.log(F.weights.slice(0, 5));
+assert(F.vars.some(v => /newsBy/.test(v)) && F.vars.some(v => /market/.test(v)), 'the builder climbs with the real signals (alone or as a branch)');
+const all = H.weights(F.vars, H.years(), 1, 999); assert(!all.some(w => w.value === 'social/Loud Influencer: pos' || w.value === 'social/Loud Influencer: pos | market flat'), 'the inconsistent influencer gets no weight on its own');
+assert(F.weights.some(w => /Good Analyst/.test(w.value) && w.points === 'up'), 'the reliable analyst is weighed in');
+assert(F.steps.filter(s => s.add).every((s, i, a) => i === 0 || s.avgAcc >= a[i - 1].avgAcc), 'every kept step raised accuracy');
+assert(!F.vars.some(v => /^(candle|dow|time)$/.test(v)), 'noise variables are left behind');
+console.log(H.text(st));
 console.log('HUNT TEST PASSED');

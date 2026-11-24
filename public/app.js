@@ -379,9 +379,10 @@
     const svg = `<svg class="elis-g hunt-g" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" x2="${W}" y1="${y(g)}" y2="${y(g)}" stroke="#4dff9a" stroke-opacity=".55" stroke-dasharray="4 3"/><line x1="0" x2="${W}" y1="${y(50)}" y2="${y(50)}" stroke="rgba(120,200,255,.25)" stroke-dasharray="2 3"/>${line(rec, 'rgba(120,200,255,.55)', 1)}${line(hist, '#3fe0ff', 1.8)}</svg>`;
     const yrs = (m.years || []).length;
     box.innerHTML = `<div class="elis-n hunt-h"><span>ACCURACY HUNT</span><span>GOAL <b class="up">${g}%</b></span></div>`
-      + `<div class="hunt-big ${col(m.bestAvg)}">${pct(m.bestAvg)}<small> best avg on unseen years${m.bestMin != null ? ' · worst ' + pct(m.bestMin) : ''}</small></div>`
+      + `<div class="hunt-big ${col(m.bestAvg)}">${pct(m.bestAvg)}<small> formula avg on unseen years${m.bestMin != null ? ' · worst ' + pct(m.bestMin) : ''}</small></div>`
       + svg
       + `<div class="elis-n"><span>LAST TEST <b class="${col(m.lastAcc)}">${pct(m.lastAcc)}</b></span><span>TESTED <b>${(m.tested || 0).toLocaleString()}</b></span><span>YEARS <b>${yrs}</b></span></div>`
+      + (m.formula ? `<div class="elis-s"><small>FORMULA ${esc(m.formula)}</small></div>` : '')
       + `<div class="elis-s"><small>${m.proven ? 'PROVEN · ' : ''}${esc(m.phase || '')}${m.phase && m.phase.startsWith('collecting') && m.collect ? ' · ' + esc(m.collect) : ''}</small></div>`;
     const fr = $('#elisFrame'); if (fr) fr.style.display = '';
   }
