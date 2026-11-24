@@ -377,8 +377,9 @@ export async function jumpNow() {   // Owner's big-jump study: once, outside 9:1
   } catch (e) { await E.tellOut('big-jump study error', e.message); return e.message; } finally { learnBusy = false; }
 }
 let provenKey = OOS.lastRules()?.proven?.slice(0, 3).map(p => p.rule).join('|') || '';
+let oosHoldUntil = 0;
 export async function oosNow(year = OOS.nextYear(true) || OOS.nextYear()) {   // Owner: test the newest formulas on a year they never saw
-  if (learnBusy) return 'busy'; learnBusy = true;
+  if (learnBusy || Date.now() < oosHoldUntil) return 'busy'; learnBusy = true;
   try {
     note(`year test ${year} started`);
     const r = await OOS.run({ year, progress: m => { note(m); WALK.setCollect(m); }, shouldStop: marketHours }); if (r.paused) return 'paused';
@@ -388,8 +389,12 @@ export async function oosNow(year = OOS.nextYear(true) || OOS.nextYear()) {   //
     if (b.ready && b.proven.length) { const key = b.proven.slice(0, 3).map(p => p.rule).join('|'); if (key !== provenKey) { provenKey = key; await E.tellOut('Elis found a consistent rule', rt); } }
     note('oos publish: ' + await L.publish(`elis/year-test-${year}.md`, `# Elis year test ${year}\n\n${txt}\n\n\`\`\`json\n${JSON.stringify(r, null, 1)}\n\`\`\`\n`));
     return txt;
-  } catch (e) { await E.tellOut('year test error', e.message); return e.message; } finally { learnBusy = false; }
+  } catch (e) {
+    if (/could not save/.test(e.message)) { oosHoldUntil = Date.now() + 3600e3; try { HUNT.cleanup(); } catch {} note('DISK: ' + e.message + ' -> cleaned up, retrying in 1 h (the year resumes from its save point)'); if (!diskWarned) { diskWarned = true; await E.tellOut('Elis: server disk is full', e.message + '. Raising the Railway volume size fixes this for good.'); } return e.message; }
+    await E.tellOut('year test error', e.message); return e.message;
+  } finally { learnBusy = false; }
 }
+let diskWarned = false;
 export async function whyNow() {   // Owner: where does the moving information come from, and how much does each source weigh
   if (learnBusy) return 'busy'; learnBusy = true;
   try {
@@ -492,6 +497,7 @@ export function start() {
   E.setHudExtra(() => ({ learnVersion: L.version(), learnBusy: learnBusy }));
   if (process.env.ELIS_LEARN !== '0') { setInterval(() => learnTick(), 2 * 60e3); setTimeout(() => learnTick(), 90e3);   // no waiting between studies
     setInterval(() => E.hudSend({ type: 'elisHunt', ...WALK.live() }), 10e3);   // rolling accuracy on the Jarvis panel
+    try { const gone = HUNT.cleanup(); if (gone.length) note(`disk cleanup: removed ${gone.length} superseded/empty files`); } catch {}
     if (process.env.ELIS_HUNT !== '0') setTimeout(() => WALK.forever({ paused: marketHours, log: m => note(m), tell: (a, b) => E.tellOut(a, b) }), 120e3); }   // the endless hunt
   note(`online: picks ${W.picks}, risk ${W.riskPct}%/trade, entries until ${Math.floor(W.entryEnd / 60)}:${String(W.entryEnd % 60).padStart(2, '0')}, exit ${Math.floor(W.exitAt / 60)}:${String(W.exitAt % 60).padStart(2, '0')}`);
   return true;

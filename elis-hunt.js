@@ -69,7 +69,19 @@ export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, s
   }
   return out;
 }
-export const saveSamples = (y, arr) => { try { fs.writeFileSync(SFILE(y), zlib.gzipSync(JSON.stringify(arr))); } catch {} };
+// verified save: write to a temp file, check it reads back, then swap in; a failure is reported, never silently left as an empty file
+export function saveSamples(y, arr) {
+  const f = SFILE(y), tmp = f + '.tmp', buf = zlib.gzipSync(JSON.stringify(arr));
+  try { fs.writeFileSync(tmp, buf); if (fs.statSync(tmp).size !== buf.length) throw new Error('short write (disk full?)'); JSON.parse(zlib.gunzipSync(fs.readFileSync(tmp))); fs.renameSync(tmp, f); cache.clear(); return true; }
+  catch (e) { try { fs.unlinkSync(tmp); } catch {} throw new Error(`could not save ${y} samples (${Math.round(buf.length / 1024)} KB): ${e.message}`); }
+}
+// housekeeping: remove sample files that are superseded or empty (they only take disk)
+export function cleanup() {
+  const out = []; for (const f of fs.readdirSync(DIR)) { const m = /^hunt-samples-(?:v(\d+)-)?(\d{4})\.json\.gz(\.tmp)?$/.exec(f); if (!m) continue; const p = path.join(DIR, f), sz = fs.statSync(p).size;
+    if (m[3] || !m[1] || +m[1] < MIN_SREV || sz === 0) { try { fs.unlinkSync(p); out.push(f); } catch {} } }
+  for (const f of fs.readdirSync(DIR)) if (/^(walk-state(-v4[a-z]?)?\.json|walk-state-v[0-9]+b?\.json|oos-ckpt-\d{4}-v[0-4]\.json\.gz)$/.test(f) && !f.includes(`v${SREV}c`)) { try { fs.unlinkSync(path.join(DIR, f)); out.push(f); } catch {} }
+  return out;
+}
 const cache = new Map();
 export function loadYear(y) {
   const fp = fileFor(y); if (cache.has(fp)) return cache.get(fp);

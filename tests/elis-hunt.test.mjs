@@ -31,3 +31,9 @@ await H.climb(st2, 1, H.years(), H.years(), { paused: () => false, log: () => {}
 const F2 = st2.formulas[6]; console.log('weak world:', F2.vars, F2.score?.avgAcc, F2.screen.slice(0, 3));
 assert(F2.screen.length && F2.screen[0].avgAcc > 50 && F2.vars.length >= 1 && F2.score.avgAcc > 51, 'weak but real signals give real percentages and a formula');
 console.log('HUNT TEST PASSED');
+// verified save + cleanup
+{ const fs2 = (await import('node:fs')).default, p2 = (await import('node:path')).default; const dir = p2.join(process.env.DATA_DIR, 'elis');
+  fs2.writeFileSync(p2.join(dir, 'hunt-samples-v4-2030.json.gz'), ''); fs2.writeFileSync(p2.join(dir, 'hunt-samples-2031.json.gz'), 'x'); fs2.writeFileSync(p2.join(dir, 'hunt-samples-v3-2032.json.gz'), 'x');
+  const gone = H.cleanup(); console.log('cleanup removed', gone); assert(gone.length === 3 && H.years().every(y => !['2030', '2031', '2032'].includes(y)), 'empty / superseded sample files are removed');
+  assert(H.saveSamples('2033', [{ v: [], t: [], sw: [], r: [], m: 0 }]) === true && H.loadYear('2033').length === 1, 'verified save reads back');
+  console.log('SAVE/CLEANUP OK'); }

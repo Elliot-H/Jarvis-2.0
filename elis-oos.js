@@ -187,7 +187,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
   const main = all.filter(t => /^strong move alone/.test(t.formula));   // every strong-move trade: the widest base for the why
   const why = X.explain(main, WHY_DIMS);
   const whyFormula = X.explain(all.filter(t => /^midday, stock strong against the market -> go/.test(t.formula)), WHY_DIMS, { minN: 15 });
-  HUNT.saveSamples(year, hunt); try { fs.unlinkSync(CK); } catch {}
+  HUNT.saveSamples(year, hunt); try { fs.unlinkSync(CK); } catch {}   // throws if the disk refused: the year is NOT marked done and is retried
   saveTrades(year, main.map(t => { const o = { R: Math.round(t.R * 1000) / 1000 }; for (const d of WHY_DIMS) { const v = typeof d.get === 'function' ? d.get(t) : t[d.key]; if (v != null) o[d.name] = v; } return o; }));
   return { year, sessions, results: summarize(all), trades: all.length, why, whyFormula, sample: all.slice(-20) };
 }
