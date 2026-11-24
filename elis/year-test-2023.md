@@ -1,91 +1,127 @@
 # Elis year test 2023
 
-Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 2023). Stop 0.4 x daily range, out after 30 min, costs included; $3,000 at 1% risk, max 3 trades/day:
-- midday, stock strong against the market -> go with the stock: 161 trades, 43% wins, avg -0.1R, total -16.4R -> $3,000 became $2,508 (-16.4%, max drawdown 18.2%)
-- midday, against the market, S&P flat at the open -> go with the stock: 100 trades, 42% wins, avg -0.1R, total -10.3R -> $3,000 became $2,696 (-10.1%, max drawdown 13.5%)
-- midday, against the market, normal volume -> go with the stock: 89 trades, 45% wins, avg -0.05R, total -4.6R -> $3,000 became $2,883 (-3.9%, max drawdown 13.2%)
-- afternoon, far from VWAP in the move direction -> go with the stock: 235 trades, 42% wins, avg -0.07R, total -17.4R -> $3,000 became $2,678 (-10.7%, max drawdown 16.5%)
-- strong move alone (control) -> go with the stock: 2999 trades, 44% wins, avg -0.06R, total -171.5R -> $3,000 became $1,838 (-38.7%, max drawdown 40.1%)
+Out-of-sample year 2023 (220 sessions, formulas found on 2024-2025, never on 2023). Stop 0.4 x daily range, out after 30 min, costs included; $3,000 at 1% risk, max 3 trades/day:
+- midday, stock strong against the market -> go with the stock: 141 trades, 45% wins, avg -0.07R, total -10.3R -> $3,000 became $2,672 (-10.9%, max drawdown 15.9%)
+- midday, against the market, S&P flat at the open -> go with the stock: 92 trades, 42% wins, avg -0.1R, total -9R -> $3,000 became $2,734 (-8.9%, max drawdown 13.5%)
+- midday, against the market, normal volume -> go with the stock: 82 trades, 48% wins, avg 0.02R, total 1.3R -> $3,000 became $3,027 (+0.9%, max drawdown 8.9%)
+- afternoon, far from VWAP in the move direction -> go with the stock: 211 trades, 43% wins, avg -0.05R, total -9.9R -> $3,000 became $2,939 (-2%, max drawdown 9.1%)
+- strong move alone (control) -> go with the stock: 2663 trades, 44% wins, avg -0.05R, total -123.8R -> $3,000 became $2,351 (-21.6%, max drawdown 24.4%)
 
 ```json
 {
  "year": "2023",
- "sessions": 250,
+ "sessions": 220,
  "results": {
   "midday, stock strong against the market -> go with the stock": {
-   "trades": 161,
-   "winPct": 43,
-   "avgR": -0.1,
-   "totalR": -16.4,
-   "money3k": {
-    "start": 3000,
-    "end": 2508,
-    "returnPct": -16.4,
-    "maxDrawdownPct": 18.2
-   }
-  },
-  "midday, against the market, S&P flat at the open -> go with the stock": {
-   "trades": 100,
-   "winPct": 42,
-   "avgR": -0.1,
+   "trades": 141,
+   "winPct": 45,
+   "avgR": -0.07,
    "totalR": -10.3,
    "money3k": {
     "start": 3000,
-    "end": 2696,
-    "returnPct": -10.1,
+    "end": 2672,
+    "returnPct": -10.9,
+    "maxDrawdownPct": 15.9
+   }
+  },
+  "midday, against the market, S&P flat at the open -> go with the stock": {
+   "trades": 92,
+   "winPct": 42,
+   "avgR": -0.1,
+   "totalR": -9,
+   "money3k": {
+    "start": 3000,
+    "end": 2734,
+    "returnPct": -8.9,
     "maxDrawdownPct": 13.5
    }
   },
   "midday, against the market, normal volume -> go with the stock": {
-   "trades": 89,
-   "winPct": 45,
-   "avgR": -0.05,
-   "totalR": -4.6,
+   "trades": 82,
+   "winPct": 48,
+   "avgR": 0.02,
+   "totalR": 1.3,
    "money3k": {
     "start": 3000,
-    "end": 2883,
-    "returnPct": -3.9,
-    "maxDrawdownPct": 13.2
+    "end": 3027,
+    "returnPct": 0.9,
+    "maxDrawdownPct": 8.9
    }
   },
   "afternoon, far from VWAP in the move direction -> go with the stock": {
-   "trades": 235,
-   "winPct": 42,
-   "avgR": -0.07,
-   "totalR": -17.4,
+   "trades": 211,
+   "winPct": 43,
+   "avgR": -0.05,
+   "totalR": -9.9,
    "money3k": {
     "start": 3000,
-    "end": 2678,
-    "returnPct": -10.7,
-    "maxDrawdownPct": 16.5
+    "end": 2939,
+    "returnPct": -2,
+    "maxDrawdownPct": 9.1
    }
   },
   "strong move alone (control) -> go with the stock": {
-   "trades": 2999,
+   "trades": 2663,
    "winPct": 44,
-   "avgR": -0.06,
-   "totalR": -171.5,
+   "avgR": -0.05,
+   "totalR": -123.8,
    "money3k": {
     "start": 3000,
-    "end": 1838,
-    "returnPct": -38.7,
-    "maxDrawdownPct": 40.1
+    "end": 2351,
+    "returnPct": -21.6,
+    "maxDrawdownPct": 24.4
    }
   }
  },
- "trades": 3584,
+ "trades": 3189,
  "why": {
-  "n": 2999,
-  "overall": -0.06,
+  "n": 2663,
+  "overall": -0.05,
   "findings": [
    {
     "dim": "month",
     "value": "2023-03",
-    "n": 231,
-    "avgR": -0.21,
-    "winPct": 35,
-    "z": -2.51,
+    "n": 153,
+    "avgR": -0.26,
+    "winPct": 33,
+    "z": -2.83,
     "better": false
+   },
+   {
+    "dim": "volume on the signal candle",
+    "value": "surging",
+    "n": 57,
+    "avgR": 0.25,
+    "winPct": 47,
+    "z": 2.4,
+    "better": true
+   },
+   {
+    "dim": "chart structure",
+    "value": "range",
+    "n": 1049,
+    "avgR": 0.02,
+    "winPct": 47,
+    "z": 2.31,
+    "better": true
+   },
+   {
+    "dim": "stock volatility",
+    "value": "very jumpy stock",
+    "n": 30,
+    "avgR": 0.34,
+    "winPct": 57,
+    "z": 2.27,
+    "better": true
+   },
+   {
+    "dim": "S&P gap at the open",
+    "value": "S&P flat",
+    "n": 1194,
+    "avgR": 0.01,
+    "winPct": 47,
+    "z": 2.09,
+    "better": true
    },
    {
     "dim": "month",
@@ -93,448 +129,439 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
     "n": 202,
     "avgR": 0.09,
     "winPct": 50,
-    "z": 2.26,
-    "better": true
-   },
-   {
-    "dim": "stock volatility",
-    "value": "very jumpy stock",
-    "n": 36,
-    "avgR": 0.26,
-    "winPct": 56,
-    "z": 2.05,
+    "z": 2.08,
     "better": true
    }
   ],
   "tables": {
    "market trend": {
     "market downtrend": {
-     "n": 1028,
-     "avgR": -0.09,
-     "winPct": 42
+     "n": 896,
+     "avgR": -0.07,
+     "winPct": 44
     },
     "market uptrend": {
-     "n": 1971,
+     "n": 1767,
      "avgR": -0.04,
      "winPct": 45
     }
    },
    "market volatility": {
     "nervous market (18-28%)": {
-     "n": 135,
-     "avgR": 0.02,
-     "winPct": 51
+     "n": 104,
+     "avgR": -0.01,
+     "winPct": 52
     },
     "normal market (12-18%)": {
-     "n": 1548,
-     "avgR": -0.1,
-     "winPct": 42
+     "n": 1249,
+     "avgR": -0.09,
+     "winPct": 43
     },
     "calm market (<12%)": {
-     "n": 1316,
+     "n": 1310,
      "avgR": -0.01,
      "winPct": 46
     }
    },
    "S&P gap at the open": {
     "S&P gapped up": {
-     "n": 695,
-     "avgR": -0.09,
+     "n": 651,
+     "avgR": -0.08,
      "winPct": 43
     },
     "S&P gapped down": {
-     "n": 661,
-     "avgR": -0.09,
+     "n": 566,
+     "avgR": -0.08,
      "winPct": 42
     },
     "S&P gapped up hard": {
-     "n": 214,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 166,
+     "avgR": -0.09,
+     "winPct": 45
     },
     "S&P flat": {
-     "n": 1284,
-     "avgR": -0.01,
-     "winPct": 46
+     "n": 1194,
+     "avgR": 0.01,
+     "winPct": 47
     },
     "S&P gapped down hard": {
-     "n": 145,
-     "avgR": -0.14,
+     "n": 86,
+     "avgR": -0.2,
      "winPct": 36
     }
    },
    "time of day": {
     "first hour": {
-     "n": 2299,
-     "avgR": -0.07,
-     "winPct": 43
+     "n": 2043,
+     "avgR": -0.06,
+     "winPct": 44
     },
     "last 90 min": {
-     "n": 43,
-     "avgR": 0.08,
-     "winPct": 58
+     "n": 38,
+     "avgR": 0.07,
+     "winPct": 53
     },
     "10:30-11:30": {
-     "n": 495,
+     "n": 435,
      "avgR": 0,
      "winPct": 48
     },
     "11:30-1:00": {
-     "n": 111,
-     "avgR": -0.16,
-     "winPct": 35
+     "n": 102,
+     "avgR": -0.14,
+     "winPct": 37
     },
     "1:00-2:30": {
-     "n": 51,
-     "avgR": 0.06,
-     "winPct": 57
+     "n": 45,
+     "avgR": 0.07,
+     "winPct": 58
     }
    },
    "side": {
     "short": {
-     "n": 1456,
-     "avgR": -0.04,
+     "n": 1314,
+     "avgR": -0.03,
      "winPct": 44
     },
     "long": {
-     "n": 1543,
-     "avgR": -0.07,
-     "winPct": 44
+     "n": 1349,
+     "avgR": -0.06,
+     "winPct": 45
     }
    },
    "moving against the market": {
     "no": {
-     "n": 2584,
-     "avgR": -0.06,
-     "winPct": 44
+     "n": 2297,
+     "avgR": -0.04,
+     "winPct": 45
     },
     "yes": {
-     "n": 415,
-     "avgR": -0.06,
+     "n": 366,
+     "avgR": -0.07,
      "winPct": 41
     }
    },
    "volume on the signal candle": {
     "fading": {
-     "n": 1316,
-     "avgR": -0.04,
-     "winPct": 45
+     "n": 1156,
+     "avgR": -0.03,
+     "winPct": 46
     },
     "normal": {
-     "n": 1319,
-     "avgR": -0.08,
+     "n": 1182,
+     "avgR": -0.07,
      "winPct": 43
     },
     "surging": {
-     "n": 68,
-     "avgR": 0.16,
-     "winPct": 46
+     "n": 57,
+     "avgR": 0.25,
+     "winPct": 47
     },
     "rising": {
-     "n": 296,
-     "avgR": -0.09,
-     "winPct": 43
+     "n": 268,
+     "avgR": -0.1,
+     "winPct": 42
     }
    },
    "price vs VWAP": {
     "with the move, far": {
-     "n": 1387,
-     "avgR": -0.1,
-     "winPct": 41
+     "n": 1242,
+     "avgR": -0.08,
+     "winPct": 43
     },
     "with the move": {
-     "n": 1559,
+     "n": 1377,
      "avgR": -0.02,
      "winPct": 46
     },
     "against the move": {
-     "n": 49,
-     "avgR": 0.12,
-     "winPct": 53
+     "n": 41,
+     "avgR": 0.19,
+     "winPct": 56
     },
     "against the move, far": {
-     "n": 4,
-     "avgR": -0.33,
-     "winPct": 25
+     "n": 3,
+     "avgR": -1.05,
+     "winPct": 0
     }
    },
    "size of the 30-min move": {
     "0.8-1.2x range": {
-     "n": 827,
-     "avgR": -0.07,
-     "winPct": 44
+     "n": 746,
+     "avgR": -0.05,
+     "winPct": 45
     },
     "0.6-0.8x range": {
-     "n": 1819,
-     "avgR": -0.04,
+     "n": 1613,
+     "avgR": -0.03,
      "winPct": 45
     },
     "1.2x+ range": {
-     "n": 353,
+     "n": 304,
      "avgR": -0.13,
      "winPct": 39
     }
    },
    "stock opening gap": {
     "no gap": {
-     "n": 596,
-     "avgR": -0.04,
-     "winPct": 47
+     "n": 540,
+     "avgR": -0.02,
+     "winPct": 49
     },
     "gap up 1-4%": {
-     "n": 591,
-     "avgR": -0.02,
-     "winPct": 45
+     "n": 541,
+     "avgR": 0,
+     "winPct": 47
     },
     "gap down 1-4%": {
-     "n": 509,
-     "avgR": -0.08,
-     "winPct": 40
+     "n": 452,
+     "avgR": -0.07,
+     "winPct": 41
     },
     "gap up 4%+": {
-     "n": 742,
+     "n": 638,
      "avgR": -0.09,
      "winPct": 43
     },
     "gap down 4%+": {
-     "n": 561,
-     "avgR": -0.04,
+     "n": 492,
+     "avgR": -0.05,
      "winPct": 43
     }
    },
    "opening volume surge": {
     "4-8x": {
-     "n": 1292,
-     "avgR": -0.05,
-     "winPct": 44
+     "n": 1133,
+     "avgR": -0.04,
+     "winPct": 45
     },
     "2-4x": {
-     "n": 875,
-     "avgR": -0.05,
+     "n": 799,
+     "avgR": -0.04,
      "winPct": 47
     },
     "8x+": {
-     "n": 819,
-     "avgR": -0.08,
-     "winPct": 41
+     "n": 719,
+     "avgR": -0.06,
+     "winPct": 42
     },
     "1-2x normal": {
-     "n": 13,
-     "avgR": -0.42,
-     "winPct": 23
+     "n": 12,
+     "avgR": -0.34,
+     "winPct": 33
     }
    },
    "stock volatility": {
     "normal stock": {
-     "n": 1272,
-     "avgR": -0.07,
-     "winPct": 43
-    },
-    "calm stock": {
-     "n": 1416,
-     "avgR": -0.04,
+     "n": 1110,
+     "avgR": -0.06,
      "winPct": 44
     },
+    "calm stock": {
+     "n": 1306,
+     "avgR": -0.02,
+     "winPct": 45
+    },
     "jumpy stock": {
-     "n": 275,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 217,
+     "avgR": -0.16,
+     "winPct": 40
     },
     "very jumpy stock": {
-     "n": 36,
-     "avgR": 0.26,
-     "winPct": 56
+     "n": 30,
+     "avgR": 0.34,
+     "winPct": 57
     }
    },
    "news in the last hour": {
     "none": {
-     "n": 2999,
-     "avgR": -0.06,
+     "n": 2663,
+     "avgR": -0.05,
      "winPct": 44
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 2999,
-     "avgR": -0.06,
+     "n": 2663,
+     "avgR": -0.05,
      "winPct": 44
     }
    },
    "overnight news": {
     "none": {
-     "n": 2999,
-     "avgR": -0.06,
+     "n": 2663,
+     "avgR": -0.05,
      "winPct": 44
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 2999,
-     "avgR": -0.06,
+     "n": 2663,
+     "avgR": -0.05,
      "winPct": 44
     }
    },
    "sector": {
     "sector with the move": {
-     "n": 1696,
-     "avgR": -0.07,
-     "winPct": 44
+     "n": 1506,
+     "avgR": -0.05,
+     "winPct": 45
     },
     "sector against the move": {
-     "n": 486,
+     "n": 423,
      "avgR": -0.09,
      "winPct": 42
     },
     "sector flat": {
-     "n": 746,
-     "avgR": 0.01,
+     "n": 669,
+     "avgR": 0,
      "winPct": 45
     },
     "no sector": {
-     "n": 71,
-     "avgR": -0.2,
-     "winPct": 37
+     "n": 65,
+     "avgR": -0.16,
+     "winPct": 40
     }
    },
    "candle read": {
     "candle-with": {
-     "n": 1544,
-     "avgR": -0.05,
-     "winPct": 44
-    },
-    "candle-mild": {
-     "n": 299,
+     "n": 1366,
      "avgR": -0.04,
      "winPct": 45
     },
+    "candle-mild": {
+     "n": 260,
+     "avgR": -0.05,
+     "winPct": 45
+    },
     "candle-against": {
-     "n": 333,
+     "n": 301,
      "avgR": -0.05,
      "winPct": 44
     },
     "candle-none": {
-     "n": 823,
-     "avgR": -0.08,
-     "winPct": 43
+     "n": 736,
+     "avgR": -0.06,
+     "winPct": 44
     }
    },
    "chart structure": {
     "trend-with": {
-     "n": 1683,
+     "n": 1510,
      "avgR": -0.09,
      "winPct": 43
     },
     "range": {
-     "n": 1201,
-     "avgR": -0.01,
-     "winPct": 45
+     "n": 1049,
+     "avgR": 0.02,
+     "winPct": 47
     },
     "trend-against": {
-     "n": 115,
-     "avgR": -0.06,
+     "n": 104,
+     "avgR": -0.08,
      "winPct": 45
     }
    },
    "latest candle pattern": {
     "three black crows": {
-     "n": 628,
+     "n": 568,
      "avgR": -0.06,
      "winPct": 44
     },
     "strong bull candle": {
-     "n": 84,
-     "avgR": -0.11,
-     "winPct": 44
-    },
-    "shooting star": {
-     "n": 30,
-     "avgR": -0.23,
-     "winPct": 33
-    },
-    "none": {
-     "n": 527,
-     "avgR": -0.06,
-     "winPct": 44
-    },
-    "bearish engulfing": {
-     "n": 96,
-     "avgR": 0,
-     "winPct": 46
-    },
-    "inside bar": {
-     "n": 249,
-     "avgR": -0.09,
+     "n": 70,
+     "avgR": -0.14,
      "winPct": 41
     },
+    "shooting star": {
+     "n": 24,
+     "avgR": -0.18,
+     "winPct": 38
+    },
+    "none": {
+     "n": 476,
+     "avgR": -0.06,
+     "winPct": 45
+    },
+    "bearish engulfing": {
+     "n": 81,
+     "avgR": -0.02,
+     "winPct": 42
+    },
+    "inside bar": {
+     "n": 222,
+     "avgR": -0.03,
+     "winPct": 44
+    },
     "doji": {
-     "n": 30,
-     "avgR": -0.16,
+     "n": 27,
+     "avgR": -0.15,
      "winPct": 37
     },
     "outside bar": {
-     "n": 123,
-     "avgR": -0.02,
+     "n": 113,
+     "avgR": -0.05,
      "winPct": 43
     },
     "tweezer top": {
-     "n": 51,
-     "avgR": -0.07,
-     "winPct": 43
+     "n": 45,
+     "avgR": -0.09,
+     "winPct": 44
     },
     "three white soldiers": {
-     "n": 578,
-     "avgR": -0.08,
-     "winPct": 43
+     "n": 503,
+     "avgR": -0.05,
+     "winPct": 45
     },
     "bullish engulfing": {
-     "n": 88,
+     "n": 73,
      "avgR": 0.03,
-     "winPct": 48
+     "winPct": 47
     },
     "hammer": {
      "n": 17,
-     "avgR": -0.17,
-     "winPct": 41
+     "avgR": -0.22,
+     "winPct": 35
     },
     "strong bear candle": {
-     "n": 85,
-     "avgR": 0,
-     "winPct": 47
-    },
-    "gravestone doji": {
-     "n": 30,
+     "n": 77,
      "avgR": 0.03,
      "winPct": 47
     },
-    "tweezer bottom": {
-     "n": 45,
-     "avgR": -0.17,
-     "winPct": 40
+    "gravestone doji": {
+     "n": 27,
+     "avgR": 0.05,
+     "winPct": 48
     },
-    "spinning top": {
-     "n": 88,
-     "avgR": -0.06,
+    "tweezer bottom": {
+     "n": 41,
+     "avgR": -0.14,
      "winPct": 44
     },
+    "spinning top": {
+     "n": 76,
+     "avgR": -0.06,
+     "winPct": 46
+    },
     "piercing line": {
-     "n": 20,
-     "avgR": 0.02,
-     "winPct": 55
+     "n": 17,
+     "avgR": 0.08,
+     "winPct": 65
     },
     "bullish marubozu": {
-     "n": 28,
-     "avgR": 0.07,
-     "winPct": 54
+     "n": 25,
+     "avgR": 0.13,
+     "winPct": 56
     },
     "bull flag": {
-     "n": 17,
-     "avgR": -0.1,
-     "winPct": 47
+     "n": 16,
+     "avgR": -0.04,
+     "winPct": 50
     },
     "morning star": {
-     "n": 20,
-     "avgR": -0.22,
-     "winPct": 40
+     "n": 18,
+     "avgR": -0.27,
+     "winPct": 39
     },
     "bear flag": {
      "n": 12,
@@ -542,71 +569,71 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 25
     },
     "bullish harami": {
-     "n": 12,
-     "avgR": -0.57,
-     "winPct": 33
+     "n": 11,
+     "avgR": -0.62,
+     "winPct": 27
     },
     "bearish marubozu": {
-     "n": 26,
+     "n": 23,
      "avgR": 0.22,
-     "winPct": 50
+     "winPct": 48
     },
     "hanging man": {
-     "n": 18,
-     "avgR": 0.49,
-     "winPct": 61
+     "n": 19,
+     "avgR": 0.44,
+     "winPct": 58
     },
     "evening star": {
-     "n": 25,
-     "avgR": 0.11,
-     "winPct": 56
+     "n": 19,
+     "avgR": 0.16,
+     "winPct": 58
     },
     "inverted hammer": {
-     "n": 15,
-     "avgR": -0.31,
-     "winPct": 33
-    },
-    "bearish harami": {
-     "n": 10,
-     "avgR": -0.25,
-     "winPct": 30
+     "n": 12,
+     "avgR": -0.24,
+     "winPct": 42
     },
     "dark cloud cover": {
-     "n": 20,
-     "avgR": 0.05,
-     "winPct": 45
+     "n": 18,
+     "avgR": 0.09,
+     "winPct": 44
+    },
+    "bearish harami": {
+     "n": 9,
+     "avgR": -0.27,
+     "winPct": 33
     },
     "dragonfly doji": {
-     "n": 27,
-     "avgR": 0.06,
-     "winPct": 41
+     "n": 24,
+     "avgR": 0.15,
+     "winPct": 42
     }
    },
    "month": {
     "2023-01": {
-     "n": 220,
-     "avgR": -0.14,
-     "winPct": 43
+     "n": 104,
+     "avgR": -0.07,
+     "winPct": 50
     },
     "2023-02": {
-     "n": 291,
+     "n": 158,
      "avgR": -0.11,
-     "winPct": 39
+     "winPct": 38
     },
     "2023-03": {
-     "n": 231,
-     "avgR": -0.21,
-     "winPct": 35
+     "n": 153,
+     "avgR": -0.26,
+     "winPct": 33
     },
     "2023-04": {
-     "n": 215,
+     "n": 211,
      "avgR": -0.09,
      "winPct": 45
     },
     "2023-05": {
-     "n": 317,
-     "avgR": -0.03,
-     "winPct": 47
+     "n": 311,
+     "avgR": -0.04,
+     "winPct": 46
     },
     "2023-06": {
      "n": 202,
@@ -614,7 +641,7 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 50
     },
     "2023-07": {
-     "n": 257,
+     "n": 258,
      "avgR": -0.04,
      "winPct": 43
     },
@@ -624,12 +651,12 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 44
     },
     "2023-09": {
-     "n": 190,
-     "avgR": 0.04,
+     "n": 186,
+     "avgR": 0.03,
      "winPct": 48
     },
     "2023-10": {
-     "n": 284,
+     "n": 289,
      "avgR": 0,
      "winPct": 45
     },
@@ -639,179 +666,179 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 44
     },
     "2023-12": {
-     "n": 219,
-     "avgR": -0.03,
-     "winPct": 44
+     "n": 218,
+     "avgR": -0.02,
+     "winPct": 45
     }
    }
   },
-  "text": "Overall -0.06R avg over 2999 trades.\nMade money when:\n  + month = 2023-06: +0.09R avg, 50% wins, 202 trades\n  + stock volatility = very jumpy stock: +0.26R avg, 56% wins, 36 trades\nLost most when:\n  - month = 2023-03: -0.21R avg, 35% wins, 231 trades"
+  "text": "Overall -0.05R avg over 2663 trades.\nMade money when:\n  + volume on the signal candle = surging: +0.25R avg, 47% wins, 57 trades\n  + chart structure = range: +0.02R avg, 47% wins, 1049 trades\n  + stock volatility = very jumpy stock: +0.34R avg, 57% wins, 30 trades\n  + S&P gap at the open = S&P flat: +0.01R avg, 47% wins, 1194 trades\n  + month = 2023-06: +0.09R avg, 50% wins, 202 trades\nLost most when:\n  - month = 2023-03: -0.26R avg, 33% wins, 153 trades"
  },
  "whyFormula": {
-  "n": 161,
-  "overall": -0.1,
+  "n": 141,
+  "overall": -0.07,
   "findings": [
    {
     "dim": "candle read",
     "value": "candle-mild",
-    "n": 22,
-    "avgR": 0.31,
-    "winPct": 68,
-    "z": 2.22,
+    "n": 21,
+    "avgR": 0.32,
+    "winPct": 67,
+    "z": 2.1,
     "better": true
    },
    {
     "dim": "stock opening gap",
     "value": "no gap",
-    "n": 21,
-    "avgR": 0.29,
-    "winPct": 57,
-    "z": 2.06,
+    "n": 17,
+    "avgR": 0.36,
+    "winPct": 65,
+    "z": 2.08,
     "better": true
    }
   ],
   "tables": {
    "market trend": {
     "market downtrend": {
-     "n": 71,
-     "avgR": -0.14,
-     "winPct": 45
+     "n": 64,
+     "avgR": -0.07,
+     "winPct": 48
     },
     "market uptrend": {
-     "n": 90,
+     "n": 77,
      "avgR": -0.07,
-     "winPct": 42
+     "winPct": 43
     }
    },
    "market volatility": {
     "normal market (12-18%)": {
-     "n": 94,
-     "avgR": -0.1,
-     "winPct": 46
+     "n": 80,
+     "avgR": -0.07,
+     "winPct": 49
     },
     "nervous market (18-28%)": {
-     "n": 10,
-     "avgR": -0.56,
-     "winPct": 20
+     "n": 6,
+     "avgR": -0.82,
+     "winPct": 0
     },
     "calm market (<12%)": {
-     "n": 57,
-     "avgR": -0.03,
-     "winPct": 44
+     "n": 55,
+     "avgR": 0,
+     "winPct": 45
     }
    },
    "S&P gap at the open": {
     "S&P gapped down": {
-     "n": 41,
-     "avgR": -0.18,
-     "winPct": 41
+     "n": 38,
+     "avgR": -0.13,
+     "winPct": 45
     },
     "S&P gapped up": {
-     "n": 42,
-     "avgR": -0.21,
-     "winPct": 38
+     "n": 38,
+     "avgR": -0.19,
+     "winPct": 39
     },
     "S&P gapped down hard": {
-     "n": 12,
-     "avgR": -0.17,
-     "winPct": 42
+     "n": 7,
+     "avgR": -0.24,
+     "winPct": 43
     },
     "S&P gapped up hard": {
-     "n": 15,
-     "avgR": -0.04,
-     "winPct": 40
+     "n": 12,
+     "avgR": 0.15,
+     "winPct": 50
     },
     "S&P flat": {
-     "n": 51,
-     "avgR": 0.05,
-     "winPct": 51
+     "n": 46,
+     "avgR": 0.04,
+     "winPct": 50
     }
    },
    "time of day": {
     "10:30-11:30": {
-     "n": 100,
-     "avgR": -0.15,
-     "winPct": 42
+     "n": 84,
+     "avgR": -0.1,
+     "winPct": 45
     },
     "11:30-1:00": {
-     "n": 61,
-     "avgR": -0.03,
+     "n": 57,
+     "avgR": -0.04,
      "winPct": 46
     }
    },
    "side": {
     "long": {
-     "n": 71,
+     "n": 62,
      "avgR": -0.14,
      "winPct": 39
     },
     "short": {
-     "n": 90,
-     "avgR": -0.07,
-     "winPct": 47
+     "n": 79,
+     "avgR": -0.02,
+     "winPct": 51
     }
    },
    "moving against the market": {
     "yes": {
-     "n": 161,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 141,
+     "avgR": -0.07,
+     "winPct": 45
     }
    },
    "volume on the signal candle": {
     "normal": {
-     "n": 75,
-     "avgR": -0.02,
-     "winPct": 48
+     "n": 70,
+     "avgR": 0.04,
+     "winPct": 50
     },
     "fading": {
-     "n": 49,
-     "avgR": -0.22,
-     "winPct": 39
+     "n": 39,
+     "avgR": -0.2,
+     "winPct": 41
     },
     "rising": {
-     "n": 30,
-     "avgR": -0.11,
+     "n": 28,
+     "avgR": -0.17,
      "winPct": 43
     },
     "surging": {
-     "n": 7,
-     "avgR": -0.15,
-     "winPct": 29
+     "n": 4,
+     "avgR": -0.02,
+     "winPct": 25
     }
    },
    "price vs VWAP": {
     "with the move": {
-     "n": 37,
-     "avgR": -0.08,
-     "winPct": 43
+     "n": 33,
+     "avgR": -0.05,
+     "winPct": 45
     },
     "with the move, far": {
-     "n": 105,
-     "avgR": -0.04,
-     "winPct": 48
+     "n": 91,
+     "avgR": -0.02,
+     "winPct": 49
     },
     "against the move": {
-     "n": 15,
-     "avgR": -0.47,
-     "winPct": 20
+     "n": 14,
+     "avgR": -0.43,
+     "winPct": 21
     },
     "against the move, far": {
-     "n": 4,
-     "avgR": -0.49,
-     "winPct": 25
+     "n": 3,
+     "avgR": -0.3,
+     "winPct": 33
     }
    },
    "size of the 30-min move": {
     "0.8-1.2x range": {
-     "n": 40,
-     "avgR": 0.03,
-     "winPct": 48
+     "n": 34,
+     "avgR": 0.1,
+     "winPct": 53
     },
     "0.6-0.8x range": {
-     "n": 115,
-     "avgR": -0.16,
-     "winPct": 42
+     "n": 101,
+     "avgR": -0.14,
+     "winPct": 43
     },
     "1.2x+ range": {
      "n": 6,
@@ -821,46 +848,46 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
    },
    "stock opening gap": {
     "gap up 1-4%": {
-     "n": 24,
-     "avgR": -0.4,
+     "n": 21,
+     "avgR": -0.41,
      "winPct": 29
     },
     "gap down 1-4%": {
-     "n": 15,
-     "avgR": -0.3,
-     "winPct": 40
+     "n": 14,
+     "avgR": -0.26,
+     "winPct": 43
     },
     "gap up 4%+": {
-     "n": 60,
-     "avgR": -0.1,
+     "n": 53,
+     "avgR": -0.07,
      "winPct": 40
     },
     "gap down 4%+": {
-     "n": 41,
-     "avgR": -0.05,
-     "winPct": 51
+     "n": 36,
+     "avgR": -0.01,
+     "winPct": 56
     },
     "no gap": {
-     "n": 21,
-     "avgR": 0.29,
-     "winPct": 57
+     "n": 17,
+     "avgR": 0.36,
+     "winPct": 65
     }
    },
    "opening volume surge": {
     "2-4x": {
-     "n": 22,
-     "avgR": 0.04,
-     "winPct": 45
+     "n": 16,
+     "avgR": 0.15,
+     "winPct": 56
     },
     "4-8x": {
-     "n": 70,
-     "avgR": -0.17,
-     "winPct": 40
+     "n": 66,
+     "avgR": -0.15,
+     "winPct": 41
     },
     "8x+": {
-     "n": 68,
-     "avgR": -0.09,
-     "winPct": 46
+     "n": 58,
+     "avgR": -0.06,
+     "winPct": 47
     },
     "1-2x normal": {
      "n": 1,
@@ -870,64 +897,64 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
    },
    "stock volatility": {
     "calm stock": {
-     "n": 79,
-     "avgR": -0.09,
-     "winPct": 46
+     "n": 74,
+     "avgR": -0.11,
+     "winPct": 45
     },
     "normal stock": {
-     "n": 73,
-     "avgR": -0.09,
-     "winPct": 41
+     "n": 61,
+     "avgR": -0.01,
+     "winPct": 46
     },
     "very jumpy stock": {
-     "n": 4,
-     "avgR": -0.01,
-     "winPct": 50
+     "n": 2,
+     "avgR": 0.71,
+     "winPct": 100
     },
     "jumpy stock": {
-     "n": 5,
-     "avgR": -0.54,
-     "winPct": 40
+     "n": 4,
+     "avgR": -0.75,
+     "winPct": 25
     }
    },
    "news in the last hour": {
     "none": {
-     "n": 161,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 141,
+     "avgR": -0.07,
+     "winPct": 45
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 161,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 141,
+     "avgR": -0.07,
+     "winPct": 45
     }
    },
    "overnight news": {
     "none": {
-     "n": 161,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 141,
+     "avgR": -0.07,
+     "winPct": 45
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 161,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 141,
+     "avgR": -0.07,
+     "winPct": 45
     }
    },
    "sector": {
     "sector against the move": {
-     "n": 84,
-     "avgR": -0.13,
-     "winPct": 38
+     "n": 67,
+     "avgR": -0.1,
+     "winPct": 40
     },
     "sector flat": {
-     "n": 57,
-     "avgR": -0.07,
-     "winPct": 47
+     "n": 54,
+     "avgR": -0.05,
+     "winPct": 48
     },
     "sector with the move": {
      "n": 16,
@@ -942,35 +969,35 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
    },
    "candle read": {
     "candle-none": {
-     "n": 35,
-     "avgR": -0.25,
-     "winPct": 43
+     "n": 33,
+     "avgR": -0.21,
+     "winPct": 45
     },
     "candle-against": {
-     "n": 16,
-     "avgR": -0.1,
-     "winPct": 44
+     "n": 12,
+     "avgR": -0.02,
+     "winPct": 50
     },
     "candle-with": {
-     "n": 88,
-     "avgR": -0.15,
-     "winPct": 38
+     "n": 75,
+     "avgR": -0.13,
+     "winPct": 39
     },
     "candle-mild": {
-     "n": 22,
-     "avgR": 0.31,
-     "winPct": 68
+     "n": 21,
+     "avgR": 0.32,
+     "winPct": 67
     }
    },
    "chart structure": {
     "range": {
-     "n": 53,
-     "avgR": -0.22,
-     "winPct": 38
+     "n": 46,
+     "avgR": -0.11,
+     "winPct": 43
     },
     "trend-with": {
-     "n": 103,
-     "avgR": -0.02,
+     "n": 90,
+     "avgR": -0.03,
      "winPct": 48
     },
     "trend-against": {
@@ -981,29 +1008,19 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
    },
    "latest candle pattern": {
     "inside bar": {
-     "n": 16,
-     "avgR": 0.05,
-     "winPct": 50
+     "n": 14,
+     "avgR": 0.18,
+     "winPct": 57
     },
     "three black crows": {
-     "n": 47,
-     "avgR": -0.1,
-     "winPct": 43
+     "n": 42,
+     "avgR": -0.04,
+     "winPct": 48
     },
     "three white soldiers": {
-     "n": 26,
-     "avgR": -0.03,
-     "winPct": 35
-    },
-    "shooting star": {
-     "n": 1,
-     "avgR": -1.05,
-     "winPct": 0
-    },
-    "evening star": {
-     "n": 1,
-     "avgR": -1.05,
-     "winPct": 0
+     "n": 22,
+     "avgR": -0.08,
+     "winPct": 32
     },
     "none": {
      "n": 19,
@@ -1021,9 +1038,9 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 38
     },
     "strong bull candle": {
-     "n": 7,
-     "avgR": -0.17,
-     "winPct": 29
+     "n": 6,
+     "avgR": -0.25,
+     "winPct": 17
     },
     "piercing line": {
      "n": 1,
@@ -1031,14 +1048,9 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 0
     },
     "gravestone doji": {
-     "n": 3,
-     "avgR": -0.13,
-     "winPct": 67
-    },
-    "dragonfly doji": {
-     "n": 3,
-     "avgR": 0.24,
-     "winPct": 33
+     "n": 2,
+     "avgR": 0.33,
+     "winPct": 100
     },
     "bearish marubozu": {
      "n": 2,
@@ -1050,25 +1062,25 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "avgR": -0.1,
      "winPct": 75
     },
-    "bullish engulfing": {
-     "n": 4,
-     "avgR": -0.11,
-     "winPct": 50
-    },
-    "bearish engulfing": {
-     "n": 4,
-     "avgR": -0.72,
-     "winPct": 25
-    },
     "dark cloud cover": {
      "n": 1,
      "avgR": 1.53,
      "winPct": 100
     },
+    "dragonfly doji": {
+     "n": 2,
+     "avgR": -0.53,
+     "winPct": 0
+    },
     "tweezer bottom": {
      "n": 2,
      "avgR": -0.52,
      "winPct": 50
+    },
+    "bearish engulfing": {
+     "n": 3,
+     "avgR": -1.05,
+     "winPct": 0
     },
     "bullish marubozu": {
      "n": 1,
@@ -1090,6 +1102,11 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "avgR": -0.41,
      "winPct": 50
     },
+    "bullish engulfing": {
+     "n": 1,
+     "avgR": 1.1,
+     "winPct": 100
+    },
     "bearish harami": {
      "n": 1,
      "avgR": 1.23,
@@ -1098,24 +1115,24 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
    },
    "month": {
     "2023-01": {
-     "n": 11,
-     "avgR": -0.6,
-     "winPct": 18
+     "n": 6,
+     "avgR": -0.71,
+     "winPct": 17
     },
     "2023-02": {
-     "n": 16,
-     "avgR": 0.18,
-     "winPct": 50
+     "n": 11,
+     "avgR": 0.29,
+     "winPct": 55
     },
     "2023-03": {
-     "n": 16,
-     "avgR": -0.33,
-     "winPct": 44
+     "n": 9,
+     "avgR": -0.16,
+     "winPct": 56
     },
     "2023-04": {
-     "n": 12,
-     "avgR": 0.37,
-     "winPct": 75
+     "n": 11,
+     "avgR": 0.23,
+     "winPct": 73
     },
     "2023-05": {
      "n": 24,
@@ -1153,13 +1170,13 @@ Out-of-sample year 2023 (250 sessions, formulas found on 2024-2025, never on 202
      "winPct": 60
     },
     "2023-12": {
-     "n": 4,
-     "avgR": -0.37,
-     "winPct": 25
+     "n": 2,
+     "avgR": -0.01,
+     "winPct": 50
     }
    }
   },
-  "text": "Overall -0.1R avg over 161 trades.\nMade money when:\n  + candle read = candle-mild: +0.31R avg, 68% wins, 22 trades\n  + stock opening gap = no gap: +0.29R avg, 57% wins, 21 trades\nNo group stood out as worse than the rest."
+  "text": "Overall -0.07R avg over 141 trades.\nMade money when:\n  + candle read = candle-mild: +0.32R avg, 67% wins, 21 trades\n  + stock opening gap = no gap: +0.36R avg, 65% wins, 17 trades\nNo group stood out as worse than the rest."
  },
  "sample": [
   {
