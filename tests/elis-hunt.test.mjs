@@ -22,4 +22,12 @@ assert(F.weights.some(w => /Good Analyst/.test(w.value) && w.points === 'up'), '
 assert(F.steps.filter(s => s.add).every((s, i, a) => i === 0 || s.avgAcc >= a[i - 1].avgAcc), 'every kept step raised accuracy');
 assert(!F.vars.some(v => /^(candle|dow|time)$/.test(v)), 'noise variables are left behind');
 console.log(H.text(st));
+// a realistic weak world (signals worth 2-4 points): the builder must still produce real percentages and climb
+sd = 21; const weak = yi => Array.from({ length: 30000 }, () => { const f = Object.fromEntries(H.KEYS.map(k => [k, 'v' + Math.floor(r() * 3)])); let p = 0.5;
+  if (f.market === 'v0') p -= 0.04; if (f.trend5d === 'v1') p += 0.03; const t = r() < p ? 'up' : 'down'; return { v: H.KEYS.map(k => f[k]), t: [t, t, t], r: [[0, 0], [0, 0], [0, 0]], m: 0 }; });
+['2019', '2020', '2021', '2022', '2023'].forEach((y, i) => H.saveSamples(y, weak(i))); H.clearCache();
+const st2 = { formulas: {}, years: [], tested: 0, finalChecks: 0, bestHist: [], log: [] };
+await H.climb(st2, 1, H.years(), H.years(), { paused: () => false, log: () => {}, tell: async () => {} });
+const F2 = st2.formulas[6]; console.log('weak world:', F2.vars, F2.score?.avgAcc, F2.screen.slice(0, 3));
+assert(F2.screen.length && F2.screen[0].avgAcc > 50 && F2.vars.length >= 1 && F2.score.avgAcc > 51, 'weak but real signals give real percentages and a formula');
 console.log('HUNT TEST PASSED');

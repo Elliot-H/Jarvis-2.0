@@ -68,10 +68,11 @@ export function loadYear(y) {
 // try the next. After a keep, re-check the older variables and drop any that no longer add. Interactions (a x b) of the most
 // reliable variables are candidates too (the decision tree's branches). Runs per horizon; never stops; resumes when new years or
 // new variables arrive.
-const A = 1, K = 200, TH = [0.55, 0.575, 0.6, 0.625, 0.65, 0.675, 0.7, 0.725, 0.75, 0.8], MINCALLS = 100;
+const A = 1, K = 200, TH = [0.505, 0.51, 0.515, 0.52, 0.53, 0.54, 0.55, 0.575, 0.6, 0.625, 0.65, 0.675, 0.7, 0.725, 0.75, 0.8], MINCALLS = 100;   // real single signals move the odds only a few points: start the calls at 50.5%
 const r1 = x => Math.round(x * 10) / 10;
 const val = (f, v) => { const i = v.indexOf(' x '); if (i < 0) return f[v]; const a = f[v.slice(0, i)], c = f[v.slice(i + 3)]; return a == null || c == null ? null : a + ' | ' + c; };
-const ccache = new Map();   // per year, horizon, variable: value -> [up, down]
+const ccache = new Map();
+export const clearCache = () => { cache.clear(); ccache.clear(); };   // per year, horizon, variable: value -> [up, down]
 function counts(y, hi, v) {
   const key = `${y}:${hi}:${v}`; if (ccache.has(key)) return ccache.get(key);
   const o = {}, tot = [0, 0]; for (const s of loadYear(y)) { const t = s.t[hi]; if (t === 'flat') continue; const j = t === 'up' ? 0 : 1; tot[j]++; const x = val(s.f, v); if (x == null) continue; (o[x] ||= [0, 0])[j]++; }
@@ -117,12 +118,13 @@ export function weights(vars, ys, hi, top = 12) {
   return out.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)).slice(0, top);
 }
 // ---- state + live readout ----
-const blank = () => ({ formulas: {}, years: [], tested: 0, finalChecks: 0, proven: null, bestHist: [], log: [] });
-export const state = () => { try { const s = JSON.parse(fs.readFileSync(SF, 'utf8')); return s.formulas ? s : blank(); } catch { return blank(); } };
+const blank = () => ({ samples: {}, formulas: {}, years: [], tested: 0, finalChecks: 0, proven: null, bestHist: [], log: [] });
+export const HREV = 2;   // bump to rebuild formulas after a builder fix
+export const state = () => { try { const s = JSON.parse(fs.readFileSync(SF, 'utf8')); return s.formulas && s.hrev === HREV ? s : { ...blank(), hrev: HREV }; } catch { return { ...blank(), hrev: HREV }; } };
 const save = st => { try { fs.writeFileSync(SF, JSON.stringify(st)); } catch {} };
 const L = { phase: 'starting', tested: 0, bestAvg: null, bestMin: null, lastAcc: null, lastDesc: '', recent: [], bestHist: [], years: [], collect: '', proven: false, formula: '', at: 0 };
 const bestOf = st => Object.entries(st.formulas || {}).map(([h, f]) => ({ h: +h, ...f })).filter(f => f.score?.ok).sort((a, b) => rank(b.score) - rank(a.score))[0];
-const syncL = st => { const b2 = bestOf(st); Object.assign(L, { tested: st.tested, years: st.years, bestHist: st.bestHist || [], proven: !!st.proven, bestAvg: b2?.score.avgAcc ?? null, bestMin: b2?.score.minAcc ?? null, formula: b2 ? `${NAMES[b2.h]}: ${b2.vars.join(' + ')}` : '' }); };
+const syncL = st => { const b2 = bestOf(st) || (() => { const sc = Object.entries(st.formulas || {}).map(([h, f]) => ({ h: +h, s: f.screen?.[0] })).filter(x => x.s).sort((a, b) => b.s.avgAcc - a.s.avgAcc)[0]; return sc ? { h: sc.h, vars: [sc.s.v + ' (single, not yet added)'], score: { avgAcc: sc.s.avgAcc, minAcc: sc.s.minAcc } } : null; })(); Object.assign(L, { tested: st.tested, years: st.years, bestHist: st.bestHist || [], proven: !!st.proven, bestAvg: b2?.score.avgAcc ?? null, bestMin: b2?.score.minAcc ?? null, formula: b2 ? `${NAMES[b2.h]}: ${b2.vars.join(' + ')}` : '' }); };
 syncL(state());
 export const live = () => ({ ...L, target: TARGET, at: Date.now() });
 export const setCollect = m => { L.collect = String(m || '').slice(0, 90); };
@@ -142,7 +144,9 @@ export async function climb(st, hi, ys, all, { paused, log, tell }) {
     for (let i = 0; i < base.length; i++) for (let j = i + 1; j < base.length; j++) { const pv = `${base[i]} x ${base[j]}`; if (!F.vars.includes(pv)) pairs.push(pv); }
     for (const v of pairs) { const r = await evalFormula([v], ys, hi); scr.push({ v, ...r }); st.tested++; L.tested = st.tested; L.lastAcc = r.ok ? r.avgAcc : null; if (r.ok) { L.recent.push(r.avgAcc); L.recent = L.recent.slice(-60); } }
     const cands = scr.filter(x => x.ok && x.avgAcc > 50 && x.minAcc >= 50).sort((a, b) => rank(b) - rank(a));
-    F.screen = cands.slice(0, 15).map(x => ({ v: x.v, avgAcc: x.avgAcc, minAcc: x.minAcc }));
+    F.screen = scr.filter(x => x.ok).sort((a, b) => rank(b) - rank(a)).slice(0, 15).map(x => ({ v: x.v, avgAcc: x.avgAcc, minAcc: x.minAcc, calls: x.calls }));
+    if (!F.vars.length && F.screen[0]) { L.bestAvg = F.screen[0].avgAcc; L.bestMin = F.screen[0].minAcc; L.formula = `${NAMES[h]}: best single so far ${F.screen[0].v}`; }
+    save(st);
     const cur = F.score || { ok: false, avgAcc: 0, minAcc: 0 };
     let added = null;
     for (const c of cands.slice(0, 15)) {
@@ -175,7 +179,8 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
       if (paused()) { L.phase = 'paused for the market open'; await sleep(60e3); continue; }
       const all = years(), ys = all.filter(y => y !== LOCK); L.years = all; if (ys.length < 3) { L.phase = `collecting history: ${ys.length} of 3 years ready`; await sleep(60e3); continue; }
       const st = state(); const fresh = String(st.years) !== String(all) || st.keys !== KEYS.join();
-      if (fresh) { st.years = all; st.keys = KEYS.join(); for (const f of Object.values(st.formulas)) f.done = false; ccache.clear(); logStep(st, `data now ${ys.join(', ')}${all.includes(LOCK) ? ` + ${LOCK} locked` : ''}; re-checking every formula`, log); }
+      st.samples = Object.fromEntries(all.map(y => [y, loadYear(y).length]));
+      if (fresh) { st.years = all; st.keys = KEYS.join(); for (const f of Object.values(st.formulas)) f.done = false; clearCache(); logStep(st, `data now ${ys.join(', ')}${all.includes(LOCK) ? ` + ${LOCK} locked` : ''}; re-checking every formula`, log); }
       const todo = HS.map((h, i) => i).filter(i => !st.formulas[HS[i]]?.done).sort((a, b) => (a === 1 ? -1 : b === 1 ? 1 : 0));   // 30 min first
       if (!todo.length) { L.phase = 'all formulas settled; waiting for new years or variables'; save(st); await sleep(10 * 60e3); continue; }
       await climb(st, todo[0], ys, all, { paused, log, tell });
