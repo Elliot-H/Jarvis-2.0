@@ -17,4 +17,12 @@ assert(good.ok && good.minAcc > 66 && good.minAcc > loose.minAcc, 'selective con
 const why = await H.score({ h: 6, why: true, P: { mode: 'best', minP: 0.55, minN: 80, abstain: [], drop: [] } }, H.years());
 assert(why.ok, 'why-tuned path runs');
 console.log(H.text({ tested: 3, board: [{ d: 'test', minAcc: good.minAcc, avgAcc: good.avgAcc, avgR: good.avgR, per: good.per }], finalChecks: 0, years: H.years() }));
+// factor refinement: mutate toggles exactly one factor or one setting
+const [m2, fx] = H.mutate({ h: 6, why: false, P: { mode: 'best', minP: 0.6, minN: 80, abstain: [], drop: ['dow'] } });
+assert(fx ? (fx.on ? !m2.P.drop.includes(fx.k) : m2.P.drop.includes(fx.k)) : true, 'one factor toggled');
+assert(H.KEYS.includes('trend5d') && H.KEYS.includes('openCandle'), 'new factors in the search');
+const O = await import('../elis-oos.js');
+const fake = { c: Float32Array.from({ length: 30 }, (_, i) => 100 + i), o: Float32Array.from({ length: 30 }, (_, i) => 99.5 + i) };
+const df = O.dailyF(fake, 25, '2023-03-06'); console.log(df);
+assert(df.range20 === 'near 20-day high' && df.sma20 === 'above 20-day average' && df.dow === 'Monday', 'daily factors');
 console.log('HUNT TEST PASSED');

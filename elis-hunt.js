@@ -17,14 +17,16 @@ const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_P
 export const HS = [3, 6, 12];                         // 15 / 30 / 60 minutes ahead (5-min candles)
 export const NAMES = { 3: '15 min', 6: '30 min', 12: '60 min' };
 export const LOCK = process.env.ELIS_HUNT_LOCK || '2025';
-export const TARGET = 70, PROVEN_MIN = 70;           // Owner: the goal is 70% ACCURACY (share of calls right) on every unseen year incl. 2025
+export const FACTORS_NOTE = 'factors = chart read + why variables; refine adds/removes one at a time and keeps it only if unseen accuracy rises';
+export const TARGET = 70, PROVEN_MIN = 70, FLOOR = 65;           // Owner: the goal is 70% ACCURACY (share of calls right) on every unseen year incl. 2025
 const STOP = 0.4, COST = 0.05, FLAT = 0.1;
 const yieldNow = () => new Promise(r => setImmediate(r)), sleep = ms => new Promise(r => setTimeout(r, ms));
 const b = (x, c, n) => { if (x == null || !Number.isFinite(x)) return null; for (let i = 0; i < c.length; i++) if (x < c[i]) return n[i]; return n[c.length]; };
 export const KEYS = [...['move', 'candle', 'structure', 'vwap', 'volume', 'market', 'time', 'pattern'], ...BL.DAY_KEYS];
-const SFILE = y => path.join(DIR, `hunt-samples-${y}.json.gz`);
+export const SREV = 2;   // bump when factors are added -> year tests recollect samples
+const SFILE = y => path.join(DIR, `hunt-samples-v${SREV}-${y}.json.gz`);
 export const haveSamples = y => fs.existsSync(SFILE(y));
-export const years = () => fs.readdirSync(DIR).map(f => /^hunt-samples-(\d{4})\.json\.gz$/.exec(f)?.[1]).filter(Boolean).sort();
+export const years = () => fs.readdirSync(DIR).map(f => new RegExp(`^hunt-samples-v${SREV}-(\\d{4})\\.json\\.gz$`).exec(f)?.[1]).filter(Boolean).sort();
 
 function outcomeH(cs, k, atr, h, dir) {
   const e = cs[k].c, risk = STOP * atr;
@@ -32,13 +34,14 @@ function outcomeH(cs, k, atr, h, dir) {
   for (let j = k + 1; j <= k + h; j++) { const c = cs[j]; if (dir > 0 ? c.l <= e - risk : c.h >= e + risk) return -1 - COST; if (j === k + h) return Math.round((dir * (c.c - e) / risk - COST) * 100) / 100; }
 }
 // one stock-day -> n samples (features known at the cut, outcomes after it)
-export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, spyTrend, spyVol, news = [], n = 4, rnd = Math.random }) {
+export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, spyTrend, spyVol, news = [], daily = {}, n = 4, rnd = Math.random }) {
   const cs = RD.to5m(bars, t0); if (cs.length < 26) return [];
   const pre = news.filter(x => x.t < t0), pos = pre.filter(x => x.tone === 'pos').length, neg = pre.filter(x => x.tone === 'neg').length;
   const day = { gap: b(gapPct, [-3, -0.5, 0.5, 3], ['gapped down 3%+', 'gapped down', 'no gap', 'gapped up', 'gapped up 3%+']) || 'gap-unknown',
     news: !pre.length ? 'no news' : pos > neg ? 'news pos' : neg > pos ? 'news neg' : 'news neutral', newsType: pre.length ? pre.at(-1).cat || 'other' : 'none',
     rvol: b(rvol, [2, 4, 8], ['rvol 1-2', 'rvol 2-4', 'rvol 4-8', 'rvol 8+']) || 'rvol-unknown', mktGap: b(spyGap, [-0.5, -0.15, 0.15, 0.5], ['spy gap down big', 'spy gap down', 'spy flat', 'spy gap up', 'spy gap up big']) || 'spy-unknown',
-    fear: b(spyVol, [12, 18, 28], ['calm market', 'normal market', 'nervous market', 'panicky market']) || 'fear-unknown', regime: spyTrend || 'trend-unknown', buzz: 'buzz-unknown' };
+    fear: b(spyVol, [12, 18, 28], ['calm market', 'normal market', 'nervous market', 'panicky market']) || 'fear-unknown', regime: spyTrend || 'trend-unknown', buzz: 'buzz-unknown',
+    ...daily, openCandle: (o => !o ? null : (o.c - o.o) / atr > 0.1 ? 'opening candle up' : (o.c - o.o) / atr < -0.1 ? 'opening candle down' : 'opening candle doji')(cs[0]) };
   const sc = sec ? RD.to5m(sec, t0) : null, out = [];
   for (let i = 0; i < n; i++) {
     const k = 6 + Math.floor(rnd() * (cs.length - 12 - 7)), { mv, ...v } = BL.sees(bars, spy, t0, atr, k);
@@ -78,6 +81,14 @@ export async function score(cfg, ys) {
   const v = Object.values(per), ok = v.every(x => x.calls >= 100);
   return { per, minAcc: ok ? Math.min(...v.map(x => x.acc)) : 0, avgAcc: Math.round(v.reduce((a, x) => a + x.acc, 0) / v.length * 10) / 10, avgR: Math.round(v.reduce((a, x) => a + x.avgR, 0) / v.length * 100) / 100, calls: v.reduce((a, x) => a + x.calls, 0), ok };
 }
+// accuracy is the goal (Owner): average unseen accuracy, with the worst year as the guard against luck
+export const rank = r => (r.avgAcc ?? 0) * 0.7 + (r.minAcc ?? 0) * 0.3;
+export function mutate(c) {
+  const P = { ...c.P, drop: [...c.P.drop] }, roll = rnd();
+  if (roll < 0.6) { const k = pick(KEYS), on = P.drop.includes(k); P.drop = on ? P.drop.filter(x => x !== k) : [...P.drop, k]; if (P.drop.length >= KEYS.length - 2) P.drop = P.drop.slice(1); return [{ ...c, P }, { k, on }]; }
+  if (roll < 0.8) P.minP = Math.min(0.85, Math.max(0.55, Math.round((P.minP + pick([-0.025, 0.025, 0.05])) * 1000) / 1000)); else P.minN = pick([40, 80, 150, 300, 600]);
+  return [{ ...c, P }, null];
+}
 let seed = Date.now() % 2147483647 || 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647), pick = a => a[Math.floor(rnd() * a.length)];
 export function nextConfig() {
   const keep = KEYS.filter(() => rnd() < 0.6), drop = rnd() < 0.35 ? [] : KEYS.filter(k => !keep.includes(k));
@@ -93,16 +104,17 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
       if (paused()) { await sleep(60e3); continue; }
       const all = years(), ys = all.filter(y => y !== LOCK); if (ys.length < 3) { await sleep(10 * 60e3); continue; }
       const st = state(); if (String(st.years) !== String(all)) { st.years = all; st.rescored = false; }
-      if (!st.rescored && st.board.length) { for (const e of st.board) Object.assign(e, await score(e.cfg, ys)); st.board.sort((a, b) => b.minAcc - a.minAcc || b.avgR - a.avgR); st.rescored = true; save(st); log(`hunt: rescored on ${ys.join(',')}`); }
+      if (!st.rescored && st.board.length) { for (const e of st.board) Object.assign(e, await score(e.cfg, ys)); st.board.sort((a, b) => rank(b) - rank(a)); st.rescored = true; save(st); log(`hunt: rescored on ${ys.join(',')}`); }
       st.rescored = true;
-      const cfg = nextConfig(), r = await score(cfg, ys); st.tested++;
-      if (r.ok) { st.board.push({ cfg, d: desc(cfg), ...r, per: Object.fromEntries(Object.entries(r.per).map(([y, x]) => [y, { acc: x.acc, calls: x.calls, avgR: x.avgR }])) }); st.board.sort((a, b) => b.minAcc - a.minAcc || b.avgR - a.avgR); st.board = st.board.slice(0, 25); }
+      const base = st.board[0], refine = base && st.tested % 3 === 2, [cfg, factor] = refine ? mutate(base.cfg) : [nextConfig(), null], r = await score(cfg, ys); st.tested++;
+      if (factor) { const fl = (st.factors ||= {})[factor.k] ||= { tried: 0, helped: 0, hurt: 0 }; fl.tried++; if (r.ok && rank(r) > rank(base) + 0.3) fl[factor.on ? 'helped' : 'hurt']++; else if (r.ok && rank(r) < rank(base) - 0.3) fl[factor.on ? 'hurt' : 'helped']++; }
+      if (r.ok) { st.board.push({ cfg, d: desc(cfg), ...r, per: Object.fromEntries(Object.entries(r.per).map(([y, x]) => [y, { acc: x.acc, calls: x.calls, avgR: x.avgR }])) }); st.board.sort((a, b) => rank(b) - rank(a)); st.board = st.board.slice(0, 25); }
       const top = st.board[0];
-      if (top && all.includes(LOCK) && top.minAcc >= 60 && top.minAcc > (st.best?.minAcc || 0) + 0.5) {   // exam on the locked year only for a new best
+      if (top && all.includes(LOCK) && top.avgAcc >= 60 && rank(top) > rank(st.best || {}) + 0.5) {   // exam on the locked year only for a new best
         const hi = HS.indexOf(top.cfg.h), fin = await grade(sum(ys.map(x => tableOf(x, hi))), loadYear(LOCK), hi, top.cfg.P); st.finalChecks++;
-        st.best = { d: top.d, cfg: top.cfg, minAcc: top.minAcc, per: top.per, final: fin, at: new Date().toISOString(), tested: st.tested };
+        st.best = { d: top.d, cfg: top.cfg, minAcc: top.minAcc, avgAcc: top.avgAcc, per: top.per, final: fin, at: new Date().toISOString(), tested: st.tested };
         log(`hunt: new best ${top.minAcc}% worst year; locked ${LOCK}: ${fin.acc}% on ${fin.calls}`);
-        if (top.minAcc >= PROVEN_MIN && fin.acc >= PROVEN_MIN && fin.calls >= 100 && !st.proven) { st.proven = st.best; await tell('Elis: PROVEN read', text(st)); }
+        if (top.avgAcc >= PROVEN_MIN && top.minAcc >= FLOOR && fin.acc >= PROVEN_MIN && fin.calls >= 100 && !st.proven) { st.proven = st.best; await tell('Elis: PROVEN read', text(st)); }
       }
       if (st.tested % 100 === 0) log(`hunt: ${st.tested} configurations tested on ${ys.length} years; best worst-year ${top ? top.minAcc + '%' : 'n/a'}`);
       save(st); await yieldNow();
@@ -112,7 +124,8 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
 export function text(st = state()) {
   const t = st.board?.[0];
   return `Hunt: ${st.tested} configurations tested leave-one-year-out on ${(st.years || []).filter(y => y !== LOCK).join(', ') || 'no years yet'} (${LOCK} locked as the final exam, checked ${st.finalChecks} times).\n`
-    + (t ? `Best so far: ${t.d}. Worst unseen year ${t.minAcc}% right, average ${t.avgAcc}%, ${t.avgR >= 0 ? '+' : ''}${t.avgR}R/trade; by year ${Object.entries(t.per).map(([y, x]) => `${y} ${x.acc}% (${x.calls})`).join(', ')}.\n` : 'No configuration with enough calls yet.\n')
+    + (t ? `Best so far: ${t.d}. Average unseen accuracy ${t.avgAcc}%, worst year ${t.minAcc}%; by year ${Object.entries(t.per).map(([y, x]) => `${y} ${x.acc}% (${x.calls})`).join(', ')}.\nFactors in it: ${KEYS.filter(k => !(t.cfg?.P?.drop || []).includes(k)).join(', ')}.\n` : 'No configuration with enough calls yet.\n')
+    + (st.factors ? `Factor record (helped/hurt when toggled): ${Object.entries(st.factors).sort((a, b) => (b[1].helped - b[1].hurt) - (a[1].helped - a[1].hurt)).slice(0, 8).map(([k, v]) => `${k} ${v.helped}/${v.hurt}`).join(', ')}.\n` : '')
     + (st.best?.final ? `Locked ${LOCK} exam for the best: ${st.best.final.acc}% on ${st.best.final.calls} calls, ${st.best.final.avgR >= 0 ? '+' : ''}${st.best.final.avgR}R/trade.\n` : '')
-    + (st.proven ? `PROVEN: ${st.proven.d}` : `Goal ${TARGET}%: not reached; still looping.`);
+    + (st.proven ? `PROVEN: ${st.proven.d}` : `Goal ${TARGET}% average accuracy: not reached; still looping.`);
 }

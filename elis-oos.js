@@ -113,6 +113,15 @@ export const WHY_DIMS = [
 ];
 // UTILITY: to add a new variable to the formula search, add one line above ({ name, key } or { name, get }) and make sure the
 // trades carry it (tradesForDay ctx or run()). Every year test then stores it, and build() searches it alone and paired with every other one.
+// the stock's own bigger picture as of the prior close (factors added for the hunt)
+const DOW = ['Sun', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Sat'];
+export function dailyF(x, k, d) {
+  if (!x) return {}; const c1 = x.c[k - 1], c6 = x.c[k - 6], cl = []; for (let j = k - 20; j < k; j++) if (!isNaN(x.c[j])) cl.push(x.c[j]);
+  const hi = Math.max(...cl), lo = Math.min(...cl), pos = hi > lo ? (c1 - lo) / (hi - lo) : 0.5, sma = cl.reduce((a, v) => a + v, 0) / (cl.length || 1), t5 = (c1 / c6 - 1) * 100, pd = (x.c[k - 1] / x.o[k - 1] - 1) * 100;
+  const bk = (v, c, n) => { if (!Number.isFinite(v)) return null; for (let i = 0; i < c.length; i++) if (v < c[i]) return n[i]; return n[c.length]; };
+  return { trend5d: bk(t5, [-5, -1.5, 1.5, 5], ['down big over 5 days', 'down over 5 days', 'flat over 5 days', 'up over 5 days', 'up big over 5 days']), range20: cl.length < 15 ? null : pos < 0.2 ? 'near 20-day low' : pos > 0.8 ? 'near 20-day high' : 'mid 20-day range',
+    sma20: cl.length < 15 ? null : c1 >= sma ? 'above 20-day average' : 'below 20-day average', prevDay: bk(pd, [-3, -0.5, 0.5, 3], ['prev day down big', 'prev day down', 'prev day flat', 'prev day up', 'prev day up big']), dow: DOW[new Date(d + 'T12:00:00Z').getUTCDay()] };
+}
 export async function run({ year = '2023', progress = null, shouldStop = () => false, perDay = 30 } = {}) {
   const from = `${year}-01-01`, to = `${year}-12-31`, warm = new Date(Date.parse(from) - 50 * 86400e3).toISOString().slice(0, 10);
   const cal = (await A(E.BASE, `/v2/calendar?start=${warm}&end=${to}`)).map(c => c.date), N = cal.length, di = new Map(cal.map((d, i) => [d, i]));
@@ -156,7 +165,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
       let spyTrend = null, spyVol = null; if (spy) { const cl = []; for (let j = k - 20; j < k; j++) if (!isNaN(spy.c[j])) cl.push(spy.c[j]); if (cl.length >= 15) { const sma = cl.reduce((a, b) => a + b, 0) / cl.length; spyTrend = spy.c[k - 1] >= sma ? 'market uptrend' : 'market downtrend'; const rr = cl.slice(1).map((c, i) => Math.log(c / cl[i])), mu = rr.reduce((a, b) => a + b, 0) / rr.length; spyVol = Math.sqrt(rr.reduce((a, b) => a + (b - mu) ** 2, 0) / rr.length * 252) * 100; } }
       for (const c of top) { const x = D.get(c.s), gap = x && first[c.s] ? (first[c.s].o / x.c[k - 1] - 1) * 100 : null;
         const nws = news.filter(n => (n.symbols || []).includes(c.s)).map(n => ({ t: Date.parse(n.created_at), tone: RD.tone(n.headline), cat: catOf(n.headline, true) }));
-        if ((bars[c.s] || []).length > 150) try { hunt.push(...HUNT.samplesForDay({ bars: bars[c.s], spy: bars.SPY, sec: secOf[c.s] ? bars[secOf[c.s]] : null, t0: E.etMs(d, 570), atr: c.atr, gapPct: gap, rvol: c.rvol, spyGap, spyTrend, spyVol, news: nws, rnd: hr })); } catch {}
+        if ((bars[c.s] || []).length > 150) try { hunt.push(...HUNT.samplesForDay({ bars: bars[c.s], spy: bars.SPY, sec: secOf[c.s] ? bars[secOf[c.s]] : null, t0: E.etMs(d, 570), atr: c.atr, gapPct: gap, rvol: c.rvol, spyGap, spyTrend, spyVol, news: nws, daily: dailyF(x, k, d), rnd: hr })); } catch {}
         for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap, { news: nws, secBars: secOf[c.s] ? bars[secOf[c.s]] : null })) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
       sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`);
     }
