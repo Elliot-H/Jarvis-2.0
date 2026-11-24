@@ -116,16 +116,17 @@ export async function shortOf(sym, cal, k) {
 
 // ---------- SEC EDGAR: insider (Form 4) and 8-K timing ----------
 let CIK = null;
-async function cikMap() { if (CIK) return CIK; CIK = load('cik'); if (CIK) return CIK; const j = await get('https://www.sec.gov/files/company_tickers.json', { json: true, src: 'sec', wait: 150 }); CIK = {}; for (const v of Object.values(j || {})) CIK[v.ticker] = v.cik_str; if (Object.keys(CIK).length) save('cik', CIK); return CIK; }
+async function cikMap() { if (CIK && Object.keys(CIK).length) return CIK; CIK = load('cik'); if (CIK && Object.keys(CIK).length) return CIK; const j = await get('https://www.sec.gov/files/company_tickers.json', { json: true, src: 'sec', wait: 150 }); CIK = {}; for (const v of Object.values(j || {})) CIK[v.ticker] = v.cik_str; if (Object.keys(CIK).length) save('cik', CIK); return CIK; }
 const edgarMem = new Map();
 export async function edgarEvents(sym) {   // { f4: [YYYY-MM-DD], k8: [ISO acceptance times] }
-  if (edgarMem.has(sym)) return edgarMem.get(sym); const disk = load('edgar-' + sym); if (disk) { edgarMem.set(sym, disk); return disk; }
-  const cik = (await cikMap())[sym]; let ev = { f4: [], k8: [] };
+  if (edgarMem.has(sym)) return edgarMem.get(sym); const disk = load('edgar2-' + sym); if (disk) { edgarMem.set(sym, disk); return disk; }
+  const map = await cikMap(); if (!Object.keys(map).length) return null;   // SEC unreachable: unknown, not 'no filings' (and nothing cached)
+  const cik = map[sym]; let ev = { f4: [], k8: [] }, okAll = true;
   if (cik) { const pad = String(cik).padStart(10, '0'), j = await get(`https://data.sec.gov/submissions/CIK${pad}.json`, { json: true, src: 'sec', wait: 150 });
     const take = r => { if (!r?.form) return; for (let i = 0; i < r.form.length; i++) { if (r.form[i] === '4') ev.f4.push(r.filingDate[i]); else if (r.form[i] === '8-K') ev.k8.push(r.acceptanceDateTime?.[i] || r.filingDate[i]); } };
-    take(j?.filings?.recent);
-    for (const f of j?.filings?.files || []) { if (f.filingTo && f.filingTo < '2015-06-01') continue; take(await get(`https://data.sec.gov/submissions/${f.name}`, { json: true, src: 'sec', wait: 150 })); } }
-  ev = { f4: [...new Set(ev.f4)].sort(), k8: [...new Set(ev.k8)].sort() }; edgarMem.set(sym, ev); if (edgarMem.size > 400) edgarMem.delete(edgarMem.keys().next().value); save('edgar-' + sym, ev); return ev;
+    if (!j) okAll = false; take(j?.filings?.recent);
+    for (const f of j?.filings?.files || []) { if (f.filingTo && f.filingTo < '2015-06-01') continue; const jj = await get(`https://data.sec.gov/submissions/${f.name}`, { json: true, src: 'sec', wait: 150 }); if (!jj) okAll = false; take(jj); } }
+  ev = { f4: [...new Set(ev.f4)].sort(), k8: [...new Set(ev.k8)].sort() }; edgarMem.set(sym, ev); if (edgarMem.size > 400) edgarMem.delete(edgarMem.keys().next().value); if (okAll) save('edgar2-' + sym, ev); return ev;
 }
 export async function filingsOf(sym, d, cal, k, t0) {
   const ev = await edgarEvents(sym).catch(() => null); if (!ev) return {}; const lo = cal[Math.max(0, k - 3)], prevClose = cal[k - 1];
@@ -140,15 +141,16 @@ async function wikiTitle(sym, name) {
   const T = wikiTitles(); if (sym in T) return T[sym]; if (!name) return (T[sym] = null);
   const q = String(name).replace(/\b(Inc|Corp|Corporation|Co|Ltd|Holdings|Group|plc|Class [A-C]|Common Stock|Ordinary Shares|ADR|American Depositary Shares)\b\.?/gi, '').replace(/[,.]+/g, ' ').replace(/\s+/g, ' ').trim();
   const j = await get(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q + ' company')}&srlimit=1&format=json`, { json: true, src: 'wiki', wait: 60 });
+  if (!j) return null;   // search failed: retry next time
   T[sym] = j?.query?.search?.[0]?.title || null; if (Object.keys(T).length % 25 === 0) save('wiki-titles', T); return T[sym];
 }
 const wikiMem = new Map();
 async function wikiViews(sym, name) {
   if (wikiMem.has(sym)) return wikiMem.get(sym); const disk = load('wiki-' + sym); if (disk) { wikiMem.set(sym, disk); return disk; }
   const t = await wikiTitle(sym, name); let v = {};
-  if (t) { const j = await get(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/${encodeURIComponent(t.replace(/ /g, '_'))}/daily/20150701/20260101`, { json: true, src: 'wiki', wait: 60 });
-    for (const it of j?.items || []) v[`${it.timestamp.slice(0, 4)}-${it.timestamp.slice(4, 6)}-${it.timestamp.slice(6, 8)}`] = it.views; }
-  wikiMem.set(sym, v); if (wikiMem.size > 400) wikiMem.delete(wikiMem.keys().next().value); save('wiki-' + sym, v); return v;
+  let okv = true; if (t) { const j = await get(`https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/${encodeURIComponent(t.replace(/ /g, '_'))}/daily/20150701/20260101`, { json: true, src: 'wiki', wait: 60 });
+    if (!j) okv = false; for (const it of j?.items || []) v[`${it.timestamp.slice(0, 4)}-${it.timestamp.slice(4, 6)}-${it.timestamp.slice(6, 8)}`] = it.views; }
+  wikiMem.set(sym, v); if (wikiMem.size > 400) wikiMem.delete(wikiMem.keys().next().value); if (okv && t) save('wiki-' + sym, v); return v;
 }
 export async function attentionOf(sym, name, cal, k) {
   const v = await wikiViews(sym, name).catch(() => null); if (!v || !Object.keys(v).length) return null;
