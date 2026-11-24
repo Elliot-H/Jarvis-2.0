@@ -23,6 +23,7 @@ import * as JS from './elis-jumps.js';
 import * as OOS from './elis-oos.js';
 import * as WHY from './elis-why.js';
 import * as BL from './elis-blind.js';
+import * as HUNT from './elis-hunt.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -415,7 +416,7 @@ async function learnTick() {
     if (hs.learnedRev >= L.LEARN_REV && OOS.nextYear(true)) return void oosNow();   // core year tests (2023, 2020 COVID, 2022 bear) first
     if (hs.learnedRev >= L.LEARN_REV && !JS.state().done) return void jumpNow();
     if (hs.learnedRev >= L.LEARN_REV && !WHY.lastReport()) return void whyNow();
-    if (hs.learnedRev >= L.LEARN_REV && !(OOS.lastRules()?.proven?.length >= 3) && OOS.nextYear()) return void oosNow();   // keep testing older years until rules prove consistent
+    if (hs.learnedRev >= L.LEARN_REV && OOS.nextYear()) return void oosNow();   // every year 2016-2025 feeds the hunt; no stopping early
     if (hs.diskStop && L.freeMB() < 300) { if (!hs.learnedAfterStop || (hs.learnedRev || 0) < L.LEARN_REV) return void learnNow(`${(hs.done || []).length} sessions (disk limit)`); }   // learn once from what fits; no endless restarts
     else if (!hs.finished) return void learnNow('history');
     if (dow === 6 && now.min >= 600 && lastLearnDay !== now.date) { lastLearnDay = now.date; learnNow('weekly'); }
@@ -488,7 +489,8 @@ export function start() {
   setInterval(() => openValues().then(v => { openCache = v; }).catch(() => {}), 60e3);
   E.setExtraOpen(() => openCache);
   E.setHudExtra(() => ({ learnVersion: L.version(), learnBusy: learnBusy }));
-  if (process.env.ELIS_LEARN !== '0') { setInterval(() => learnTick(), 30 * 60e3); setTimeout(() => learnTick(), 90e3); }
+  if (process.env.ELIS_LEARN !== '0') { setInterval(() => learnTick(), 2 * 60e3); setTimeout(() => learnTick(), 90e3);   // no waiting between studies
+    if (process.env.ELIS_HUNT !== '0') setTimeout(() => HUNT.forever({ paused: marketHours, log: m => note(m), tell: (a, b) => E.tellOut(a, b) }), 120e3); }   // the endless hunt
   note(`online: picks ${W.picks}, risk ${W.riskPct}%/trade, entries until ${Math.floor(W.entryEnd / 60)}:${String(W.entryEnd % 60).padStart(2, '0')}, exit ${Math.floor(W.exitAt / 60)}:${String(W.exitAt % 60).padStart(2, '0')}`);
   return true;
 }

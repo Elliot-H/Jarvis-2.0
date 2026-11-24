@@ -7,6 +7,7 @@
 import * as E from './elis.js';
 import * as RD from './elis-read.js';
 import * as X from './elis-explain.js';
+import * as HUNT from './elis-hunt.js';
 import * as CX from './elis-context.js';
 import { catOf } from './elis-learn.js';
 import fs from 'node:fs';
@@ -18,8 +19,8 @@ export const lastReport = () => { const r = reports(); return Object.keys(r).len
 export const saveReport = r => { const all = reports(); all[r.year] = r; try { fs.writeFileSync(SF, JSON.stringify(all)); } catch {} };
 // first three: 2023, 2020 (COVID), 2022 (bear). If no rule proves consistent, Elis keeps adding older years (Alpaca SIP goes back to 2016)
 export const CORE = 3;
-export const YEARS = () => String(process.env.ELIS_OOS_YEARS || '2023,2020,2022,2021,2019,2018,2017,2016').split(',').map(x => x.trim()).filter(Boolean);
-const doneY = y => reports()[y] && fs.existsSync(TF(y));
+export const YEARS = () => String(process.env.ELIS_OOS_YEARS || '2023,2020,2022,2025,2024,2021,2019,2018,2017,2016').split(',').map(x => x.trim()).filter(Boolean);
+const doneY = y => reports()[y] && fs.existsSync(TF(y)) && HUNT.haveSamples(y);   // every year also feeds the hunt
 export const nextYear = (core = false) => (core ? YEARS().slice(0, CORE) : YEARS()).find(y => !doneY(y));
 const TF = y => path.join(DIR, `oos-trades-${y}.json.gz`);   // compact graded trades per year: the raw material the rules are built from
 export const saveTrades = (y, trades) => { try { fs.writeFileSync(TF(y), zlib.gzipSync(JSON.stringify(trades))); } catch {} };
@@ -131,7 +132,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
       D.set(s, { o, h, l, c, v });
     }
   }
-  const win = {}, all = [], sectorCache = {}; let sessions = 0;
+  const win = {}, all = [], sectorCache = {}, hunt = []; let sessions = 0, hs = 97 + +year; const hr = () => ((hs = (hs * 16807) % 2147483647) / 2147483647);
   for (let k = 15; k < N; k++) {
     const d = cal[k]; if (shouldStop()) return { paused: true, partial: summarize(all), sessions };
     const elig = [];
@@ -155,6 +156,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
       let spyTrend = null, spyVol = null; if (spy) { const cl = []; for (let j = k - 20; j < k; j++) if (!isNaN(spy.c[j])) cl.push(spy.c[j]); if (cl.length >= 15) { const sma = cl.reduce((a, b) => a + b, 0) / cl.length; spyTrend = spy.c[k - 1] >= sma ? 'market uptrend' : 'market downtrend'; const rr = cl.slice(1).map((c, i) => Math.log(c / cl[i])), mu = rr.reduce((a, b) => a + b, 0) / rr.length; spyVol = Math.sqrt(rr.reduce((a, b) => a + (b - mu) ** 2, 0) / rr.length * 252) * 100; } }
       for (const c of top) { const x = D.get(c.s), gap = x && first[c.s] ? (first[c.s].o / x.c[k - 1] - 1) * 100 : null;
         const nws = news.filter(n => (n.symbols || []).includes(c.s)).map(n => ({ t: Date.parse(n.created_at), tone: RD.tone(n.headline), cat: catOf(n.headline, true) }));
+        if ((bars[c.s] || []).length > 150) try { hunt.push(...HUNT.samplesForDay({ bars: bars[c.s], spy: bars.SPY, sec: secOf[c.s] ? bars[secOf[c.s]] : null, t0: E.etMs(d, 570), atr: c.atr, gapPct: gap, rvol: c.rvol, spyGap, spyTrend, spyVol, news: nws, rnd: hr })); } catch {}
         for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap, { news: nws, secBars: secOf[c.s] ? bars[secOf[c.s]] : null })) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
       sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`);
     }
@@ -163,6 +165,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
   const main = all.filter(t => /^strong move alone/.test(t.formula));   // every strong-move trade: the widest base for the why
   const why = X.explain(main, WHY_DIMS);
   const whyFormula = X.explain(all.filter(t => /^midday, stock strong against the market -> go/.test(t.formula)), WHY_DIMS, { minN: 15 });
+  HUNT.saveSamples(year, hunt);
   saveTrades(year, main.map(t => { const o = { R: Math.round(t.R * 1000) / 1000 }; for (const d of WHY_DIMS) { const v = typeof d.get === 'function' ? d.get(t) : t[d.key]; if (v != null) o[d.name] = v; } return o; }));
   return { year, sessions, results: summarize(all), trades: all.length, why, whyFormula, sample: all.slice(-20) };
 }
