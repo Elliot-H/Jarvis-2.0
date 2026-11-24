@@ -39,7 +39,7 @@ function firstTouch(bars, T, e, x) { const up = e * (1 + x / 100), dn = e * (1 -
 // swing turns: 5-min candles where price has come >= 1% off its last-hour extreme and the candle turned back (the flip-flops to catch)
 function turns(cs) { const out = []; for (let k = 12; k < cs.length - 2; k++) { const w = cs.slice(k - 12, k + 1), hi = Math.max(...w.map(c => c.h)), lo = Math.min(...w.map(c => c.l)), c = cs[k];
   if ((hi / c.c - 1 >= 0.01 && c.c > c.o) || (1 - lo / c.c >= 0.01 && c.c < c.o)) out.push(k); } return out; }
-export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, spyTrend, spyVol, news = [], daily = {}, n = 4, rnd = Math.random }) {
+export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, spyTrend, spyVol, news = [], daily = {}, n = 6, rnd = Math.random }) {
   const cs = RD.to5m(bars, t0); if (cs.length < 26) return [];
   const pre = news.filter(x => x.t < t0), pos = pre.filter(x => x.tone === 'pos').length, neg = pre.filter(x => x.tone === 'neg').length;
   const day = { gap: b(gapPct, [-3, -0.5, 0.5, 3], ['gapped down 3%+', 'gapped down', 'no gap', 'gapped up', 'gapped up 3%+']) || 'gap-unknown',

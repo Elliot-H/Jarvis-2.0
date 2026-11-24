@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as H from './elis-hunt.js';
+import * as ML from './elis-ml.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'walk-state.json');
 export const TARGET = 70, SWI = Math.max(0, [0.5, 1, 2].indexOf(+(process.env.ELIS_SWING || 1)));   // Owner: from here, +1% before -1%?
@@ -72,6 +73,7 @@ const L = { phase: 'starting', tested: 0, bestAvg: null, bestMin: null, lastAcc:
 const roll = st => { const w = st.recent.slice(-12), n = w.reduce((a, x) => a + x.n, 0); return n ? r1(w.reduce((a, x) => a + x.acc * x.n, 0) / n) : null; };
 const syncL = (st, phase) => { const last = st.recent.at(-1); Object.assign(L, { years: H.years(), phase: phase || L.phase, tested: st.charts, lastAcc: last?.acc ?? null, bestAvg: roll(st), bestMin: st.exams.at(-1)?.acc ?? null,
   recent: st.recent.map(x => x.acc), bestHist: (st.hist || []).map(a => ({ avg: a })), proven: !!st.proven, formula: `${st.formula.length} rules, ${st.cands.length} candidates under watch` }); };
+{ const r0 = ML.lastReport(); if (r0) L.ml = { all: r0.avg.all, top10: r0.avg.top10, top5: r0.avg.top5, worst10: r0.worst.top10, exam10: r0.exam?.top10 ?? null }; }
 syncL(state());
 export const live = () => ({ ...L, target: TARGET, at: Date.now(), labels: { big: 'accuracy, last 12 periods (blind calls)', small: 'last 2025 exam', last: 'THIS PERIOD', tested: 'CHARTS CALLED' } });
 export const setCollect = m => { L.collect = String(m || '').slice(0, 90); };
@@ -85,6 +87,10 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
         if (all.includes(H.LOCK)) { const e = grade(H.loadYear(H.LOCK), st.formula); st.exams.push({ pass: st.pass, acc: e.acc, n: e.n, rules: st.formula.length, t: new Date().toISOString() }); log(`walk: pass ${st.pass} done; 2025 exam ${e.acc}% on ${e.n} charts with ${st.formula.length} rules`);
           if (e.acc >= TARGET && !st.proven) { st.proven = { pass: st.pass, acc: e.acc, rules: st.formula.map(r => `${label(r.c)} -> ${r.dir}`) }; await tell('Elis: 70% reached on the locked 2025 exam', text(st)); } }
         st.pass++; st.pos = 0; st.walkedOn = String(ys); save(st);
+        // the ML engine: every variable weighed together, trained on earlier years, tested on the next; certainty per call
+        syncL(st, 'training the ML engine on every variable (earlier years -> next year)'); const ml = await ML.run({ log }).catch(e => (log('ml error: ' + e.message), null));
+        if (ml) { L.ml = { all: ml.avg.all, top10: ml.avg.top10, top5: ml.avg.top5, worst10: ml.worst.top10, exam10: ml.exam?.top10 ?? null }; log('walk: ' + ML.text(ml));
+          if (ml.avg.top10 >= TARGET && ml.worst.top10 >= 65 && (ml.exam?.top10 ?? 0) >= TARGET && !st.mlProven) { st.mlProven = true; save(st); await tell('Elis: 70% reached on its most certain calls', ML.text(ml)); } }
         while (String(H.years().filter(y => y !== H.LOCK)) === st.walkedOn) { syncL(st, `walked every year in (${ys.length}); waiting for the next year of data (${H.years().length} of 10 in)`); await sleep(5 * 60e3); }
         continue;
       }

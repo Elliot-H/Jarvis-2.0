@@ -383,6 +383,7 @@
       + svg
       + `<div class="elis-n"><span>${esc((m.labels && m.labels.last) || 'LAST TEST')} <b class="${col(m.lastAcc)}">${pct(m.lastAcc)}</b></span><span>${esc((m.labels && m.labels.tested) || 'TESTED')} <b>${(m.tested || 0).toLocaleString()}</b></span><span>YEARS <b>${yrs}</b></span></div>`
       + (m.formula ? `<div class="elis-s"><small>FORMULA ${esc(m.formula)}</small></div>` : '')
+      + (m.ml ? `<div class="elis-n"><span>ML ALL <b class="${col(m.ml.all)}">${pct(m.ml.all)}</b></span><span>MOST CERTAIN 10% <b class="${col(m.ml.top10)}">${pct(m.ml.top10)}</b></span><span>2025 EXAM <b class="${col(m.ml.exam10)}">${pct(m.ml.exam10)}</b></span></div>` : '')
       + `<div class="elis-s"><small>${m.proven ? 'PROVEN · ' : ''}${esc(m.phase || '')}${m.phase && m.phase.startsWith('collecting') && m.collect ? ' · ' + esc(m.collect) : ''}</small></div>`;
     const fr = $('#elisFrame'); if (fr) fr.style.display = '';
   }
