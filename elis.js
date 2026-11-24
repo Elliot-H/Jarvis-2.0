@@ -342,6 +342,7 @@ function summarize(trades, sessions, cfg) {
 // Elis P/L = cash flow of its own fills (client_order_id elis-*: entries, bracket exits, EOD flatten) + any open Elis position.
 let hudCache = { at: 0, v: null }, extraOpen = () => [], hudExtra = () => ({});
 export const setHudExtra = f => { hudExtra = f; };
+export const hudSend = o => { try { hud(o); } catch {} };   // extra live panels (hunt accuracy)
 export const setExtraOpen = f => { extraOpen = f; };
 export async function summary(force = false) {
   if (!force && hudCache.v && Date.now() - hudCache.at < 55e3) return hudCache.v;

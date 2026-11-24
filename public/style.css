@@ -217,3 +217,10 @@ a.tk{color:inherit;text-decoration:underline dotted;cursor:pointer}
 .elis .elis-n b{font-family:"JetBrains Mono";font-size:12px;color:var(--c,#3fe0ff);margin-left:4px}
 .elis .elis-n b.up{color:#4dff9a}.elis .elis-n b.dn{color:#ff6b6b}
 .elis .elis-s{padding-top:2px}
+
+.elis.hunt{border-top:1px solid var(--cline);margin-top:6px;padding-top:4px}
+.elis.hunt .hunt-big{font-family:"JetBrains Mono";font-size:22px;color:#ff6b6b;line-height:1.1}
+.elis.hunt .hunt-big.up{color:#4dff9a}.elis.hunt .hunt-big.mid{color:#ffd166}
+.elis.hunt .hunt-big small{font-family:inherit;font-size:9px;color:var(--muted);letter-spacing:.04em;margin-left:4px}
+.elis.hunt .hunt-g{height:40px}
+.elis .elis-n b.mid{color:#ffd166}

@@ -4128,6 +4128,7 @@ wss.on('connection', (ws, req) => {
   ws.send(JSON.stringify({ type: 'panels', panels: state.panels }));
   if (watch.holdings) ws.send(JSON.stringify(holdingsOut()));
   if (elis.lastHud()) ws.send(JSON.stringify(elis.lastHud()));   // Elis P/L panel
+  try { ws.send(JSON.stringify({ type: 'elisHunt', ...elisHunt.live() })); } catch {}   // Elis hunt accuracy
   ws.send(JSON.stringify(watchlistMsg()));
   ws.send(JSON.stringify({ type: 'state', state: busy ? 'thinking' : 'idle' }));
   ws.on('close', () => { clients.delete(ws); deviceClients.delete(ws); });

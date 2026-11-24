@@ -97,12 +97,18 @@ export function nextConfig() {
 export const state = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return { tested: 0, board: [], finalChecks: 0, best: null, proven: null, years: [] }; } };
 const save = st => { try { fs.writeFileSync(SF, JSON.stringify(st)); } catch {} };
 const desc = c => `${NAMES[c.h]} ahead, ${c.P.mode === 'best' ? 'strongest read' : '5-read blend'}, ${Math.round(c.P.minP * 1000) / 10}%+ sure, ${c.P.minN}+ examples${c.P.drop.length ? `, without ${c.P.drop.join('/')}` : ''}${c.why ? ', why-tuned' : ''}`;
+// LIVE readout for the Jarvis panel (Owner: "a rolling display of the % accuracy we're at, at any moment")
+const L = { phase: 'starting', tested: 0, bestAvg: null, bestMin: null, lastAcc: null, lastDesc: '', recent: [], bestHist: [], years: [], collect: '', proven: false, at: 0 };
+{ const st = state(); const t = st.board?.[0]; Object.assign(L, { tested: st.tested || 0, bestAvg: t?.avgAcc ?? null, bestMin: t?.minAcc ?? null, years: st.years || [], bestHist: st.bestHist || [], proven: !!st.proven }); }
+export const live = () => ({ ...L, target: TARGET, at: Date.now() });
+export const setCollect = m => { L.collect = String(m || '').slice(0, 90); };
 // the endless loop
 export async function forever({ paused = () => false, log = () => {}, tell = async () => {} } = {}) {
   for (;;) {
     try {
-      if (paused()) { await sleep(60e3); continue; }
-      const all = years(), ys = all.filter(y => y !== LOCK); if (ys.length < 3) { await sleep(10 * 60e3); continue; }
+      if (paused()) { L.phase = 'paused for the market open'; await sleep(60e3); continue; }
+      const all = years(), ys = all.filter(y => y !== LOCK); L.years = all; if (ys.length < 3) { L.phase = `collecting history: ${ys.length} of 3 years ready`; await sleep(60e3); continue; }
+      L.phase = 'testing';
       const st = state(); if (String(st.years) !== String(all)) { st.years = all; st.rescored = false; }
       if (!st.rescored && st.board.length) { for (const e of st.board) Object.assign(e, await score(e.cfg, ys)); st.board.sort((a, b) => rank(b) - rank(a)); st.rescored = true; save(st); log(`hunt: rescored on ${ys.join(',')}`); }
       st.rescored = true;
@@ -117,6 +123,9 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
         if (top.avgAcc >= PROVEN_MIN && top.minAcc >= FLOOR && fin.acc >= PROVEN_MIN && fin.calls >= 100 && !st.proven) { st.proven = st.best; await tell('Elis: PROVEN read', text(st)); }
       }
       if (st.tested % 100 === 0) log(`hunt: ${st.tested} configurations tested on ${ys.length} years; best worst-year ${top ? top.minAcc + '%' : 'n/a'}`);
+      const t0 = st.board[0]; L.tested = st.tested; L.lastAcc = r.ok ? r.avgAcc : null; L.lastDesc = desc(cfg); if (r.ok) { L.recent.push(r.avgAcc); L.recent = L.recent.slice(-60); }
+      if (t0 && t0.avgAcc !== L.bestAvg) { (st.bestHist ||= []).push({ t: Date.now(), avg: t0.avgAcc, min: t0.minAcc, n: st.tested }); st.bestHist = st.bestHist.slice(-200); }
+      L.bestAvg = t0?.avgAcc ?? null; L.bestMin = t0?.minAcc ?? null; L.bestHist = st.bestHist || []; L.proven = !!st.proven;
       save(st); await yieldNow();
     } catch (e) { log('hunt error: ' + e.message); await sleep(60e3); }
   }
