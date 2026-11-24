@@ -25,7 +25,12 @@ export const KEYS = [...['move', 'candle', 'structure', 'vwap', 'volume', 'marke
 export const SREV = 5;   // v5: + free sources (VIX curve, put/call, macro days, FINRA shorting, SEC insider/8-K, Wikipedia attention, order flow)   // v4: swing outcomes (+X% before -X%) and cuts at swing turns   // bump when factors are added -> year tests recollect samples
 const SFILE = y => path.join(DIR, `hunt-samples-v${SREV}-${y}.json.gz`);
 export const haveSamples = y => fs.existsSync(SFILE(y));
-export const years = () => fs.readdirSync(DIR).map(f => new RegExp(`^hunt-samples-v${SREV}-(\\d{4})\\.json\\.gz$`).exec(f)?.[1]).filter(Boolean).sort();
+// engines use the newest sample file for each year; years already collected with the swing outcomes (v4+) count right away,
+// and the new free-data variables simply fill in as each year is re-collected (old files have them empty)
+export const MIN_SREV = 4;
+const fileFor = y => { for (let v = SREV; v >= MIN_SREV; v--) { const f = path.join(DIR, `hunt-samples-v${v}-${y}.json.gz`); if (fs.existsSync(f)) return f; } return null; };
+export const versionOf = y => { const f = fileFor(y); return f ? +/-v(\d+)-/.exec(f)[1] : null; };
+export const years = () => [...new Set(fs.readdirSync(DIR).map(f => /^hunt-samples-v(\d+)-(\d{4})\.json\.gz$/.exec(f)).filter(m => m && +m[1] >= MIN_SREV).map(m => m[2]))].sort();
 
 function outcomeH(cs, k, atr, h, dir) {
   const e = cs[k].c, risk = STOP * atr;
@@ -67,9 +72,9 @@ export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, s
 export const saveSamples = (y, arr) => { try { fs.writeFileSync(SFILE(y), zlib.gzipSync(JSON.stringify(arr))); } catch {} };
 const cache = new Map();
 export function loadYear(y) {
-  if (cache.has(y)) return cache.get(y);
-  let raw = []; try { raw = JSON.parse(zlib.gunzipSync(fs.readFileSync(SFILE(y)))); } catch {}
-  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, sw: x.sw, T: x.T, r: x.r, m: x.m })); cache.set(y, s); return s;
+  const fp = fileFor(y); if (cache.has(fp)) return cache.get(fp);
+  let raw = []; try { raw = JSON.parse(zlib.gunzipSync(fs.readFileSync(fp))); } catch {}
+  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, sw: x.sw, T: x.T, r: x.r, m: x.m })); for (const k of [...cache.keys()]) if (k.endsWith(`-${y}.json.gz`)) cache.delete(k); cache.set(fp, s); return s;
 }
 // ======================= FORMULA BUILDER (Owner 2026-11-23) =======================
 // No randomness. Every variable value gets a weight learned from its own track record (shrunk by how many times it was seen) and

@@ -54,7 +54,7 @@ export async function run({ log = () => {} } = {}) {
   for (let i = 2; i < ys.length; i++) { const y = ys[i], tr = ys.slice(0, i).flatMap(x => H.loadYear(x)); const m = await train(tr); per[y] = grade(m, H.loadYear(y)); log(`ml: trained on ${ys.slice(0, i).join(',')} -> ${y}: all ${per[y].all}%, most certain 10% ${per[y].top10}%`); await yieldNow(); }
   const v = Object.values(per), avg = k => (v.length ? r1(v.reduce((a, x) => a + x[k], 0) / v.length) : null), mn = k => (v.length ? Math.min(...v.map(x => x[k])) : null);
   let exam = null; if (all.includes(H.LOCK)) { const m = await train(ys.flatMap(x => H.loadYear(x))); exam = grade(m, H.loadYear(H.LOCK)); }
-  const r = { at: new Date().toISOString(), years: all, per, avg: { all: avg('all'), top30: avg('top30'), top20: avg('top20'), top10: avg('top10'), top5: avg('top5') }, worst: { all: mn('all'), top10: mn('top10'), top5: mn('top5') }, exam };
+  const r = { at: new Date().toISOString(), years: all, versions: Object.fromEntries(all.map(y => [y, H.versionOf(y)])), per, avg: { all: avg('all'), top30: avg('top30'), top20: avg('top20'), top10: avg('top10'), top5: avg('top5') }, worst: { all: mn('all'), top10: mn('top10'), top5: mn('top5') }, exam };
   try { fs.writeFileSync(SF, JSON.stringify(r)); } catch {} return r;
 }
 export function text(r = lastReport()) {

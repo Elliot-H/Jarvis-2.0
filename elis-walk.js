@@ -14,7 +14,7 @@ import path from 'node:path';
 import * as H from './elis-hunt.js';
 import * as ML from './elis-ml.js';
 
-const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, `walk-state-v${H.SREV}b.json`);   // fresh state per data version (clean start on the new inputs)
+const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, `walk-state-v${H.SREV}c.json`);   // fresh state per data version (clean start on the new inputs)
 export const TARGET = 70, SWI = Math.max(0, [0.5, 1, 2].indexOf(+(process.env.ELIS_SWING || 1)));   // Owner: from here, +1% before -1%?
 const outc = s => (s.sw ? s.sw[SWI] : s.t[1]);   // 'up' | 'down' | 'none'/'flat'
 export const P = { periodsPerYear: 12, minN: 30, minGain: 5, adoptMonths: 6, adoptShare: 0.7, minZ: 3, dropShare: 0.55, expire: 24, maxPairsVars: 26 };
@@ -86,12 +86,12 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
       if (st.pos >= PS.length) {   // end of a pass: the locked exam, then walk again with what was learned
         if (all.includes(H.LOCK)) { const e = grade(H.loadYear(H.LOCK), st.formula); st.exams.push({ pass: st.pass, acc: e.acc, n: e.n, rules: st.formula.length, t: new Date().toISOString() }); log(`walk: pass ${st.pass} done; 2025 exam ${e.acc}% on ${e.n} charts with ${st.formula.length} rules`);
           if (e.acc >= TARGET && !st.proven) { st.proven = { pass: st.pass, acc: e.acc, rules: st.formula.map(r => `${label(r.c)} -> ${r.dir}`) }; await tell('Elis: 70% reached on the locked 2025 exam', text(st)); } }
-        st.pass++; st.pos = 0; st.walkedOn = String(ys); save(st);
+        st.pass++; st.pos = 0; st.walkedOn = ys.map(y => y + ':' + H.versionOf(y)).join(); save(st);
         // the ML engine: every variable weighed together, trained on earlier years, tested on the next; certainty per call
         syncL(st, 'training the ML engine on every variable (earlier years -> next year)'); const ml = await ML.run({ log }).catch(e => (log('ml error: ' + e.message), null));
         if (ml) { L.ml = { all: ml.avg.all, top10: ml.avg.top10, top5: ml.avg.top5, worst10: ml.worst.top10, exam10: ml.exam?.top10 ?? null }; log('walk: ' + ML.text(ml));
           if (ml.avg.top10 >= TARGET && ml.worst.top10 >= 65 && (ml.exam?.top10 ?? 0) >= TARGET && !st.mlProven) { st.mlProven = true; save(st); await tell('Elis: 70% reached on its most certain calls', ML.text(ml)); } }
-        while (String(H.years().filter(y => y !== H.LOCK)) === st.walkedOn) { syncL(st, `walked every year in (${ys.length}); waiting for the next year of data (${H.years().length} of 10 in)`); await sleep(5 * 60e3); }
+        while (H.years().filter(y => y !== H.LOCK).map(y => y + ':' + H.versionOf(y)).join() === st.walkedOn) { syncL(st, `walked every year in (${ys.length}); waiting for the next year of data (${H.years().length} of 10 in)`); await sleep(5 * 60e3); }
         continue;
       }
       const per = PS[st.pos], g = step(st, per); st.hist = [...(st.hist || []), roll(st)].slice(-200);

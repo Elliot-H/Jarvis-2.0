@@ -144,8 +144,12 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
     }
   }
   const win = {}, all = [], sectorCache = {}, hunt = []; let sessions = 0, hs = 97 + +year; const hr = () => ((hs = (hs * 16807) % 2147483647) / 2147483647);
-  for (let k = 15; k < N; k++) {
-    const d = cal[k]; if (shouldStop()) return { paused: true, partial: summarize(all), sessions };
+  // save point: a restart (deploy) resumes the year where it stopped instead of starting over
+  const CK = path.join(DIR, `oos-ckpt-${year}-v${HUNT.SREV}.json.gz`); let k0 = 15;
+  try { const c = JSON.parse(zlib.gunzipSync(fs.readFileSync(CK))); k0 = c.k + 1; sessions = c.sessions; hs = c.hs; all.push(...c.all); hunt.push(...c.hunt); progress?.(`${year} test: resumed at ${cal[k0]} (${sessions} sessions already done)`); } catch {}
+  const ckpt = k => { try { fs.writeFileSync(CK, zlib.gzipSync(JSON.stringify({ k, sessions, hs, all, hunt }))); } catch {} };
+  for (let k = k0; k < N; k++) {
+    const d = cal[k]; if (shouldStop()) { ckpt(k - 1); return { paused: true, partial: summarize(all), sessions }; }
     const elig = [];
     for (const [s, x] of D) { if (s === 'SPY') continue; let ok = 0, vs = 0, trs = 0; for (let j = k - 14; j < k; j++) if (!isNaN(x.c[j])) { ok++; vs += x.v[j]; trs += Math.max(x.h[j] - x.l[j], Math.abs(x.h[j] - (x.c[j - 1] || x.c[j])), Math.abs(x.l[j] - (x.c[j - 1] || x.c[j]))); }
       const prev = x.c[k - 1]; if (ok < 13 || isNaN(prev) || isNaN(x.o[k])) continue; const avgVol = vs / ok, atr = trs / ok; if (prev < 5 || avgVol < 1e6 || atr <= 0.5) continue; elig.push({ s, atr }); }
@@ -176,14 +180,14 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
           hunt.push(...sm);
         } catch (e) { progress?.('sample error: ' + e.message); }
         for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap, { news: nws, secBars: secOf[c.s] ? bars[secOf[c.s]] : null })) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
-      sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`);
+      sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`); if (sessions % 5 === 0) ckpt(k);
     }
     await yieldNow();
   }
   const main = all.filter(t => /^strong move alone/.test(t.formula));   // every strong-move trade: the widest base for the why
   const why = X.explain(main, WHY_DIMS);
   const whyFormula = X.explain(all.filter(t => /^midday, stock strong against the market -> go/.test(t.formula)), WHY_DIMS, { minN: 15 });
-  HUNT.saveSamples(year, hunt);
+  HUNT.saveSamples(year, hunt); try { fs.unlinkSync(CK); } catch {}
   saveTrades(year, main.map(t => { const o = { R: Math.round(t.R * 1000) / 1000 }; for (const d of WHY_DIMS) { const v = typeof d.get === 'function' ? d.get(t) : t[d.key]; if (v != null) o[d.name] = v; } return o; }));
   return { year, sessions, results: summarize(all), trades: all.length, why, whyFormula, sample: all.slice(-20) };
 }
