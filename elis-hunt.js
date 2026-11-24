@@ -17,7 +17,7 @@ const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_P
 export const HS = [3, 6, 12];                         // 15 / 30 / 60 minutes ahead (5-min candles)
 export const NAMES = { 3: '15 min', 6: '30 min', 12: '60 min' };
 export const LOCK = process.env.ELIS_HUNT_LOCK || '2025';
-export const TARGET = 70, PROVEN_MIN = 65;           // Owner's goal; a result is reported as proven at 65%+ on every unseen year incl. 2025
+export const TARGET = 70, PROVEN_MIN = 70;           // Owner: the goal is 70% ACCURACY (share of calls right) on every unseen year incl. 2025
 const STOP = 0.4, COST = 0.05, FLAT = 0.1;
 const yieldNow = () => new Promise(r => setImmediate(r)), sleep = ms => new Promise(r => setTimeout(r, ms));
 const b = (x, c, n) => { if (x == null || !Number.isFinite(x)) return null; for (let i = 0; i < c.length; i++) if (x < c[i]) return n[i]; return n[c.length]; };
