@@ -20,7 +20,7 @@ const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_P
 export const lastReport = () => { try { return JSON.parse(fs.readFileSync(RF, 'utf8')); } catch { return null; } };
 const pause = ms => new Promise(r => setTimeout(r, ms)), yieldNow = () => new Promise(r => setImmediate(r));
 async function A(base, p) { for (let i = 0; ; i++) { try { return await E.api(base, p, {}, true); } catch (e) { if (i >= 6 || (e.status && e.status !== 429 && e.status < 500)) throw e; await pause(Math.min(60e3, 2000 * 2 ** i)); } } }
-const UA = 'Elis research (+https://github.com/Elliot-H/Jarvis-2.0)';
+const UA = `Elis research ${process.env.ELIS_SEC_CONTACT || 'Elliot-H@users.noreply.github.com'}`;   // SEC requires a contact e-mail in the User-Agent
 async function sec(url) {   // SEC asks for <= 10 requests/s and a descriptive User-Agent
   for (let i = 0; i < 4; i++) { const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(20000) }).catch(() => null); await pause(150);
     if (r?.ok) return r.json(); if (r && r.status !== 429 && r.status < 500) return null; await pause(2000 * 2 ** i); }

@@ -65,7 +65,7 @@ export function step(st, per) {
   st.cands = st.cands.slice(-400); st.log = st.log.slice(-200); st.n++; st.pos++;
   return g;
 }
-const blank = () => ({ pass: 1, pos: 0, n: 0, charts: 0, right: 0, formula: [], cands: [], dropped: 0, recent: [], log: [], exams: [], best: null });
+const blank = () => ({ walkedOn: '', pass: 1, pos: 0, n: 0, charts: 0, right: 0, formula: [], cands: [], dropped: 0, recent: [], log: [], exams: [], best: null });
 export const state = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return blank(); } };
 const save = st => { try { fs.writeFileSync(SF, JSON.stringify(st)); } catch {} };
 const L = { phase: 'starting', tested: 0, bestAvg: null, bestMin: null, lastAcc: null, recent: [], bestHist: [], years: [], collect: '', proven: false, formula: '', at: 0 };
@@ -84,7 +84,9 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
       if (st.pos >= PS.length) {   // end of a pass: the locked exam, then walk again with what was learned
         if (all.includes(H.LOCK)) { const e = grade(H.loadYear(H.LOCK), st.formula); st.exams.push({ pass: st.pass, acc: e.acc, n: e.n, rules: st.formula.length, t: new Date().toISOString() }); log(`walk: pass ${st.pass} done; 2025 exam ${e.acc}% on ${e.n} charts with ${st.formula.length} rules`);
           if (e.acc >= TARGET && !st.proven) { st.proven = { pass: st.pass, acc: e.acc, rules: st.formula.map(r => `${label(r.c)} -> ${r.dir}`) }; await tell('Elis: 70% reached on the locked 2025 exam', text(st)); } }
-        st.pass++; st.pos = 0; save(st); continue;
+        st.pass++; st.pos = 0; st.walkedOn = String(ys); save(st);
+        while (String(H.years().filter(y => y !== H.LOCK)) === st.walkedOn) { syncL(st, `walked every year in (${ys.length}); waiting for the next year of data (${H.years().length} of 10 in)`); await sleep(5 * 60e3); }
+        continue;
       }
       const per = PS[st.pos], g = step(st, per); st.hist = [...(st.hist || []), roll(st)].slice(-200);
       if (st.formula.length !== (st.lastRules ?? 0)) { st.lastRules = st.formula.length; log(`walk: ${per.id}: formula now ${st.formula.length} rules; rolling accuracy ${roll(st)}%`); }

@@ -15,7 +15,9 @@ import zlib from 'node:zlib';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis', 'free');
 try { fs.mkdirSync(DIR, { recursive: true }); } catch {}
-const UA = 'Elis research (+https://github.com/Elliot-H/Jarvis-2.0)';
+// SEC (and BLS) refuse requests whose User-Agent has no contact e-mail: '<name> <email>'
+const CONTACT = process.env.ELIS_SEC_CONTACT || 'Elliot-H@users.noreply.github.com';
+const UA = `Elis research ${CONTACT}`;
 const pause = ms => new Promise(r => setTimeout(r, ms));
 export const status = {};   // per source: ok / fail counts and last error (shown on /elis-report)
 const mark = (src, ok, err) => { const s = (status[src] ||= { ok: 0, fail: 0, last: '' }); ok ? s.ok++ : (s.fail++, (s.last = String(err || '').slice(0, 120))); };
@@ -83,9 +85,12 @@ export function parseBlsDates(html) {   // BLS release archive pages list every 
 let MAC = null;
 export async function macroDates() {
   if (MAC) return MAC; MAC = load('macro'); if (MAC && Date.now() - (MAC.at || 0) < 30 * 864e5) return MAC;
-  const cpi = parseBlsDates(await get('https://www.bls.gov/bls/news-release/cpi.htm', { src: 'bls' })), jobs = parseBlsDates(await get('https://www.bls.gov/bls/news-release/empsit.htm', { src: 'bls' }));
-  MAC = { at: Date.now(), cpi, jobs }; if (cpi.length || jobs.length) save('macro', MAC); return MAC;
+  const cpi = parseBlsDates(await get('https://www.bls.gov/bls/news-release/cpi.htm', { src: 'bls' }));
+  let jobs = parseBlsDates(await get('https://www.bls.gov/bls/news-release/empsit.htm', { src: 'bls' }));
+  if (!jobs.length) jobs = firstFridays();   // fallback when BLS refuses: the jobs report comes out the first Friday of the month (a few exceptions)
+  MAC = { at: Date.now(), cpi, jobs, jobsRule: !cpi.length }; if (cpi.length) save('macro', MAC); return MAC;
 }
+export function firstFridays() { const out = []; for (let y = 2015; y <= 2026; y++) for (let m = 1; m <= 12; m++) { const d = new Date(Date.UTC(y, m - 1, 1)); while (d.getUTCDay() !== 5) d.setUTCDate(d.getUTCDate() + 1); out.push(d.toISOString().slice(0, 10)); } return out; }
 export async function macroOf(d, cal, k) {
   const m = await macroDates(), next = cal[k + 1];
   if (FOMC.has(d)) return 'Fed decision day'; if (m.cpi.includes(d)) return 'CPI day'; if (m.jobs.includes(d)) return 'jobs report day'; if (next && FOMC.has(next)) return 'day before Fed decision';
