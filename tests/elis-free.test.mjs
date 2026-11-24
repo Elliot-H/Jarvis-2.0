@@ -15,7 +15,7 @@ globalThis.fetch = async url => {
   if (/cpi\.htm/.test(url)) return ok('<li>Consumer Price Index for February 2023 <a>03/14/2023</a></li>');
   if (/empsit\.htm/.test(url)) return ok('<li>The Employment Situation - February 2023, released March 10, 2023</li>');
   if (/CNMSshvol(\d{8})/.test(url)) { const d = /CNMSshvol(\d{8})/.exec(url)[1]; return ok(`Date|Symbol|ShortVolume|ShortExemptVolume|TotalVolume|Market\n${d}|ABC|${d === '20230331' ? 700 : 400}|0|1000|B,Q,N\n`); }
-  if (/company_tickers/.test(url)) return ok({ 0: { cik_str: 1234, ticker: 'ABC' } });
+  if (/company_tickers/.test(url)) { if (globalThis.SECDOWN) return { ok: false, status: 403, text: async () => '', json: async () => ({}) }; return ok({ 0: { cik_str: 1234, ticker: 'ABC' } }); }
   if (/CIK0000001234/.test(url)) return ok({ filings: { recent: { form: ['4', '8-K', '10-Q'], filingDate: ['2023-03-30', '2023-03-31', '2023-02-01'], acceptanceDateTime: ['2023-03-30T17:00:00.000Z', '2023-03-31T21:30:00.000Z', ''] }, files: [] } });
   if (/list=search/.test(url)) return ok({ query: { search: [{ title: 'ABC Company' }] } });
   if (/pageviews/.test(url)) return ok({ items: cal.map(d => ({ timestamp: d.replace(/-/g, '') + '00', views: d === '2023-03-31' ? 5000 : 1000 })) });
@@ -36,4 +36,8 @@ assert.equal(await F.macroOf('2023-03-22', cal, cal.indexOf('2023-03-22')), 'Fed
 assert.equal(await F.macroOf('2023-03-21', cal, cal.indexOf('2023-03-21')), 'day before Fed decision');
 assert(Math.abs(F.tickFlow([{ p: 10, s: 100 }, { p: 10.01, s: 300 }, { p: 10.01, s: 100 }, { p: 10, s: 100 }]) - 0.8) < 1e-9, 'tick rule: upticks are buys');
 const H = await import('../elis-hunt.js'); assert(F.FREE_KEYS.every(x => H.KEYS.includes(x)), 'free variables are in the loop');
+globalThis.SECDOWN = true;
+// a source that keeps refusing is paused instead of slowing every day
+const before = Date.now(); for (let i = 0; i < 8; i++) await F.edgarEvents('ZZZ' + i).catch(() => {}); const took = Date.now() - before;
+console.log('8 blocked lookups took', took, 'ms', F.status.sec);
 console.log('FREE TEST PASSED');

@@ -21,7 +21,14 @@ const UA = `Elis research ${CONTACT}`;
 const pause = ms => new Promise(r => setTimeout(r, ms));
 export const status = {};   // per source: ok / fail counts and last error (shown on /elis-report)
 const mark = (src, ok, err) => { const s = (status[src] ||= { ok: 0, fail: 0, last: '' }); ok ? s.ok++ : (s.fail++, (s.last = String(err || '').slice(0, 120))); };
+const down = {};   // circuit breaker: a source that keeps refusing is skipped for 6 hours instead of slowing every replayed day
 async function get(url, { json = false, src = 'web', tries = 3, wait = 120, headers = {} } = {}) {
+  const dn = (down[src] ||= { streak: 0, until: 0 }); if (Date.now() < dn.until) return null;
+  const v = await get1(url, { json, src, tries, wait, headers });
+  if (v == null && !/404/.test(status[src]?.last || '')) { if (++dn.streak >= 5) { dn.until = Date.now() + 6 * 3600e3; dn.streak = 0; mark(src, false, 'paused 6h after repeated refusals'); } } else if (v != null) dn.streak = 0;
+  return v;
+}
+async function get1(url, { json = false, src = 'web', tries = 3, wait = 120, headers = {} } = {}) {
   for (let i = 0; i < tries; i++) {
     try { const r = await fetch(url, { headers: { 'User-Agent': UA, ...headers }, signal: AbortSignal.timeout(30000) }); await pause(wait);
       if (r.status === 404) { mark(src, false, '404 ' + url); return null; }
