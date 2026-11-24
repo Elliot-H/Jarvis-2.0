@@ -8,6 +8,7 @@ import * as E from './elis.js';
 import * as RD from './elis-read.js';
 import * as X from './elis-explain.js';
 import * as HUNT from './elis-hunt.js';
+import * as FREE from './elis-free.js';
 import * as CX from './elis-context.js';
 import { catOf } from './elis-learn.js';
 import fs from 'node:fs';
@@ -126,6 +127,7 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
   const from = `${year}-01-01`, to = `${year}-12-31`, warm = new Date(Date.parse(from) - 50 * 86400e3).toISOString().slice(0, 10);
   const cal = (await A(E.BASE, `/v2/calendar?start=${warm}&end=${to}`)).map(c => c.date), N = cal.length, di = new Map(cal.map((d, i) => [d, i]));
   const assets = []; for (const st of ['active', 'inactive']) { try { assets.push(...await A(E.BASE, `/v2/assets?status=${st}&asset_class=us_equity`)); } catch {} }
+  const nameOf = Object.fromEntries(assets.map(a => [a.symbol, a.name]));
   const syms = [...new Set(assets.filter(a => /^[A-Z]{1,5}$/.test(a.symbol) && ['NASDAQ', 'NYSE', 'ARCA', 'AMEX', 'BATS'].includes(a.exchange)).map(a => a.symbol))];
   progress?.(`${year} test: daily bars for ${syms.length} symbols`);
   const D = new Map();
@@ -166,7 +168,13 @@ export async function run({ year = '2023', progress = null, shouldStop = () => f
       const vx = D.get('VIXY'), fv = vx ? (vx.c[k - 1] / vx.c[k - 2] - 1) * 100 : NaN, fearMove = !Number.isFinite(fv) ? 'fear-unknown' : fv > 3 ? 'fear jumped yesterday' : fv > 0.75 ? 'fear rose yesterday' : fv < -3 ? 'fear dropped yesterday' : fv < -0.75 ? 'fear eased yesterday' : 'fear steady';
       for (const c of top) { const x = D.get(c.s), gap = x && first[c.s] ? (first[c.s].o / x.c[k - 1] - 1) * 100 : null;
         const nws = news.filter(n => (n.symbols || []).includes(c.s)).map(n => ({ t: Date.parse(n.created_at), tone: RD.tone(n.headline), cat: catOf(n.headline, true), src: [n.source, n.author].filter(Boolean).join('/').slice(0, 60) || 'unknown' }));
-        if ((bars[c.s] || []).length > 150) try { hunt.push(...HUNT.samplesForDay({ bars: bars[c.s], spy: bars.SPY, sec: secOf[c.s] ? bars[secOf[c.s]] : null, t0: E.etMs(d, 570), atr: c.atr, gapPct: gap, rvol: c.rvol, spyGap, spyTrend, spyVol, news: nws, daily: { ...dailyF(x, k, d), fearMove }, rnd: hr })); } catch {}
+        if ((bars[c.s] || []).length > 150) try {
+          const free = await FREE.dayFree({ sym: c.s, name: nameOf[c.s], d, cal, k, t0: E.etMs(d, 570) });   // free sources known that morning
+          const sm = HUNT.samplesForDay({ bars: bars[c.s], spy: bars.SPY, sec: secOf[c.s] ? bars[secOf[c.s]] : null, t0: E.etMs(d, 570), atr: c.atr, gapPct: gap, rvol: c.rvol, spyGap, spyTrend, spyVol, news: nws, daily: { ...dailyF(x, k, d), fearMove, ...free }, rnd: hr });
+          const ci = HUNT.KEYS.indexOf('cut'), oi = HUNT.KEYS.indexOf('orderFlow'); let n = 0;
+          for (const s2 of sm) if (s2.v[ci] === 'swing turn' && n < 2) { n++; s2.v[oi] = await FREE.orderFlowOf(A, E.DATA, c.s, s2.T); }   // buying vs selling right before the turn
+          hunt.push(...sm);
+        } catch (e) { progress?.('sample error: ' + e.message); }
         for (const t of tradesForDay(bars[c.s] || [], E.etMs(d, 570), c.atr, bars.SPY, spyGap, { news: nws, secBars: secOf[c.s] ? bars[secOf[c.s]] : null })) all.push({ date: d, sym: c.s, ...t, rvol: c.rvol, gap, atrPct: x ? c.atr / x.c[k - 1] * 100 : null, spyGap, spyTrend, spyVol }); }
       sessions++; if (sessions % 25 === 0) progress?.(`${year} test: ${sessions} sessions, ${all.length} formula trades`);
     }

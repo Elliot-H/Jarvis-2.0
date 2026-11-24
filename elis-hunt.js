@@ -22,7 +22,7 @@ const STOP = 0.4, COST = 0.05, FLAT = 0.1;
 const yieldNow = () => new Promise(r => setImmediate(r)), sleep = ms => new Promise(r => setTimeout(r, ms));
 const b = (x, c, n) => { if (x == null || !Number.isFinite(x)) return null; for (let i = 0; i < c.length; i++) if (x < c[i]) return n[i]; return n[c.length]; };
 export const KEYS = [...['move', 'candle', 'structure', 'vwap', 'volume', 'market', 'time', 'pattern'], ...BL.DAY_KEYS];
-export const SREV = 4;   // v4: swing outcomes (+X% before -X%) and cuts at swing turns   // bump when factors are added -> year tests recollect samples
+export const SREV = 5;   // v5: + free sources (VIX curve, put/call, macro days, FINRA shorting, SEC insider/8-K, Wikipedia attention, order flow)   // v4: swing outcomes (+X% before -X%) and cuts at swing turns   // bump when factors are added -> year tests recollect samples
 const SFILE = y => path.join(DIR, `hunt-samples-v${SREV}-${y}.json.gz`);
 export const haveSamples = y => fs.existsSync(SFILE(y));
 export const years = () => fs.readdirSync(DIR).map(f => new RegExp(`^hunt-samples-v${SREV}-(\\d{4})\\.json\\.gz$`).exec(f)?.[1]).filter(Boolean).sort();
@@ -60,7 +60,7 @@ export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, s
     const T = cs[k].t + 300e3, hr = news.filter(x => x.t >= T - 3600e3 && x.t < T);
     const nc = hr.length;
     const f = { ...v, ...day, cut: kind, newsCount: nc === 0 ? 'no headlines last hour' : nc === 1 ? '1 headline last hour' : nc <= 3 ? '2-3 headlines last hour' : '4+ headlines last hour', newsByHour: by(hr), sector: sm == null ? 'no sector' : sm > 0.0015 ? 'sector rising' : sm < -0.0015 ? 'sector falling' : 'sector flat' };
-    out.push({ v: KEYS.map(x => f[x]), sw: SW.map(x => firstTouch(bars, T, cs[k].c, x)), t: HS.map(h => outcomeH(cs, k, atr, h)), r: HS.map(h => [outcomeH(cs, k, atr, h, 1), outcomeH(cs, k, atr, h, -1)]), m: mv > 0.2 ? 1 : mv < -0.2 ? -1 : 0 });
+    out.push({ T, v: KEYS.map(x => f[x]), sw: SW.map(x => firstTouch(bars, T, cs[k].c, x)), t: HS.map(h => outcomeH(cs, k, atr, h)), r: HS.map(h => [outcomeH(cs, k, atr, h, 1), outcomeH(cs, k, atr, h, -1)]), m: mv > 0.2 ? 1 : mv < -0.2 ? -1 : 0 });
   }
   return out;
 }
@@ -69,7 +69,7 @@ const cache = new Map();
 export function loadYear(y) {
   if (cache.has(y)) return cache.get(y);
   let raw = []; try { raw = JSON.parse(zlib.gunzipSync(fs.readFileSync(SFILE(y)))); } catch {}
-  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, sw: x.sw, r: x.r, m: x.m })); cache.set(y, s); return s;
+  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, sw: x.sw, T: x.T, r: x.r, m: x.m })); cache.set(y, s); return s;
 }
 // ======================= FORMULA BUILDER (Owner 2026-11-23) =======================
 // No randomness. Every variable value gets a weight learned from its own track record (shrunk by how many times it was seen) and
