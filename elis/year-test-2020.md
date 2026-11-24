@@ -5,7 +5,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
 - midday, against the market, S&P flat at the open -> go with the stock: 110 trades, 39% wins, avg -0.08R, total -8.5R -> $3,000 became $2,883 (-3.9%, max drawdown 14.9%)
 - midday, against the market, normal volume -> go with the stock: 143 trades, 41% wins, avg -0.13R, total -17.9R -> $3,000 became $2,436 (-18.8%, max drawdown 19.8%)
 - afternoon, far from VWAP in the move direction -> go with the stock: 307 trades, 36% wins, avg -0.14R, total -44.3R -> $3,000 became $2,222 (-25.9%, max drawdown 32.8%)
-- strong move alone (control) -> go with the stock: 2686 trades, 41% wins, avg -0.09R, total -247.2R -> $3,000 became $1,275 (-57.5%, max drawdown 58.6%)
+- strong move alone (control) -> go with the stock: 2687 trades, 41% wins, avg -0.09R, total -247.3R -> $3,000 became $1,275 (-57.5%, max drawdown 58.6%)
 
 ```json
 {
@@ -61,10 +61,10 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    }
   },
   "strong move alone (control) -> go with the stock": {
-   "trades": 2686,
+   "trades": 2687,
    "winPct": 41,
    "avgR": -0.09,
-   "totalR": -247.2,
+   "totalR": -247.3,
    "money3k": {
     "start": 3000,
     "end": 1275,
@@ -73,9 +73,9 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    }
   }
  },
- "trades": 3459,
+ "trades": 3460,
  "why": {
-  "n": 2686,
+  "n": 2687,
   "overall": -0.09,
   "findings": [
    {
@@ -100,7 +100,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
   "tables": {
    "market trend": {
     "market uptrend": {
-     "n": 1994,
+     "n": 1995,
      "avgR": -0.07,
      "winPct": 43
     },
@@ -117,9 +117,9 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 42
     },
     "normal market (12-18%)": {
-     "n": 583,
+     "n": 584,
      "avgR": -0.04,
-     "winPct": 44
+     "winPct": 43
     },
     "nervous market (18-28%)": {
      "n": 902,
@@ -154,14 +154,14 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 42
     },
     "S&P gapped up hard": {
-     "n": 477,
+     "n": 478,
      "avgR": -0.16,
-     "winPct": 39
+     "winPct": 38
     }
    },
    "time of day": {
     "first hour": {
-     "n": 2000,
+     "n": 2001,
      "avgR": -0.09,
      "winPct": 41
     },
@@ -188,7 +188,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "side": {
     "short": {
-     "n": 1370,
+     "n": 1371,
      "avgR": -0.08,
      "winPct": 42
     },
@@ -200,7 +200,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "moving against the market": {
     "no": {
-     "n": 2248,
+     "n": 2249,
      "avgR": -0.1,
      "winPct": 41
     },
@@ -212,7 +212,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "volume on the signal candle": {
     "normal": {
-     "n": 1135,
+     "n": 1136,
      "avgR": -0.07,
      "winPct": 42
     },
@@ -239,7 +239,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 39
     },
     "with the move": {
-     "n": 1398,
+     "n": 1399,
      "avgR": -0.06,
      "winPct": 44
     },
@@ -251,7 +251,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "size of the 30-min move": {
     "0.6-0.8x range": {
-     "n": 1668,
+     "n": 1669,
      "avgR": -0.09,
      "winPct": 43
     },
@@ -288,7 +288,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "gap down 1-4%": {
-     "n": 376,
+     "n": 377,
      "avgR": -0.07,
      "winPct": 43
     }
@@ -300,7 +300,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "2-4x": {
-     "n": 1064,
+     "n": 1065,
      "avgR": -0.06,
      "winPct": 43
     },
@@ -317,7 +317,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "stock volatility": {
     "calm stock": {
-     "n": 860,
+     "n": 861,
      "avgR": -0.12,
      "winPct": 41
     },
@@ -339,28 +339,28 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "news in the last hour": {
     "none": {
-     "n": 2686,
+     "n": 2687,
      "avgR": -0.09,
      "winPct": 41
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 2686,
+     "n": 2687,
      "avgR": -0.09,
      "winPct": 41
     }
    },
    "overnight news": {
     "none": {
-     "n": 2686,
+     "n": 2687,
      "avgR": -0.09,
      "winPct": 41
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 2686,
+     "n": 2687,
      "avgR": -0.09,
      "winPct": 41
     }
@@ -372,7 +372,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 42
     },
     "sector flat": {
-     "n": 569,
+     "n": 570,
      "avgR": -0.09,
      "winPct": 42
     },
@@ -389,7 +389,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "candle read": {
     "candle-with": {
-     "n": 1313,
+     "n": 1314,
      "avgR": -0.12,
      "winPct": 41
     },
@@ -411,7 +411,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "chart structure": {
     "trend-with": {
-     "n": 1478,
+     "n": 1479,
      "avgR": -0.11,
      "winPct": 41
     },
@@ -468,7 +468,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 36
     },
     "bearish engulfing": {
-     "n": 78,
+     "n": 79,
      "avgR": -0.17,
      "winPct": 37
     },
@@ -580,7 +580,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 41
     },
     "2020-02": {
-     "n": 305,
+     "n": 306,
      "avgR": -0.19,
      "winPct": 39
     },
@@ -636,7 +636,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
     }
    }
   },
-  "text": "Overall -0.09R avg over 2686 trades.\nMade money when:\n  + latest candle pattern = morning star: +0.49R avg, 53% wins, 34 trades\n  + month = 2020-09: +0.07R avg, 45% wins, 206 trades\nNo group stood out as worse than the rest."
+  "text": "Overall -0.09R avg over 2687 trades.\nMade money when:\n  + latest candle pattern = morning star: +0.49R avg, 53% wins, 34 trades\n  + month = 2020-09: +0.07R avg, 45% wins, 206 trades\nNo group stood out as worse than the rest."
  },
  "whyFormula": {
   "n": 213,
