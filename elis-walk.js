@@ -14,7 +14,7 @@ import path from 'node:path';
 import * as H from './elis-hunt.js';
 import * as ML from './elis-ml.js';
 
-const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'walk-state.json');
+const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, `walk-state-v${H.SREV}b.json`);   // fresh state per data version (clean start on the new inputs)
 export const TARGET = 70, SWI = Math.max(0, [0.5, 1, 2].indexOf(+(process.env.ELIS_SWING || 1)));   // Owner: from here, +1% before -1%?
 const outc = s => (s.sw ? s.sw[SWI] : s.t[1]);   // 'up' | 'down' | 'none'/'flat'
 export const P = { periodsPerYear: 12, minN: 30, minGain: 5, adoptMonths: 6, adoptShare: 0.7, minZ: 3, dropShare: 0.55, expire: 24, maxPairsVars: 26 };
