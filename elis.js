@@ -359,9 +359,14 @@ export async function summary(force = false) {
   const today = et().date.replace(/-/g, '');
   // open Elis shares today, marked to market from the broker itself (not from memory: a restart must never show a bought position as a loss)
   const net = {}; for (const f of fills) if (f.day === today && f.sym) net[f.sym] = (net[f.sym] || 0) + (f.side === 'buy' ? f.qty : -f.qty);
-  if (Object.values(net).some(q => Math.abs(q) > 1e-9)) { const ps = await api(BASE, '/v2/positions').catch(() => []);
-    for (const [sym, q] of Object.entries(net)) { if (Math.abs(q) < 1e-9) continue; const p = (ps || []).find(x => x.symbol === sym); const px = p ? +p.current_price : null;
-      if (px) byDay[today] = (byDay[today] || 0) + q * px; else note(`hud: ${sym} shows ${q} open Elis shares but no broker position`); } }
+  if (Object.values(net).some(q => Math.abs(q) > 1e-9)) { const ps = await api(BASE, '/v2/positions').catch(() => []); let acts = null;
+    for (const [sym, q] of Object.entries(net)) { if (Math.abs(q) < 1e-9) continue; const p = (ps || []).find(x => x.symbol === sym), held = p ? +p.qty : 0;
+      // shares Elis bought that the broker no longer holds were closed by an order without Elis's tag (e.g. a replaced stop): price them from today's broker fills
+      const gone = Math.sign(q) === Math.sign(held) ? q - Math.sign(q) * Math.min(Math.abs(q), Math.abs(held)) : q;
+      if (Math.abs(gone) > 1e-9) { acts ||= await api(BASE, `/v2/account/activities/FILL?date=${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}&page_size=100`).catch(() => []);
+        let need = Math.abs(gone), val = 0; for (const a of acts || []) { if (a.symbol !== sym || a.side !== (gone > 0 ? 'sell' : 'buy') || need <= 0) continue; const k = Math.min(need, +a.qty); val += k * +a.price; need -= k; }
+        if (need < Math.abs(gone)) byDay[today] = (byDay[today] || 0) + Math.sign(gone) * val; if (need > 1e-9) note(`hud: ${sym}: ${need} Elis shares not found in today's fills`); }
+      const keep = q - gone; if (Math.abs(keep) > 1e-9 && p) byDay[today] = (byDay[today] || 0) + keep * +p.current_price; } }
   const days = Object.keys(byDay).sort(); let cum = 0;
   const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
   const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;

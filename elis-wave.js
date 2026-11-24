@@ -240,7 +240,7 @@ async function contextExit(date, now) {
     await ensureStop(date, sym, t, px).catch(e => note(`${sym}: stop restore failed ${e.message}`));
     const ns = W.exitMode === 'close' ? null : trailStop(t, px);   // study rules: fixed stop
     if (ns && t.legId && Date.now() - (t.amendAt || 0) > 30e3) {
-      try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2) }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
+      try { const nr = await E.api(E.BASE, `/v2/orders/${t.legId}`, { method: 'PATCH', body: JSON.stringify({ stop_price: ns.toFixed(2), client_order_id: `${tag(date, sym)}-trail-${Date.now().toString(36)}` }) }); if (nr?.id) t.legId = nr.id; /* Alpaca replaces the order: keep the new id */ t.amendAt = Date.now(); if (!t.beSent) { t.beSent = true; note(`${sym}: stop to break-even, now trailing`); } t.stop = ns; }
       catch (e) {
         if (e.status === 422) { const cur = await openStop(sym, t).catch(() => null); if (cur && cur.id !== t.legId) { t.legId = cur.id; continue; } t.amendFails = (t.amendFails || 0) + 1; }
         if (!t.amendWarned) note(`${sym}: stop amend failed ${e.message}`);
@@ -434,7 +434,7 @@ async function recover(date) {
   const after = new Date(E.etMs(date, 0)).toISOString(), pre = `elisw-${date.replace(/-/g, '')}-`;
   const orders = (await E.api(E.BASE, `/v2/orders?status=all&nested=true&limit=500&after=${encodeURIComponent(after)}`)).filter(o => (o.client_order_id || '').startsWith(pre));
   if (!orders.length) return;
-  for (const o of orders.filter(o => !/-(flat|stop)-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
+  for (const o of orders.filter(o => !/-(flat|stop|trail)-/.test(o.client_order_id)).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at))) {
     const sym = o.symbol, leg = (o.legs || []).find(l => l.type === 'stop'), flat = orders.some(x => x.symbol === sym && /-flat-/.test(x.client_order_id) && +x.filled_qty > 0);
     const entry = +o.filled_avg_price || null;
     let pos = null; try { pos = await E.api(E.BASE, `/v2/positions/${sym}`); } catch {}
