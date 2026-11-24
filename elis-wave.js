@@ -24,6 +24,7 @@ import * as OOS from './elis-oos.js';
 import * as WHY from './elis-why.js';
 import * as BL from './elis-blind.js';
 import * as HUNT from './elis-hunt.js';
+import * as WALK from './elis-walk.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -380,7 +381,7 @@ export async function oosNow(year = OOS.nextYear(true) || OOS.nextYear()) {   //
   if (learnBusy) return 'busy'; learnBusy = true;
   try {
     note(`year test ${year} started`);
-    const r = await OOS.run({ year, progress: m => { note(m); HUNT.setCollect(m); }, shouldStop: marketHours }); if (r.paused) return 'paused';
+    const r = await OOS.run({ year, progress: m => { note(m); WALK.setCollect(m); }, shouldStop: marketHours }); if (r.paused) return 'paused';
     OOS.saveReport(r); const txt = OOS.text(r); note(`year test ${year} done`);
     // the why is formula material, not a report: rebuild the rules from every tested year; tell the Owner only when a rule is proven consistent
     const b = OOS.build(), rt = OOS.rulesText(b); note('rules: ' + rt.split('\n')[0]);
@@ -490,8 +491,8 @@ export function start() {
   E.setExtraOpen(() => openCache);
   E.setHudExtra(() => ({ learnVersion: L.version(), learnBusy: learnBusy }));
   if (process.env.ELIS_LEARN !== '0') { setInterval(() => learnTick(), 2 * 60e3); setTimeout(() => learnTick(), 90e3);   // no waiting between studies
-    setInterval(() => E.hudSend({ type: 'elisHunt', ...HUNT.live() }), 10e3);   // rolling accuracy on the Jarvis panel
-    if (process.env.ELIS_HUNT !== '0') setTimeout(() => HUNT.forever({ paused: marketHours, log: m => note(m), tell: (a, b) => E.tellOut(a, b) }), 120e3); }   // the endless hunt
+    setInterval(() => E.hudSend({ type: 'elisHunt', ...WALK.live() }), 10e3);   // rolling accuracy on the Jarvis panel
+    if (process.env.ELIS_HUNT !== '0') setTimeout(() => WALK.forever({ paused: marketHours, log: m => note(m), tell: (a, b) => E.tellOut(a, b) }), 120e3); }   // the endless hunt
   note(`online: picks ${W.picks}, risk ${W.riskPct}%/trade, entries until ${Math.floor(W.entryEnd / 60)}:${String(W.entryEnd % 60).padStart(2, '0')}, exit ${Math.floor(W.exitAt / 60)}:${String(W.exitAt % 60).padStart(2, '0')}`);
   return true;
 }

@@ -374,14 +374,14 @@
   function renderHunt(m) {   // rolling accuracy of Elis's endless test loop (goal 70%)
     const box = $('#elisHunt'); if (!box) return;
     const g = m.target || 70, pct = v => (v == null ? '--' : v.toFixed(1) + '%'), col = v => (v == null ? '' : v >= g ? 'up' : v >= 60 ? 'mid' : 'dn');
-    const hist = (m.bestHist || []).map(x => x.avg), rec = m.recent || [], W = 240, H = 40, lo = 45, hi = 80, y = v => (H - 2 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * (H - 4)).toFixed(1);
+    const hist = (m.bestHist || []).map(x => x.avg).filter(v => v != null), rec = m.recent || [], W = 240, H = 40, lo = 45, hi = 80, y = v => (H - 2 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo) * (H - 4)).toFixed(1);
     const line = (a, c, w) => a.length > 1 ? `<polyline fill="none" stroke="${c}" stroke-width="${w}" points="${a.map((v, i) => (i * W / (a.length - 1)).toFixed(1) + ',' + y(v)).join(' ')}"/>` : '';
     const svg = `<svg class="elis-g hunt-g" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" x2="${W}" y1="${y(g)}" y2="${y(g)}" stroke="#4dff9a" stroke-opacity=".55" stroke-dasharray="4 3"/><line x1="0" x2="${W}" y1="${y(50)}" y2="${y(50)}" stroke="rgba(120,200,255,.25)" stroke-dasharray="2 3"/>${line(rec, 'rgba(120,200,255,.55)', 1)}${line(hist, '#3fe0ff', 1.8)}</svg>`;
     const yrs = (m.years || []).length;
     box.innerHTML = `<div class="elis-n hunt-h"><span>ACCURACY HUNT</span><span>GOAL <b class="up">${g}%</b></span></div>`
-      + `<div class="hunt-big ${col(m.bestAvg)}">${pct(m.bestAvg)}<small> formula avg on unseen years${m.bestMin != null ? ' · worst ' + pct(m.bestMin) : ''}</small></div>`
+      + `<div class="hunt-big ${col(m.bestAvg)}">${pct(m.bestAvg)}<small> ${esc((m.labels && m.labels.big) || 'formula avg on unseen years')}${m.bestMin != null ? ' · ' + esc((m.labels && m.labels.small) || 'worst') + ' ' + pct(m.bestMin) : ''}</small></div>`
       + svg
-      + `<div class="elis-n"><span>LAST TEST <b class="${col(m.lastAcc)}">${pct(m.lastAcc)}</b></span><span>TESTED <b>${(m.tested || 0).toLocaleString()}</b></span><span>YEARS <b>${yrs}</b></span></div>`
+      + `<div class="elis-n"><span>${esc((m.labels && m.labels.last) || 'LAST TEST')} <b class="${col(m.lastAcc)}">${pct(m.lastAcc)}</b></span><span>${esc((m.labels && m.labels.tested) || 'TESTED')} <b>${(m.tested || 0).toLocaleString()}</b></span><span>YEARS <b>${yrs}</b></span></div>`
       + (m.formula ? `<div class="elis-s"><small>FORMULA ${esc(m.formula)}</small></div>` : '')
       + `<div class="elis-s"><small>${m.proven ? 'PROVEN · ' : ''}${esc(m.phase || '')}${m.phase && m.phase.startsWith('collecting') && m.collect ? ' · ' + esc(m.collect) : ''}</small></div>`;
     const fr = $('#elisFrame'); if (fr) fr.style.display = '';
