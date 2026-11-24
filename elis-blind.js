@@ -7,9 +7,10 @@ import path from 'node:path';
 import * as RD from './elis-read.js';
 import * as E from './elis.js';
 import { readJournal, loadDayBars } from './elis-learn.js';
+import * as X from './elis-explain.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'blind-report.json');
-export const BLIND_REV = 1;
+export const BLIND_REV = 2;
 export const lastReport = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return null; } };
 const yieldNow = () => new Promise(r => setImmediate(r));
 const H = 6, STOP = 0.4, COST = 0.05, FLAT = 0.1;
@@ -30,30 +31,79 @@ export function outcome(cs, k, atr, call) {
   return { truth, R };
 }
 const KEYS = ['move', 'candle', 'structure', 'vwap', 'volume', 'market', 'time', 'pattern'];
-const pairsOf = f => { const out = []; for (let a = 0; a < KEYS.length; a++) for (let b = a + 1; b < KEYS.length; b++) out.push(`${KEYS[a]}=${f[KEYS[a]]} & ${KEYS[b]}=${f[KEYS[b]]}`); return out; };
-// Elis's call: the most one-sided pattern it learned (>= minP, enough examples), else no call
-export function call(table, f, { minN = 80, minP = 0.55 } = {}) {
-  let best = null; for (const k of pairsOf(f)) { const s = table[k]; if (!s || s.up + s.down < minN) continue; const p = s.up / (s.up + s.down), conf = Math.max(p, 1 - p); if (conf >= minP && (!best || conf > best.conf)) best = { dir: p >= 0.5 ? 'up' : 'down', conf, why: k, n: s.up + s.down }; }
-  return best;
+// the why variables known that morning (journal + enrich context), in absolute terms (not relative to a side)
+export function dayFeatures(r) {
+  const g = r.gapPct || 0, rv = r.rvol || 0, x = r.ctx || {};
+  return { gap: g <= -3 ? 'gapped down 3%+' : g < -0.5 ? 'gapped down' : g < 0.5 ? 'no gap' : g < 3 ? 'gapped up' : 'gapped up 3%+', news: r.tone && r.tone !== 'none' ? `news ${r.tone}` : r.news ? 'news neutral' : 'no news',
+    newsType: r.cat || 'none', rvol: rv < 2 ? 'rvol 1-2' : rv < 4 ? 'rvol 2-4' : rv < 8 ? 'rvol 4-8' : 'rvol 8+', mktGap: x.mktGap || 'spy-unknown', fear: x.fear || 'fear-unknown', regime: x.regime || 'trend-unknown', sector: x.sector || 'sector-unknown', buzz: x.buzz || 'buzz-unknown' };
+}
+export const DAY_KEYS = ['gap', 'news', 'newsType', 'rvol', 'mktGap', 'fear', 'regime', 'sector', 'buzz'];
+const ALL = [...KEYS, ...DAY_KEYS];
+const PAIRS = []; for (let a = 0; a < ALL.length; a++) for (let b = a + 1; b < ALL.length; b++) PAIRS.push([ALL[a], ALL[b]]);
+const pk = (f, [a, b]) => `${a}=${f[a]} & ${b}=${f[b]}`;
+const pairsOf = (f, keys = KEYS) => PAIRS.filter(([a, b]) => keys.includes(a) && keys.includes(b)).map(p => pk(f, p));
+export function learn(samples) { const t = {}; for (const s of samples) if (s.truth !== 'flat') for (const p of PAIRS) { if (s.f[p[0]] == null || s.f[p[1]] == null) continue; const k = pk(s.f, p); (t[k] ||= { up: 0, down: 0 })[s.truth]++; } return t; }
+// Elis's call under settings P: 'best' = most one-sided learned read; 'vote' = blend of the 5 strongest reads (shrunk by sample size).
+// abstain = conditions the why found its calls fail in; drop = variables that only add noise
+export const BASE = { mode: 'best', minP: 0.55, minN: 80, abstain: [], drop: [] };
+export function call(table, f, P = {}) {
+  P = { ...BASE, ...P }; if (P.abstain.some(r => f[r.k] === r.v)) return null;
+  const keys = ALL.filter(k => !P.drop.includes(k) && f[k] != null), ev = [];
+  for (const k of pairsOf(f, keys)) { const s = table[k]; if (!s || s.up + s.down < P.minN) continue; const n = s.up + s.down, p = s.up / n; ev.push({ k, n, p, lo: Math.log((s.up + 1) / (s.down + 1)) * n / (n + 200) }); }
+  if (!ev.length) return null;
+  if (P.mode === 'best') { const b = ev.reduce((a, e) => (Math.max(e.p, 1 - e.p) > Math.max(a.p, 1 - a.p) ? e : a)); const conf = Math.max(b.p, 1 - b.p); return conf >= P.minP ? { dir: b.p >= 0.5 ? 'up' : 'down', conf, why: b.k, n: b.n } : null; }
+  const top = ev.sort((a, b) => Math.abs(b.lo) - Math.abs(a.lo)).slice(0, 5), x = top.reduce((a, e) => a + e.lo, 0) / top.length, p = 1 / (1 + Math.exp(-x)), conf = Math.max(p, 1 - p);
+  return conf >= P.minP ? { dir: x >= 0 ? 'up' : 'down', conf, why: top[0].k, n: top[0].n } : null;
+}
+export function evaluate(table, samples, P) {
+  const test = samples.map(s => { const c = call(table, s.f, P); return { truth: s.truth, call: c?.dir || null, conf: c?.conf, why: c?.why, R: c ? (c.dir === 'up' ? s.Rup : s.Rdn) : null, mom: s.mom, momR: s.mom ? (s.mom === 'up' ? s.Rup : s.Rdn) : null, f: s.f }; });
+  return { test, g: grade(test) };
+}
+// THE LOOP (Owner: "keep testing, assess the why, use the why to adjust predictions and retest, loop until closer to 70%").
+// Learn on the first 50% of sessions, tune on the next 25%, final grade on the last 25% (never used while tuning).
+// Each round: grade on the tune set, run the WHY on hits vs misses, turn the worst conditions into "don't call here" rules,
+// try dropping noisy variables, the blend vs best-read mode and stricter/looser confidence; keep a change only if tune accuracy
+// rises with enough calls left. Stop at 70% on the tune set or when nothing helps; then grade once on the untouched final set.
+export async function loop(table, tune, { target = 70, rounds = 30, minCalls = 150, log = () => {} } = {}) {
+  let P = { ...BASE }, cur = evaluate(table, tune, P).g; const steps = [{ change: 'start', acc: cur.accuracy, calls: cur.calls }];
+  const ok = g => g.calls >= minCalls;
+  for (let r = 0; r < rounds && cur.accuracy < target; r++) {
+    const { test } = evaluate(table, tune, P), called = test.filter(t => t.call && t.truth !== 'flat').map(t => ({ ...t.f, side: t.call, sure: t.conf >= 0.65 ? '65%+' : t.conf >= 0.6 ? '60-65%' : '55-60%', R: t.call === t.truth ? 1 : -1 }));
+    const why = X.explain(called, [...ALL.map(k => ({ name: k, key: k })), { name: 'side', key: 'side' }, { name: 'sure', key: 'sure' }], { minN: 40, z: 1.5 });
+    const cands = [];
+    for (const f of why.findings.filter(x => !x.better)) if (ALL.includes(f.dim)) cands.push([`don't call when ${f.dim} = ${f.value} (why: ${f.winPct}% right over ${f.n})`, { ...P, abstain: [...P.abstain, { k: f.dim, v: f.value }] }]);
+    for (const k of ALL) if (!P.drop.includes(k)) cands.push([`stop using ${k}`, { ...P, drop: [...P.drop, k] }]);
+    for (const d of [0.02, 0.05, -0.02]) { const m = Math.round((P.minP + d) * 100) / 100; if (m >= 0.52 && m <= 0.85) cands.push([`call only when ${Math.round(m * 100)}%+ sure`, { ...P, minP: m }]); }
+    for (const n of [40, 150, 300]) if (n !== P.minN) cands.push([`need ${n}+ past examples`, { ...P, minN: n }]);
+    cands.push([`switch to ${P.mode === 'best' ? 'blend of the 5 strongest reads' : 'single strongest read'}`, { ...P, mode: P.mode === 'best' ? 'vote' : 'best' }]);
+    let best = null; for (const [name, Q] of cands) { const g = evaluate(table, tune, Q).g; if (ok(g) && g.accuracy > cur.accuracy + 0.3 && (!best || g.accuracy > best.g.accuracy)) best = { name, Q, g }; await yieldNow(); }
+    if (!best) { steps.push({ change: 'nothing improved; stop', acc: cur.accuracy, calls: cur.calls }); break; }
+    P = best.Q; cur = best.g; steps.push({ change: best.name, acc: cur.accuracy, calls: cur.calls }); log(`blind loop round ${r + 1}: ${best.name} -> ${cur.accuracy}% on ${cur.calls} calls`);
+  }
+  return { P, tune: cur, steps };
 }
 export async function run({ perDay = 4, progress = null, shouldStop = () => false } = {}) {
-  const J = readJournal().filter(r => r.atr > 0), days = [...new Set(J.map(r => r.date))].sort(); if (days.length < 40) return { skipped: `only ${days.length} stored sessions` };
-  const cut = days[Math.floor(days.length * 0.7)], table = {}, test = []; let seen = 0;
+  const J = readJournal().filter(r => r.atr > 0), days = [...new Set(J.map(r => r.date))].sort(); if (days.length < 60) return { skipped: `only ${days.length} stored sessions` };
+  const c1 = days[Math.floor(days.length * 0.5)], c2 = days[Math.floor(days.length * 0.75)], S = { learn: [], tune: [], final: [] }; let seen = 0; seed = 7;
+  const byDay = new Map(); for (const r of J) (byDay.get(r.date) || byDay.set(r.date, []).get(r.date)).push(r);
   for (const d of days) {
     if (shouldStop()) return { paused: true };
-    const barsOf = loadDayBars(d), spy = barsOf(d, 'SPY'), t0 = E.etMs(d, 570), learnDay = d < cut;
-    for (const r of J.filter(x => x.date === d)) {
-      const bars = barsOf(d, r.sym); if (!bars || bars.length < 120) continue; const cs = RD.to5m(bars, t0); if (cs.length < 20) continue;
+    const barsOf = loadDayBars(d), spy = barsOf(d, 'SPY'), t0 = E.etMs(d, 570), part = d < c1 ? 'learn' : d < c2 ? 'tune' : 'final';
+    for (const r of byDay.get(d) || []) {
+      const bars = barsOf(d, r.sym); if (!bars || bars.length < 120) continue; const cs = RD.to5m(bars, t0); if (cs.length < 20) continue; const df = dayFeatures(r);
       for (let i = 0; i < perDay; i++) {
-        const k = 6 + Math.floor(rnd() * (cs.length - H - 7)); const f = sees(bars, spy, t0, r.atr, k), o = outcome(cs, k, r.atr, null); seen++;
-        if (learnDay) { if (o.truth !== 'flat') for (const key of pairsOf(f)) { const s = (table[key] ||= { up: 0, down: 0 }); s[o.truth]++; } }
-        else { const c = call(table, f), oc = outcome(cs, k, r.atr, c?.dir), mom = f.mv > 0.2 ? 'up' : f.mv < -0.2 ? 'down' : null;
-          test.push({ date: d, sym: r.sym, truth: oc.truth, call: c?.dir || null, conf: c?.conf, why: c?.why, R: oc.R, mom, momR: mom ? outcome(cs, k, r.atr, mom).R : null }); }
+        const k = 6 + Math.floor(rnd() * (cs.length - H - 7)), v = sees(bars, spy, t0, r.atr, k), o = outcome(cs, k, r.atr, null); seen++;
+        const { mv, ...f } = v; S[part].push({ d, f: { ...f, ...df }, truth: o.truth, Rup: outcome(cs, k, r.atr, 'up').R, Rdn: outcome(cs, k, r.atr, 'down').R, mom: mv > 0.2 ? 'up' : mv < -0.2 ? 'down' : null });
       }
     }
     if (seen % 4000 < perDay * 20) progress?.(`blind test: ${d}, ${seen} charts`); await yieldNow();
   }
-  const r = grade(test); r.learnedOn = `${days[0]} to ${cut}`; r.testedOn = `${cut} to ${days.at(-1)}`; r.at = new Date().toISOString(); r.rev = BLIND_REV;
+  const table = learn(S.learn), before = evaluate(table, S.final, BASE).g;
+  const L2 = await loop(table, S.tune, { log: m => progress?.(m) });
+  const after = evaluate(table, S.final, L2.P).g;
+  // last step: relearn the odds on learn+tune with the tuned settings and grade the final set once more (more data, same untouched test)
+  const table2 = learn([...S.learn, ...S.tune]), after2 = evaluate(table2, S.final, L2.P).g;
+  const r = { ...after2, before, afterTuneOnly: after, tuneAcc: L2.tune.accuracy, steps: L2.steps, settings: L2.P, learnedOn: `${days[0]} to ${c2}`, tunedOn: `${c1} to ${c2}`, testedOn: `${c2} to ${days.at(-1)}`, days: days.length, at: new Date().toISOString(), rev: BLIND_REV };
   try { fs.writeFileSync(SF, JSON.stringify(r)); } catch {} return r;
 }
 const pc = (a, b) => (b ? Math.round(a / b * 1000) / 10 : 0), avg = a => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 100) / 100 : 0);
@@ -71,10 +121,10 @@ export function grade(test) {
 }
 export function text(r) {
   if (!r || r.skipped) return r?.skipped || 'no blind test yet';
-  return `Blind chart test: ${r.charts.toLocaleString()} charts Elis never saw (${r.testedOn}); it learned from ${r.learnedOn}. Each chart cut at a random moment; Elis calls the next 30 min.\n`
-    + `- Calls made on ${r.callPct}% of charts (${r.flatPct}% went nowhere either way).\n`
-    + `- Accuracy on its calls: ${r.accuracy}% (+/-${r.plusMinus}) vs 50% coin flip. ${Object.entries(r.byConfidence).map(([k, v]) => `When ${k} sure: ${v.accuracy}% over ${v.calls}`).join('; ')}.\n`
-    + `- If it had traded every call (stop 0.4x range, 30 min, costs in): ${r.tradeWinPct}% wins, ${r.tradeAvgR >= 0 ? '+' : ''}${r.tradeAvgR}R avg per trade.\n`
-    + `- Baselines: "keep going" ${r.momentumAccuracy}% (${r.momentumAvgR >= 0 ? '+' : ''}${r.momentumAvgR}R), "always up" ${r.upPct}%.\n`
-    + (r.bestReads.length ? `- Best reads: ${r.bestReads.slice(0, 3).map(b => `${b.read} ${b.accuracy}% (${b.calls})`).join('; ')}.` : '');
+  const sg = x => (x >= 0 ? '+' : '') + x;
+  return `Blind chart loop: learned ${r.learnedOn}, tuned with the why on ${r.tunedOn}, final grade on ${r.testedOn} (never touched while tuning).\n`
+    + `- Before tuning: ${r.before.accuracy}% right on ${r.before.calls} calls (${sg(r.before.tradeAvgR)}R/trade).\n`
+    + `- Tuning (${r.steps.length - 1} rounds): ${r.steps.slice(1).map(s => `${s.change} -> ${s.acc}%`).join('; ')}. Tune set reached ${r.tuneAcc}%.\n`
+    + `- FINAL (unseen): ${r.accuracy}% (+/-${r.plusMinus}) right on ${r.calls} calls (calls on ${r.callPct}% of charts), ${r.tradeWinPct}% winning trades, ${sg(r.tradeAvgR)}R/trade. Coin flip 50%, "always up" ${r.upPct}%.\n`
+    + (r.tuneAcc - r.accuracy > 4 ? `- The tune-set gain mostly did not carry over to unseen charts (memorized noise).` : `- The tune-set result carried over to unseen charts.`);
 }

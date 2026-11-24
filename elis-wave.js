@@ -407,7 +407,7 @@ export async function blindNow() {   // Owner: test against blind charts and giv
 }
 async function learnTick() {
   try {
-    if (!marketHours() && !blindBusy && (BL.lastReport()?.rev || 0) < BL.BLIND_REV) void blindNow();
+    { const br = BL.lastReport(); if (!marketHours() && !blindBusy && ((br?.rev || 0) < BL.BLIND_REV || (br?.days && new Set(L.readJournal().map(r => r.date)).size >= br.days + 20))) void blindNow(); }
     if (marketHours() || learnBusy) return;
     const now = E.et(), dow = new Date(E.etMs(now.date, 720)).getUTCDay();
     const hs = L.historyState();
