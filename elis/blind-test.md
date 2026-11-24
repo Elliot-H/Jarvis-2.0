@@ -3,24 +3,35 @@
 Blind chart loop: learned 2024-01-02 to 2025-05-01, tuned with the why on 2024-11-18 to 2025-05-01, final grade on 2025-05-01 to 2026-11-23 (never touched while tuning).
 - Before tuning: 51.8% right on 2941 calls (-0.03R/trade).
 - Tuning (4 rounds): switch to blend of the 5 strongest reads -> 50.1%; call only when 57%+ sure -> 55.2%; don't call when sector = against-sector (why: 47% right over 106) -> 60.6%; nothing improved; stop -> 60.6%. Tune set reached 60.6%.
-- FINAL (unseen): 0% (+/-0) right on 0 calls (calls on 0% of charts), 0% winning trades, +0R/trade. Coin flip 50%, "always up" 49.9%.
-- The tune-set gain mostly did not carry over to unseen charts (memorized noise).
+- FINAL (unseen): 60.4% (+/-13.5) right on 53 calls (calls on 1.7% of charts), 45.5% winning trades, +0.01R/trade. Coin flip 50%, "always up" 49.9%.
+- The tune-set result carried over to unseen charts.
 
 ```json
 {
  "charts": 6656,
  "flatPct": 45.1,
- "callPct": 0,
- "accuracy": 0,
- "plusMinus": 0,
- "calls": 0,
- "tradeAvgR": 0,
- "tradeWinPct": 0,
+ "callPct": 1.7,
+ "accuracy": 60.4,
+ "plusMinus": 13.5,
+ "calls": 53,
+ "tradeAvgR": 0.01,
+ "tradeWinPct": 45.5,
  "momentumAccuracy": 48.7,
  "momentumAvgR": -0.07,
  "upPct": 49.9,
- "byConfidence": {},
- "bestReads": [],
+ "byConfidence": {
+  "55-60%": {
+   "calls": 53,
+   "accuracy": 60.4
+  }
+ },
+ "bestReads": [
+  {
+   "read": "move=flat & mktGap=spy-gap-down",
+   "calls": 45,
+   "accuracy": 60
+  }
+ ],
  "before": {
   "charts": 6656,
   "flatPct": 45.1,
@@ -101,6 +112,21 @@ Blind chart loop: learned 2024-01-02 to 2025-05-01, tuned with the why on 2024-1
    }
   ]
  },
+ "afterRelearn": {
+  "charts": 6656,
+  "flatPct": 45.1,
+  "callPct": 0,
+  "accuracy": 0,
+  "plusMinus": 0,
+  "calls": 0,
+  "tradeAvgR": 0,
+  "tradeWinPct": 0,
+  "momentumAccuracy": 48.7,
+  "momentumAvgR": -0.07,
+  "upPct": 49.9,
+  "byConfidence": {},
+  "bestReads": []
+ },
  "tuneAcc": 60.6,
  "steps": [
   {
@@ -145,7 +171,7 @@ Blind chart loop: learned 2024-01-02 to 2025-05-01, tuned with the why on 2024-1
  "tunedOn": "2024-11-18 to 2025-05-01",
  "testedOn": "2025-05-01 to 2026-11-23",
  "days": 445,
- "at": "2026-11-24T01:07:41.821Z",
- "rev": 2
+ "at": "2026-11-24T01:45:32.838Z",
+ "rev": 3
 }
 ```
