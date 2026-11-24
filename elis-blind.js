@@ -10,7 +10,7 @@ import { readJournal, loadDayBars } from './elis-learn.js';
 import * as X from './elis-explain.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'blind-report.json');
-export const BLIND_REV = 2;
+export const BLIND_REV = 3;
 export const lastReport = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return null; } };
 const yieldNow = () => new Promise(r => setImmediate(r));
 const H = 6, STOP = 0.4, COST = 0.05, FLAT = 0.1;
@@ -103,7 +103,8 @@ export async function run({ perDay = 4, progress = null, shouldStop = () => fals
   const after = evaluate(table, S.final, L2.P).g;
   // last step: relearn the odds on learn+tune with the tuned settings and grade the final set once more (more data, same untouched test)
   const table2 = learn([...S.learn, ...S.tune]), after2 = evaluate(table2, S.final, L2.P).g;
-  const r = { ...after2, before, afterTuneOnly: after, tuneAcc: L2.tune.accuracy, steps: L2.steps, settings: L2.P, learnedOn: `${days[0]} to ${c2}`, tunedOn: `${c1} to ${c2}`, testedOn: `${c2} to ${days.at(-1)}`, days: days.length, at: new Date().toISOString(), rev: BLIND_REV };
+  const main = after2.calls >= 100 ? after2 : after;   // relearning on more data shrinks confidence; if it stops calling, grade with the table the settings were tuned on
+  const r = { ...main, before, afterTuneOnly: after, afterRelearn: after2, tuneAcc: L2.tune.accuracy, steps: L2.steps, settings: L2.P, learnedOn: `${days[0]} to ${c2}`, tunedOn: `${c1} to ${c2}`, testedOn: `${c2} to ${days.at(-1)}`, days: days.length, at: new Date().toISOString(), rev: BLIND_REV };
   try { fs.writeFileSync(SF, JSON.stringify(r)); } catch {} return r;
 }
 const pc = (a, b) => (b ? Math.round(a / b * 1000) / 10 : 0), avg = a => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length * 100) / 100 : 0);
