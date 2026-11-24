@@ -37,7 +37,7 @@ export function dayFeatures(r) {
   return { gap: g <= -3 ? 'gapped down 3%+' : g < -0.5 ? 'gapped down' : g < 0.5 ? 'no gap' : g < 3 ? 'gapped up' : 'gapped up 3%+', news: r.tone && r.tone !== 'none' ? `news ${r.tone}` : r.news ? 'news neutral' : 'no news',
     newsType: r.cat || 'none', rvol: rv < 2 ? 'rvol 1-2' : rv < 4 ? 'rvol 2-4' : rv < 8 ? 'rvol 4-8' : 'rvol 8+', mktGap: x.mktGap || 'spy-unknown', fear: x.fear || 'fear-unknown', regime: x.regime || 'trend-unknown', sector: x.sector || 'sector-unknown', buzz: x.buzz || 'buzz-unknown' };
 }
-export const DAY_KEYS = ['gap', 'news', 'newsType', 'rvol', 'mktGap', 'fear', 'regime', 'sector', 'buzz', 'trend5d', 'range20', 'sma20', 'prevDay', 'dow', 'openCandle', 'newsBy', 'newsByHour', 'fearMove'];   // later factors are null on old samples and simply skipped
+export const DAY_KEYS = ['gap', 'news', 'newsType', 'rvol', 'mktGap', 'fear', 'regime', 'sector', 'buzz', 'trend5d', 'range20', 'sma20', 'prevDay', 'dow', 'openCandle', 'newsBy', 'newsByHour', 'fearMove', 'newsCount', 'cut'];   // later factors are null on old samples and simply skipped
 const ALL = [...KEYS, ...DAY_KEYS];
 const PAIRS = []; for (let a = 0; a < ALL.length; a++) for (let b = a + 1; b < ALL.length; b++) PAIRS.push([ALL[a], ALL[b]]);
 const pk = (f, [a, b]) => `${a}=${f[a]} & ${b}=${f[b]}`;

@@ -22,7 +22,7 @@ const STOP = 0.4, COST = 0.05, FLAT = 0.1;
 const yieldNow = () => new Promise(r => setImmediate(r)), sleep = ms => new Promise(r => setTimeout(r, ms));
 const b = (x, c, n) => { if (x == null || !Number.isFinite(x)) return null; for (let i = 0; i < c.length; i++) if (x < c[i]) return n[i]; return n[c.length]; };
 export const KEYS = [...['move', 'candle', 'structure', 'vwap', 'volume', 'market', 'time', 'pattern'], ...BL.DAY_KEYS];
-export const SREV = 3;   // bump when factors are added -> year tests recollect samples
+export const SREV = 4;   // v4: swing outcomes (+X% before -X%) and cuts at swing turns   // bump when factors are added -> year tests recollect samples
 const SFILE = y => path.join(DIR, `hunt-samples-v${SREV}-${y}.json.gz`);
 export const haveSamples = y => fs.existsSync(SFILE(y));
 export const years = () => fs.readdirSync(DIR).map(f => new RegExp(`^hunt-samples-v${SREV}-(\\d{4})\\.json\\.gz$`).exec(f)?.[1]).filter(Boolean).sort();
@@ -33,6 +33,12 @@ function outcomeH(cs, k, atr, h, dir) {
   for (let j = k + 1; j <= k + h; j++) { const c = cs[j]; if (dir > 0 ? c.l <= e - risk : c.h >= e + risk) return -1 - COST; if (j === k + h) return Math.round((dir * (c.c - e) / risk - COST) * 100) / 100; }
 }
 // one stock-day -> n samples (features known at the cut, outcomes after it)
+// Owner's target: from this point, does price hit +X% before -X% (rest of the day)? -> 'up' / 'down' / 'none'
+export const SW = [0.5, 1, 2];
+function firstTouch(bars, T, e, x) { const up = e * (1 + x / 100), dn = e * (1 - x / 100); for (const b of bars) { if (b.t < T) continue; const hu = b.h >= up, hd = b.l <= dn; if (hu && hd) return b.c >= e ? 'up' : 'down'; if (hu) return 'up'; if (hd) return 'down'; } return 'none'; }
+// swing turns: 5-min candles where price has come >= 1% off its last-hour extreme and the candle turned back (the flip-flops to catch)
+function turns(cs) { const out = []; for (let k = 12; k < cs.length - 2; k++) { const w = cs.slice(k - 12, k + 1), hi = Math.max(...w.map(c => c.h)), lo = Math.min(...w.map(c => c.l)), c = cs[k];
+  if ((hi / c.c - 1 >= 0.01 && c.c > c.o) || (1 - lo / c.c >= 0.01 && c.c < c.o)) out.push(k); } return out; }
 export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, spyTrend, spyVol, news = [], daily = {}, n = 4, rnd = Math.random }) {
   const cs = RD.to5m(bars, t0); if (cs.length < 26) return [];
   const pre = news.filter(x => x.t < t0), pos = pre.filter(x => x.tone === 'pos').length, neg = pre.filter(x => x.tone === 'neg').length;
@@ -44,12 +50,17 @@ export function samplesForDay({ bars, spy, sec, t0, atr, gapPct, rvol, spyGap, s
   const by = arr => { if (!arr.length) return 'no news'; const x = arr.at(-1); return `${x.src || 'unknown'}: ${x.tone || 'neutral'}`; };
   day.newsBy = by(pre);
   const sc = sec ? RD.to5m(sec, t0) : null, out = [];
-  for (let i = 0; i < n; i++) {
-    const k = 6 + Math.floor(rnd() * (cs.length - 12 - 7)), { mv, ...v } = BL.sees(bars, spy, t0, atr, k);
+  const tk = turns(cs), cuts = [];
+  for (let i = 0; i < n; i++) cuts.push([6 + Math.floor(rnd() * (cs.length - 12 - 7)), 'random moment']);
+  for (let i = 0; i < Math.min(4, tk.length); i++) cuts.push([tk[Math.floor(rnd() * tk.length)], 'swing turn']);
+  for (const [k, kind] of cuts) {
+    if (k < 6 || k + 12 >= cs.length) continue;
+    const { mv, ...v } = BL.sees(bars, spy, t0, atr, k);
     const s1 = sc?.[k], s0 = sc?.[k - 6], sm = s1 && s0 ? s1.c / s0.c - 1 : null;
     const T = cs[k].t + 300e3, hr = news.filter(x => x.t >= T - 3600e3 && x.t < T);
-    const f = { ...v, ...day, newsByHour: by(hr), sector: sm == null ? 'no sector' : sm > 0.0015 ? 'sector rising' : sm < -0.0015 ? 'sector falling' : 'sector flat' };
-    out.push({ v: KEYS.map(x => f[x]), t: HS.map(h => outcomeH(cs, k, atr, h)), r: HS.map(h => [outcomeH(cs, k, atr, h, 1), outcomeH(cs, k, atr, h, -1)]), m: mv > 0.2 ? 1 : mv < -0.2 ? -1 : 0 });
+    const nc = hr.length;
+    const f = { ...v, ...day, cut: kind, newsCount: nc === 0 ? 'no headlines last hour' : nc === 1 ? '1 headline last hour' : nc <= 3 ? '2-3 headlines last hour' : '4+ headlines last hour', newsByHour: by(hr), sector: sm == null ? 'no sector' : sm > 0.0015 ? 'sector rising' : sm < -0.0015 ? 'sector falling' : 'sector flat' };
+    out.push({ v: KEYS.map(x => f[x]), sw: SW.map(x => firstTouch(bars, T, cs[k].c, x)), t: HS.map(h => outcomeH(cs, k, atr, h)), r: HS.map(h => [outcomeH(cs, k, atr, h, 1), outcomeH(cs, k, atr, h, -1)]), m: mv > 0.2 ? 1 : mv < -0.2 ? -1 : 0 });
   }
   return out;
 }
@@ -58,7 +69,7 @@ const cache = new Map();
 export function loadYear(y) {
   if (cache.has(y)) return cache.get(y);
   let raw = []; try { raw = JSON.parse(zlib.gunzipSync(fs.readFileSync(SFILE(y)))); } catch {}
-  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, r: x.r, m: x.m })); cache.set(y, s); return s;
+  const s = raw.map(x => ({ f: Object.fromEntries(KEYS.map((k, i) => [k, x.v[i]])), t: x.t, sw: x.sw, r: x.r, m: x.m })); cache.set(y, s); return s;
 }
 // ======================= FORMULA BUILDER (Owner 2026-11-23) =======================
 // No randomness. Every variable value gets a weight learned from its own track record (shrunk by how many times it was seen) and

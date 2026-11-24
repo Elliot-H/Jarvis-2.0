@@ -14,7 +14,8 @@ import path from 'node:path';
 import * as H from './elis-hunt.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, 'walk-state.json');
-export const TARGET = 70, HI = 1;                    // 30 minutes ahead
+export const TARGET = 70, SWI = Math.max(0, [0.5, 1, 2].indexOf(+(process.env.ELIS_SWING || 1)));   // Owner: from here, +1% before -1%?
+const outc = s => (s.sw ? s.sw[SWI] : s.t[1]);   // 'up' | 'down' | 'none'/'flat'
 export const P = { periodsPerYear: 12, minN: 30, minGain: 5, adoptMonths: 6, adoptShare: 0.7, minZ: 3, dropShare: 0.55, expire: 24, maxPairsVars: 26 };
 const yieldNow = () => new Promise(r => setImmediate(r)), sleep = ms => new Promise(r => setTimeout(r, ms));
 const r1 = x => Math.round(x * 10) / 10;
@@ -31,8 +32,8 @@ export function callOf(formula, s) {
 export function periods(years) { const out = []; for (const y of years) { const S = H.loadYear(y), n = P.periodsPerYear; for (let i = 0; i < n; i++) out.push({ id: `${y}-${String(i + 1).padStart(2, '0')}`, s: S.slice(Math.floor(S.length * i / n), Math.floor(S.length * (i + 1) / n)) }); } return out; }
 // homework on one period: conditions under which Elis was wrong and the real direction was one-sided
 export function homework(S, formula) {
-  const g = new Map(), add = (c, s, right) => { const k = keyOf(c); let x = g.get(k); if (!x) g.set(k, x = { c, n: 0, up: 0, right: 0 }); x.n++; if (s.t[HI] === 'up') x.up++; if (right) x.right++; };
-  for (const s of S) { const t = s.t[HI]; if (t === 'flat') continue; const right = callOf(formula, s) === t, kv = K.filter(k => s.f[k] != null).map(k => [k, s.f[k]]);
+  const g = new Map(), add = (c, s, right) => { const k = keyOf(c); let x = g.get(k); if (!x) g.set(k, x = { c, n: 0, up: 0, right: 0 }); x.n++; if (outc(s) === 'up') x.up++; if (right) x.right++; };
+  for (const s of S) { const t = outc(s); if ((t === 'flat' || t === 'none')) continue; const right = callOf(formula, s) === t, kv = K.filter(k => s.f[k] != null).map(k => [k, s.f[k]]);
     for (let i = 0; i < kv.length; i++) { add([kv[i]], s, right); for (let j = i + 1; j < kv.length; j++) add([kv[i], kv[j]], s, right); } }
   const out = [];
   for (const x of g.values()) { if (x.n < P.minN) continue; const dir = x.up * 2 >= x.n ? 'up' : 'down', ruleAcc = (dir === 'up' ? x.up : x.n - x.up) / x.n * 100, curAcc = x.right / x.n * 100;
@@ -42,10 +43,10 @@ export function homework(S, formula) {
 // does following a rule beat the current call on this period's matching charts?
 function check(rule, S, formula, without = false) {
   let n = 0, ruleRight = 0, curRight = 0, dis = 0; const f2 = without ? formula.filter(r => r !== rule) : formula;
-  for (const s of S) { const t = s.t[HI]; if (t === 'flat' || !condOf(s.f, rule.c)) continue; n++; const cc = callOf(f2, s); if (cc !== rule.dir) dis++; if (rule.dir === t) ruleRight++; if (cc === t) curRight++; }
+  for (const s of S) { const t = outc(s); if ((t === 'flat' || t === 'none') || !condOf(s.f, rule.c)) continue; n++; const cc = callOf(f2, s); if (cc !== rule.dir) dis++; if (rule.dir === t) ruleRight++; if (cc === t) curRight++; }
   return { n, dis, diff: ruleRight - curRight, gain: n ? (ruleRight - curRight) / n * 100 : 0 };
 }
-export function grade(S, formula) { let n = 0, ok = 0; for (const s of S) { const t = s.t[HI]; if (t === 'flat') continue; n++; if (callOf(formula, s) === t) ok++; } return { n, acc: n ? r1(ok / n * 100) : 0 }; }
+export function grade(S, formula) { let n = 0, ok = 0; for (const s of S) { const t = outc(s); if ((t === 'flat' || t === 'none')) continue; n++; if (callOf(formula, s) === t) ok++; } return { n, acc: n ? r1(ok / n * 100) : 0 }; }
 // one period of the walk: blind calls -> grade -> watch candidates / formula -> homework
 export function step(st, per) {
   const g = grade(per.s, st.formula); st.charts += g.n; st.right += Math.round(g.acc * g.n / 100);
