@@ -70,7 +70,7 @@ export const state = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')
 const save = st => { try { fs.writeFileSync(SF, JSON.stringify(st)); } catch {} };
 const L = { phase: 'starting', tested: 0, bestAvg: null, bestMin: null, lastAcc: null, recent: [], bestHist: [], years: [], collect: '', proven: false, formula: '', at: 0 };
 const roll = st => { const w = st.recent.slice(-12), n = w.reduce((a, x) => a + x.n, 0); return n ? r1(w.reduce((a, x) => a + x.acc * x.n, 0) / n) : null; };
-const syncL = (st, phase) => { const last = st.recent.at(-1); Object.assign(L, { phase: phase || L.phase, tested: st.charts, lastAcc: last?.acc ?? null, bestAvg: roll(st), bestMin: st.exams.at(-1)?.acc ?? null,
+const syncL = (st, phase) => { const last = st.recent.at(-1); Object.assign(L, { years: H.years(), phase: phase || L.phase, tested: st.charts, lastAcc: last?.acc ?? null, bestAvg: roll(st), bestMin: st.exams.at(-1)?.acc ?? null,
   recent: st.recent.map(x => x.acc), bestHist: (st.hist || []).map(a => ({ avg: a })), proven: !!st.proven, formula: `${st.formula.length} rules, ${st.cands.length} candidates under watch` }); };
 syncL(state());
 export const live = () => ({ ...L, target: TARGET, at: Date.now(), labels: { big: 'accuracy, last 12 periods (blind calls)', small: 'last 2025 exam', last: 'THIS PERIOD', tested: 'CHARTS CALLED' } });
@@ -88,7 +88,7 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
       }
       const per = PS[st.pos], g = step(st, per); st.hist = [...(st.hist || []), roll(st)].slice(-200);
       if (st.formula.length !== (st.lastRules ?? 0)) { st.lastRules = st.formula.length; log(`walk: ${per.id}: formula now ${st.formula.length} rules; rolling accuracy ${roll(st)}%`); }
-      syncL(st, `pass ${st.pass}: ${per.id} called blind (${g.acc}% of ${g.n}); homework done`); save(st); await yieldNow();
+      syncL(st, `pass ${st.pass}: month ${per.id} called blind, ${g.acc}% right of ${g.n}; misses studied; loop keeps going until 70%`); save(st); await yieldNow();
     } catch (e) { log('walk error: ' + e.message); await sleep(60e3); }
   }
 }

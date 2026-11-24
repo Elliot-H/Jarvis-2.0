@@ -351,15 +351,17 @@ export async function summary(force = false) {
   for (let page = 0; page < 10; page++) {
     const q = new URLSearchParams({ status: 'closed', nested: 'true', limit: '500', direction: 'desc' }); if (until) q.set('until', until);
     const list = await api(BASE, `/v2/orders?${q}`);
-    for (const o of list) { const mt = (o.client_order_id || '').match(/^elisw?-(\d{8})/); if (mt) for (const x of [o, ...(o.legs || [])]) if (+x.filled_qty > 0) fills.push({ day: mt[1], side: x.side, qty: +x.filled_qty, px: +x.filled_avg_price }); }
+    for (const o of list) { const mt = (o.client_order_id || '').match(/^elisw?-(\d{8})/); if (mt) for (const x of [o, ...(o.legs || [])]) if (+x.filled_qty > 0) fills.push({ day: mt[1], sym: x.symbol || o.symbol, side: x.side, qty: +x.filled_qty, px: +x.filled_avg_price }); }
     if (list.length < 500) break; until = list.at(-1).submitted_at;
   }
   const byDay = {};
   for (const f of fills) byDay[f.day] = (byDay[f.day] || 0) + (f.side === 'sell' ? 1 : -1) * f.qty * f.px;
   const today = et().date.replace(/-/g, '');
-  const pos = await position().catch(() => null);
-  if (pos && S.orderId) byDay[today] = (byDay[today] || 0) + +pos.market_value;   // open Elis trade marked to market (short = negative value)
-  for (const v of extraOpen()) byDay[today] = (byDay[today] || 0) + v;            // open Wave positions marked to market
+  // open Elis shares today, marked to market from the broker itself (not from memory: a restart must never show a bought position as a loss)
+  const net = {}; for (const f of fills) if (f.day === today && f.sym) net[f.sym] = (net[f.sym] || 0) + (f.side === 'buy' ? f.qty : -f.qty);
+  if (Object.values(net).some(q => Math.abs(q) > 1e-9)) { const ps = await api(BASE, '/v2/positions').catch(() => []);
+    for (const [sym, q] of Object.entries(net)) { if (Math.abs(q) < 1e-9) continue; const p = (ps || []).find(x => x.symbol === sym); const px = p ? +p.current_price : null;
+      if (px) byDay[today] = (byDay[today] || 0) + q * px; else note(`hud: ${sym} shows ${q} open Elis shares but no broker position`); } }
   const days = Object.keys(byDay).sort(); let cum = 0;
   const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
   const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;
