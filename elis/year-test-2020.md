@@ -5,7 +5,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
 - midday, against the market, S&P flat at the open -> go with the stock: 110 trades, 39% wins, avg -0.08R, total -8.5R -> $3,000 became $2,883 (-3.9%, max drawdown 14.9%)
 - midday, against the market, normal volume -> go with the stock: 143 trades, 41% wins, avg -0.13R, total -17.9R -> $3,000 became $2,436 (-18.8%, max drawdown 19.8%)
 - afternoon, far from VWAP in the move direction -> go with the stock: 307 trades, 36% wins, avg -0.14R, total -44.3R -> $3,000 became $2,222 (-25.9%, max drawdown 32.8%)
-- strong move alone (control) -> go with the stock: 2687 trades, 41% wins, avg -0.09R, total -247.3R -> $3,000 became $1,275 (-57.5%, max drawdown 58.6%)
+- strong move alone (control) -> go with the stock: 2687 trades, 41% wins, avg -0.09R, total -245.4R -> $3,000 became $1,275 (-57.5%, max drawdown 58.6%)
 
 ```json
 {
@@ -64,7 +64,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    "trades": 2687,
    "winPct": 41,
    "avgR": -0.09,
-   "totalR": -247.3,
+   "totalR": -245.4,
    "money3k": {
     "start": 3000,
     "end": 1275,
@@ -84,7 +84,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
     "n": 34,
     "avgR": 0.49,
     "winPct": 53,
-    "z": 3.5,
+    "z": 3.49,
     "better": true
    },
    {
@@ -93,33 +93,33 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
     "n": 206,
     "avgR": 0.07,
     "winPct": 45,
-    "z": 2.4,
+    "z": 2.39,
     "better": true
    }
   ],
   "tables": {
    "market trend": {
     "market uptrend": {
-     "n": 1995,
+     "n": 1994,
      "avgR": -0.07,
      "winPct": 43
     },
     "market downtrend": {
-     "n": 692,
+     "n": 693,
      "avgR": -0.16,
      "winPct": 38
     }
    },
    "market volatility": {
     "calm market (<12%)": {
-     "n": 753,
+     "n": 754,
      "avgR": -0.09,
      "winPct": 42
     },
     "normal market (12-18%)": {
-     "n": 584,
+     "n": 583,
      "avgR": -0.04,
-     "winPct": 43
+     "winPct": 44
     },
     "nervous market (18-28%)": {
      "n": 902,
@@ -144,7 +144,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 41
     },
     "S&P gapped down": {
-     "n": 418,
+     "n": 419,
      "avgR": -0.02,
      "winPct": 43
     },
@@ -154,9 +154,9 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 42
     },
     "S&P gapped up hard": {
-     "n": 478,
+     "n": 477,
      "avgR": -0.16,
-     "winPct": 38
+     "winPct": 39
     }
    },
    "time of day": {
@@ -189,8 +189,8 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    "side": {
     "short": {
      "n": 1371,
-     "avgR": -0.08,
-     "winPct": 42
+     "avgR": -0.07,
+     "winPct": 43
     },
     "long": {
      "n": 1316,
@@ -201,7 +201,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    "moving against the market": {
     "no": {
      "n": 2249,
-     "avgR": -0.1,
+     "avgR": -0.09,
      "winPct": 41
     },
     "yes": {
@@ -234,12 +234,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "price vs VWAP": {
     "with the move, far": {
-     "n": 1247,
+     "n": 1248,
      "avgR": -0.12,
      "winPct": 39
     },
     "with the move": {
-     "n": 1399,
+     "n": 1398,
      "avgR": -0.06,
      "winPct": 44
     },
@@ -251,12 +251,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "size of the 30-min move": {
     "0.6-0.8x range": {
-     "n": 1669,
+     "n": 1668,
      "avgR": -0.09,
      "winPct": 43
     },
     "0.8-1.2x range": {
-     "n": 762,
+     "n": 763,
      "avgR": -0.12,
      "winPct": 38
     },
@@ -268,8 +268,8 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "stock opening gap": {
     "no gap": {
-     "n": 411,
-     "avgR": -0.1,
+     "n": 412,
+     "avgR": -0.09,
      "winPct": 44
     },
     "gap down 4%+": {
@@ -288,7 +288,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "gap down 1-4%": {
-     "n": 377,
+     "n": 376,
      "avgR": -0.07,
      "winPct": 43
     }
@@ -318,7 +318,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    "stock volatility": {
     "calm stock": {
      "n": 861,
-     "avgR": -0.12,
+     "avgR": -0.11,
      "winPct": 41
     },
     "normal stock": {
@@ -367,12 +367,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "sector": {
     "sector with the move": {
-     "n": 1493,
+     "n": 1494,
      "avgR": -0.09,
      "winPct": 42
     },
     "sector flat": {
-     "n": 570,
+     "n": 569,
      "avgR": -0.09,
      "winPct": 42
     },
@@ -389,12 +389,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "candle read": {
     "candle-with": {
-     "n": 1314,
+     "n": 1313,
      "avgR": -0.12,
      "winPct": 41
     },
     "candle-none": {
-     "n": 725,
+     "n": 726,
      "avgR": -0.06,
      "winPct": 41
     },
@@ -411,12 +411,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "chart structure": {
     "trend-with": {
-     "n": 1479,
+     "n": 1478,
      "avgR": -0.11,
      "winPct": 41
     },
     "range": {
-     "n": 1118,
+     "n": 1119,
      "avgR": -0.07,
      "winPct": 42
     },
@@ -443,7 +443,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 40
     },
     "none": {
-     "n": 437,
+     "n": 438,
      "avgR": -0.09,
      "winPct": 39
     },
@@ -468,7 +468,7 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
      "winPct": 36
     },
     "bearish engulfing": {
-     "n": 79,
+     "n": 78,
      "avgR": -0.17,
      "winPct": 37
     },
@@ -575,12 +575,12 @@ Out-of-sample year 2020 (253 sessions, formulas found on 2024-2025, never on 202
    },
    "month": {
     "2020-01": {
-     "n": 287,
+     "n": 288,
      "avgR": -0.12,
-     "winPct": 41
+     "winPct": 42
     },
     "2020-02": {
-     "n": 306,
+     "n": 305,
      "avgR": -0.19,
      "winPct": 39
     },
