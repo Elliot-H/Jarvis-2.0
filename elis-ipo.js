@@ -13,7 +13,7 @@ async function A(base, p) { for (let i = 0; ; i++) { try { return await E.api(ba
 export const lastReport = () => { try { return JSON.parse(fs.readFileSync(SF, 'utf8')); } catch { return null; } };
 
 async function nasdaqMonth(ym) {
-  try { const r = await fetch(`https://api.nasdaq.com/api/ipo/calendar?date=${ym}`, { headers: { 'User-Agent': `Elis research ${process.env.ELIS_SEC_CONTACT || 'Elliot-H@users.noreply.github.com'}`, Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+  try { const r = await fetch(`https://api.nasdaq.com/api/ipo/calendar?date=${ym}`, { headers: { 'User-Agent': `Elis research ${process.env.ELIS_SEC_CONTACT || 'Elliot-H@users.noreply.github.com'}`, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null; const j = await r.json(); return (j?.data?.priced?.rows || []).map(x => ({ sym: String(x.proposedTickerSymbol || '').trim(), date: x.pricedDate, name: x.companyName, price: +String(x.proposedSharePrice || '').replace(/[^0-9.]/g, '') || null, exch: x.proposedExchange }));
   } catch { return null; }
 }
@@ -32,7 +32,10 @@ export function summarize(rows) {
 }
 export async function run({ from = 2016, to = 2025, progress = () => {}, shouldStop = () => false } = {}) {
   let list = [], source = 'Nasdaq IPO calendar';
-  months: for (let y = from; y <= to; y++) for (let m = 1; m <= 12; m++) { const rows = await nasdaqMonth(`${y}-${String(m).padStart(2, '0')}`); if (rows == null) { list = null; break months; } list.push(...rows.map(x => ({ ...x, date: toISO(x.date) }))); await pause(250); }
+  progress('ipo study: reading the Nasdaq IPO calendar');
+  months: for (let y = from; y <= to; y++) for (let m = 1; m <= 12; m++) { const rows = await nasdaqMonth(`${y}-${String(m).padStart(2, '0')}`);
+    if (rows == null || (!rows.length && !list.length && (y - from) * 12 + m >= 3)) { list = null; break months; }   // refused, or nothing in the first 3 months: not usable
+    list.push(...rows.map(x => ({ ...x, date: toISO(x.date) }))); await pause(250); if (m === 12) progress(`ipo study: Nasdaq calendar ${y}: ${list.length} IPOs so far`); }
   if (!list) {   // Nasdaq refused: new listings from Alpaca (first ever daily bar inside the period)
     source = 'Alpaca new listings'; list = []; progress('ipo study: Nasdaq calendar refused the server; finding new listings from Alpaca');
     const assets = []; for (const st of ['active', 'inactive']) { try { assets.push(...await A(E.BASE, `/v2/assets?status=${st}&asset_class=us_equity`)); } catch (e) { progress('ipo study: assets ' + st + ' failed: ' + e.message); } }
