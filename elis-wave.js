@@ -25,6 +25,7 @@ import * as WHY from './elis-why.js';
 import * as BL from './elis-blind.js';
 import * as HUNT from './elis-hunt.js';
 import * as WALK from './elis-walk.js';
+import * as IPO from './elis-ipo.js';
 
 const num = (v, d) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
 const hm = (v, d) => { const m = String(v || '').match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : d; };
@@ -395,6 +396,12 @@ export async function oosNow(year = OOS.nextYear(true) || OOS.nextYear()) {   //
   } finally { learnBusy = false; }
 }
 let diskWarned = false;
+let ipoBusy = false;
+export async function ipoNow() {   // Owner's IPO rule, tested on every US IPO 2016-2025 (runs beside the replay; pushes the result)
+  if (ipoBusy) return 'busy'; ipoBusy = true;
+  try { const r = await IPO.run({ progress: m => note(m), shouldStop: marketHours }); if (r.paused) return 'paused'; const t = IPO.text(r); await E.tellOut('IPO study', t); return t; }
+  catch (e) { note('ipo study error: ' + e.message); return e.message; } finally { ipoBusy = false; }
+}
 export async function whyNow() {   // Owner: where does the moving information come from, and how much does each source weigh
   if (learnBusy) return 'busy'; learnBusy = true;
   try {
@@ -413,6 +420,7 @@ export async function blindNow() {   // Owner: test against blind charts and giv
   } catch (e) { await E.tellOut('blind test error', e.message); return e.message; } finally { blindBusy = false; }
 }
 async function learnTick() {
+  if (!ipoBusy && !IPO.lastReport() && !marketHours()) void ipoNow();
   try {
     { const br = BL.lastReport(); if (!marketHours() && !blindBusy && ((br?.rev || 0) < BL.BLIND_REV || (br?.days && new Set(L.readJournal().map(r => r.date)).size >= br.days + 20))) void blindNow(); }
     if (marketHours() || learnBusy) return;
