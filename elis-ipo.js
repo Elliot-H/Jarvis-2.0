@@ -34,12 +34,17 @@ export async function run({ from = 2016, to = 2025, progress = () => {}, shouldS
   let list = [], source = 'Nasdaq IPO calendar';
   months: for (let y = from; y <= to; y++) for (let m = 1; m <= 12; m++) { const rows = await nasdaqMonth(`${y}-${String(m).padStart(2, '0')}`); if (rows == null) { list = null; break months; } list.push(...rows.map(x => ({ ...x, date: toISO(x.date) }))); await pause(250); }
   if (!list) {   // Nasdaq refused: new listings from Alpaca (first ever daily bar inside the period)
-    source = 'Alpaca new listings'; list = [];
-    const assets = (await A(E.BASE, '/v2/assets?asset_class=us_equity')).filter(a => ['NYSE', 'NASDAQ', 'AMEX', 'ARCA', 'BATS'].includes(a.exchange) && /^[A-Z]{1,5}$/.test(a.symbol));
-    for (let i = 0; i < assets.length; i++) { if (shouldStop()) return { paused: true };
-      const j = await A(E.DATA, `/v2/stocks/${assets[i].symbol}/bars?timeframe=1Day&start=2015-06-01&limit=1&feed=sip`).catch(() => null), d = j?.bars?.[0]?.t?.slice(0, 10);
-      if (d && d >= `${from}-01-01` && d <= `${to}-12-31`) list.push({ sym: assets[i].symbol, date: d, name: assets[i].name });
-      if (i % 500 === 0) progress(`ipo study: checked ${i} of ${assets.length} symbols for their first day`); }
+    source = 'Alpaca new listings'; list = []; progress('ipo study: Nasdaq calendar refused the server; finding new listings from Alpaca');
+    const assets = []; for (const st of ['active', 'inactive']) { try { assets.push(...await A(E.BASE, `/v2/assets?status=${st}&asset_class=us_equity`)); } catch (e) { progress('ipo study: assets ' + st + ' failed: ' + e.message); } }
+    const syms = [...new Set(assets.filter(a => ['NYSE', 'NASDAQ', 'AMEX', 'ARCA', 'BATS'].includes(a.exchange) && /^[A-Z]{1,5}$/.test(a.symbol)).map(a => a.symbol))], nameOf = Object.fromEntries(assets.map(a => [a.symbol, a.name]));
+    // first trading month per symbol, 100 symbols per request (monthly bars), then the exact first day for the new ones
+    const firstMonth = {};
+    for (let i = 0; i < syms.length; i += 100) { if (shouldStop()) return { paused: true }; let token = '';
+      do { const q = new URLSearchParams({ symbols: syms.slice(i, i + 100).join(','), timeframe: '1Month', start: '2015-06-01', end: `${to}-12-31`, limit: '10000', feed: 'sip', adjustment: 'raw' }); if (token) q.set('page_token', token);
+        const j = await A(E.DATA, `/v2/stocks/bars?${q}`).catch(() => null); for (const [sym, bs] of Object.entries(j?.bars || {})) { const d = bs[0]?.t?.slice(0, 10); if (d && (!firstMonth[sym] || d < firstMonth[sym])) firstMonth[sym] = d; } token = j?.next_page_token || ''; } while (token);
+      if (i % 2000 === 0) progress(`ipo study: first month found for ${Object.keys(firstMonth).length} of ${syms.length} symbols`); }
+    for (const [sym, m] of Object.entries(firstMonth)) { if (m < `${from}-01-01` || m > `${to}-12-31` || m <= '2015-07-01') continue;
+      const j = await A(E.DATA, `/v2/stocks/${sym}/bars?timeframe=1Day&start=${m.slice(0, 7)}-01&limit=1&feed=sip`).catch(() => null), d = j?.bars?.[0]?.t?.slice(0, 10); if (d) list.push({ sym, date: d, name: nameOf[sym] }); }
   }
   list = list.filter(x => x.sym && x.date); progress(`ipo study: ${list.length} IPOs from ${source}`);
   const rows = [];
