@@ -1,11 +1,11 @@
 # Elis year test 2017
 
 Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 2017). Stop 0.4 x daily range, out after 30 min, costs included; $3,000 at 1% risk, max 3 trades/day:
-- midday, stock strong against the market -> go with the stock: 73 trades, 47% wins, avg 0.04R, total 3.2R -> $3,000 became $3,142 (+4.7%, max drawdown 3.9%)
-- midday, against the market, S&P flat at the open -> go with the stock: 65 trades, 48% wins, avg 0.07R, total 4.6R -> $3,000 became $3,185 (+6.2%, max drawdown 4.7%)
+- midday, stock strong against the market -> go with the stock: 72 trades, 47% wins, avg 0.05R, total 3.5R -> $3,000 became $3,142 (+4.7%, max drawdown 3.9%)
+- midday, against the market, S&P flat at the open -> go with the stock: 64 trades, 48% wins, avg 0.08R, total 4.8R -> $3,000 became $3,185 (+6.2%, max drawdown 4.7%)
 - midday, against the market, normal volume -> go with the stock: 41 trades, 39% wins, avg -0.11R, total -4.6R -> $3,000 became $2,860 (-4.7%, max drawdown 7.3%)
 - afternoon, far from VWAP in the move direction -> go with the stock: 326 trades, 39% wins, avg -0.16R, total -50.9R -> $3,000 became $1,890 (-37%, max drawdown 37%)
-- strong move alone (control) -> go with the stock: 2950 trades, 42% wins, avg -0.1R, total -285.5R -> $3,000 became $1,593 (-46.9%, max drawdown 55.4%)
+- strong move alone (control) -> go with the stock: 2951 trades, 42% wins, avg -0.1R, total -287.1R -> $3,000 became $1,575 (-47.5%, max drawdown 56.2%)
 
 ```json
 {
@@ -13,10 +13,10 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
  "sessions": 251,
  "results": {
   "midday, stock strong against the market -> go with the stock": {
-   "trades": 73,
+   "trades": 72,
    "winPct": 47,
-   "avgR": 0.04,
-   "totalR": 3.2,
+   "avgR": 0.05,
+   "totalR": 3.5,
    "money3k": {
     "start": 3000,
     "end": 3142,
@@ -25,10 +25,10 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    }
   },
   "midday, against the market, S&P flat at the open -> go with the stock": {
-   "trades": 65,
+   "trades": 64,
    "winPct": 48,
-   "avgR": 0.07,
-   "totalR": 4.6,
+   "avgR": 0.08,
+   "totalR": 4.8,
    "money3k": {
     "start": 3000,
     "end": 3185,
@@ -61,30 +61,30 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    }
   },
   "strong move alone (control) -> go with the stock": {
-   "trades": 2950,
+   "trades": 2951,
    "winPct": 42,
    "avgR": -0.1,
-   "totalR": -285.5,
+   "totalR": -287.1,
    "money3k": {
     "start": 3000,
-    "end": 1593,
-    "returnPct": -46.9,
-    "maxDrawdownPct": 55.4
+    "end": 1575,
+    "returnPct": -47.5,
+    "maxDrawdownPct": 56.2
    }
   }
  },
- "trades": 3455,
+ "trades": 3454,
  "why": {
-  "n": 2950,
+  "n": 2951,
   "overall": -0.1,
   "findings": [
    {
     "dim": "size of the 30-min move",
     "value": "1.2x+ range",
-    "n": 338,
+    "n": 337,
     "avgR": -0.24,
     "winPct": 33,
-    "z": -2.96,
+    "z": -2.95,
     "better": false
    },
    {
@@ -93,34 +93,25 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
     "n": 379,
     "avgR": 0.01,
     "winPct": 47,
-    "z": 2.34,
+    "z": 2.35,
     "better": true
    },
    {
     "dim": "candle read",
     "value": "candle-mild",
-    "n": 370,
+    "n": 368,
     "avgR": -0.2,
     "winPct": 37,
-    "z": -2.24,
+    "z": -2.22,
     "better": false
    },
    {
-    "dim": "stock volatility",
-    "value": "jumpy stock",
-    "n": 65,
-    "avgR": 0.13,
-    "winPct": 54,
-    "z": 2.06,
-    "better": true
-   },
-   {
-    "dim": "month",
-    "value": "2017-11",
-    "n": 297,
-    "avgR": -0.2,
-    "winPct": 40,
-    "z": -2,
+    "dim": "latest candle pattern",
+    "value": "strong bear candle",
+    "n": 101,
+    "avgR": -0.28,
+    "winPct": 33,
+    "z": -2.07,
     "better": false
    }
   ],
@@ -132,14 +123,14 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 43
     },
     "market uptrend": {
-     "n": 2463,
+     "n": 2464,
      "avgR": -0.1,
      "winPct": 42
     }
    },
    "market volatility": {
     "calm market (<12%)": {
-     "n": 2950,
+     "n": 2951,
      "avgR": -0.1,
      "winPct": 42
     }
@@ -156,9 +147,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 43
     },
     "S&P gapped down": {
-     "n": 281,
+     "n": 282,
      "avgR": -0.14,
-     "winPct": 41
+     "winPct": 40
     },
     "S&P gapped up hard": {
      "n": 24,
@@ -178,7 +169,7 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 45
     },
     "first hour": {
-     "n": 2268,
+     "n": 2269,
      "avgR": -0.11,
      "winPct": 42
     },
@@ -200,21 +191,21 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "side": {
     "short": {
-     "n": 1491,
+     "n": 1494,
      "avgR": -0.07,
      "winPct": 44
     },
     "long": {
-     "n": 1459,
+     "n": 1457,
      "avgR": -0.13,
      "winPct": 41
     }
    },
    "moving against the market": {
     "no": {
-     "n": 2795,
+     "n": 2796,
      "avgR": -0.1,
-     "winPct": 43
+     "winPct": 42
     },
     "yes": {
      "n": 155,
@@ -224,13 +215,13 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "volume on the signal candle": {
     "normal": {
-     "n": 1225,
-     "avgR": -0.11,
+     "n": 1229,
+     "avgR": -0.1,
      "winPct": 42
     },
     "fading": {
-     "n": 1286,
-     "avgR": -0.1,
+     "n": 1284,
+     "avgR": -0.11,
      "winPct": 42
     },
     "surging": {
@@ -239,7 +230,7 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 40
     },
     "rising": {
-     "n": 351,
+     "n": 350,
      "avgR": -0.04,
      "winPct": 44
     }
@@ -251,8 +242,8 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 41
     },
     "with the move": {
-     "n": 1557,
-     "avgR": -0.07,
+     "n": 1558,
+     "avgR": -0.08,
      "winPct": 44
     },
     "against the move": {
@@ -263,39 +254,39 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "size of the 30-min move": {
     "0.8-1.2x range": {
-     "n": 817,
+     "n": 818,
      "avgR": -0.09,
      "winPct": 43
     },
     "0.6-0.8x range": {
-     "n": 1795,
+     "n": 1796,
      "avgR": -0.07,
      "winPct": 44
     },
     "1.2x+ range": {
-     "n": 338,
+     "n": 337,
      "avgR": -0.24,
      "winPct": 33
     }
    },
    "stock opening gap": {
     "no gap": {
-     "n": 917,
+     "n": 918,
      "avgR": -0.09,
      "winPct": 43
     },
     "gap up 4%+": {
-     "n": 532,
+     "n": 533,
      "avgR": -0.08,
      "winPct": 45
     },
     "gap down 1-4%": {
-     "n": 514,
+     "n": 515,
      "avgR": -0.08,
      "winPct": 45
     },
     "gap up 1-4%": {
-     "n": 589,
+     "n": 587,
      "avgR": -0.1,
      "winPct": 40
     },
@@ -312,36 +303,36 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 40
     },
     "4-8x": {
-     "n": 1122,
+     "n": 1118,
      "avgR": -0.07,
      "winPct": 44
     },
     "2-4x": {
-     "n": 1062,
+     "n": 1066,
      "avgR": -0.09,
      "winPct": 43
     },
     "1-2x normal": {
-     "n": 38,
-     "avgR": -0.16,
-     "winPct": 29
+     "n": 39,
+     "avgR": -0.17,
+     "winPct": 28
     }
    },
    "stock volatility": {
     "calm stock": {
-     "n": 2210,
+     "n": 2213,
      "avgR": -0.1,
      "winPct": 42
     },
     "normal stock": {
-     "n": 669,
+     "n": 666,
      "avgR": -0.1,
      "winPct": 42
     },
     "jumpy stock": {
-     "n": 65,
-     "avgR": 0.13,
-     "winPct": 54
+     "n": 66,
+     "avgR": 0.12,
+     "winPct": 53
     },
     "very jumpy stock": {
      "n": 6,
@@ -351,62 +342,62 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "news in the last hour": {
     "none": {
-     "n": 2950,
+     "n": 2951,
      "avgR": -0.1,
      "winPct": 42
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 2950,
+     "n": 2951,
      "avgR": -0.1,
      "winPct": 42
     }
    },
    "overnight news": {
     "none": {
-     "n": 2950,
+     "n": 2951,
      "avgR": -0.1,
      "winPct": 42
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 2950,
+     "n": 2951,
      "avgR": -0.1,
      "winPct": 42
     }
    },
    "sector": {
     "sector with the move": {
-     "n": 1276,
+     "n": 1277,
      "avgR": -0.09,
      "winPct": 44
     },
     "sector flat": {
-     "n": 1147,
+     "n": 1145,
      "avgR": -0.09,
      "winPct": 41
     },
     "no sector": {
-     "n": 167,
-     "avgR": -0.06,
+     "n": 168,
+     "avgR": -0.05,
      "winPct": 45
     },
     "sector against the move": {
-     "n": 360,
+     "n": 361,
      "avgR": -0.17,
      "winPct": 40
     }
    },
    "candle read": {
     "candle-with": {
-     "n": 1360,
+     "n": 1363,
      "avgR": -0.08,
      "winPct": 43
     },
     "candle-mild": {
-     "n": 370,
+     "n": 368,
      "avgR": -0.2,
      "winPct": 37
     },
@@ -423,24 +414,24 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "chart structure": {
     "trend-with": {
-     "n": 1566,
+     "n": 1567,
      "avgR": -0.1,
      "winPct": 42
     },
     "range": {
-     "n": 1281,
+     "n": 1282,
      "avgR": -0.1,
      "winPct": 43
     },
     "trend-against": {
-     "n": 103,
-     "avgR": -0.02,
-     "winPct": 44
+     "n": 102,
+     "avgR": -0.03,
+     "winPct": 43
     }
    },
    "latest candle pattern": {
     "three black crows": {
-     "n": 525,
+     "n": 528,
      "avgR": -0.08,
      "winPct": 43
     },
@@ -450,8 +441,8 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 42
     },
     "strong bull candle": {
-     "n": 124,
-     "avgR": -0.12,
+     "n": 123,
+     "avgR": -0.11,
      "winPct": 41
     },
     "bear flag": {
@@ -490,8 +481,8 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 35
     },
     "strong bear candle": {
-     "n": 102,
-     "avgR": -0.26,
+     "n": 101,
+     "avgR": -0.28,
      "winPct": 33
     },
     "dark cloud cover": {
@@ -500,8 +491,8 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 57
     },
     "spinning top": {
-     "n": 89,
-     "avgR": -0.07,
+     "n": 88,
+     "avgR": -0.09,
      "winPct": 40
     },
     "tweezer top": {
@@ -555,9 +546,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 50
     },
     "gravestone doji": {
-     "n": 23,
-     "avgR": -0.41,
-     "winPct": 30
+     "n": 24,
+     "avgR": -0.36,
+     "winPct": 33
     },
     "bullish marubozu": {
      "n": 25,
@@ -587,12 +578,12 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "month": {
     "2017-01": {
-     "n": 242,
+     "n": 243,
      "avgR": -0.12,
      "winPct": 41
     },
     "2017-02": {
-     "n": 261,
+     "n": 260,
      "avgR": -0.08,
      "winPct": 40
     },
@@ -608,7 +599,7 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
     },
     "2017-05": {
      "n": 294,
-     "avgR": -0.07,
+     "avgR": -0.06,
      "winPct": 42
     },
     "2017-06": {
@@ -618,11 +609,11 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
     },
     "2017-07": {
      "n": 228,
-     "avgR": -0.15,
+     "avgR": -0.16,
      "winPct": 37
     },
     "2017-08": {
-     "n": 274,
+     "n": 275,
      "avgR": -0.1,
      "winPct": 43
     },
@@ -648,18 +639,18 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
     }
    }
   },
-  "text": "Overall -0.1R avg over 2950 trades.\nMade money when:\n  + candle read = candle-against: +0.01R avg, 47% wins, 379 trades\n  + stock volatility = jumpy stock: +0.13R avg, 54% wins, 65 trades\nLost most when:\n  - size of the 30-min move = 1.2x+ range: -0.24R avg, 33% wins, 338 trades\n  - candle read = candle-mild: -0.2R avg, 37% wins, 370 trades\n  - month = 2017-11: -0.2R avg, 40% wins, 297 trades"
+  "text": "Overall -0.1R avg over 2951 trades.\nMade money when:\n  + candle read = candle-against: +0.01R avg, 47% wins, 379 trades\nLost most when:\n  - size of the 30-min move = 1.2x+ range: -0.24R avg, 33% wins, 337 trades\n  - candle read = candle-mild: -0.2R avg, 37% wins, 368 trades\n  - latest candle pattern = strong bear candle: -0.28R avg, 33% wins, 101 trades"
  },
  "whyFormula": {
-  "n": 73,
-  "overall": 0.04,
+  "n": 72,
+  "overall": 0.05,
   "findings": [],
   "tables": {
    "market trend": {
     "market uptrend": {
-     "n": 60,
-     "avgR": 0.02,
-     "winPct": 43
+     "n": 59,
+     "avgR": 0.03,
+     "winPct": 44
     },
     "market downtrend": {
      "n": 13,
@@ -669,16 +660,16 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "market volatility": {
     "calm market (<12%)": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
    "S&P gap at the open": {
     "S&P flat": {
-     "n": 51,
-     "avgR": 0.11,
-     "winPct": 45
+     "n": 50,
+     "avgR": 0.12,
+     "winPct": 46
     },
     "S&P gapped up": {
      "n": 10,
@@ -708,16 +699,16 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 47
     },
     "11:30-1:00": {
-     "n": 43,
-     "avgR": 0.09,
-     "winPct": 47
+     "n": 42,
+     "avgR": 0.1,
+     "winPct": 48
     }
    },
    "side": {
     "short": {
-     "n": 42,
+     "n": 41,
      "avgR": -0.01,
-     "winPct": 50
+     "winPct": 51
     },
     "long": {
      "n": 31,
@@ -727,8 +718,8 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "moving against the market": {
     "yes": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
@@ -739,9 +730,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 47
     },
     "fading": {
-     "n": 18,
-     "avgR": 0.15,
-     "winPct": 56
+     "n": 17,
+     "avgR": 0.18,
+     "winPct": 59
     },
     "normal": {
      "n": 34,
@@ -761,9 +752,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 44
     },
     "with the move": {
-     "n": 15,
-     "avgR": -0.03,
-     "winPct": 47
+     "n": 14,
+     "avgR": -0.01,
+     "winPct": 50
     },
     "against the move": {
      "n": 9,
@@ -783,9 +774,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 55
     },
     "0.6-0.8x range": {
-     "n": 45,
-     "avgR": -0.08,
-     "winPct": 47
+     "n": 44,
+     "avgR": -0.07,
+     "winPct": 48
     },
     "1.2x+ range": {
      "n": 8,
@@ -795,9 +786,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "stock opening gap": {
     "gap down 1-4%": {
-     "n": 15,
-     "avgR": 0.12,
-     "winPct": 53
+     "n": 14,
+     "avgR": 0.15,
+     "winPct": 57
     },
     "gap up 1-4%": {
      "n": 16,
@@ -822,9 +813,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "opening volume surge": {
     "4-8x": {
-     "n": 30,
-     "avgR": -0.12,
-     "winPct": 40
+     "n": 29,
+     "avgR": -0.11,
+     "winPct": 41
     },
     "8x+": {
      "n": 27,
@@ -844,9 +835,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 43
     },
     "normal stock": {
-     "n": 15,
-     "avgR": 0.11,
-     "winPct": 53
+     "n": 14,
+     "avgR": 0.13,
+     "winPct": 57
     },
     "jumpy stock": {
      "n": 2,
@@ -856,29 +847,29 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "news in the last hour": {
     "none": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
    "type of last-hour news": {
     "none": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
    "overnight news": {
     "none": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
    "type of overnight news": {
     "none": {
-     "n": 73,
-     "avgR": 0.04,
+     "n": 72,
+     "avgR": 0.05,
      "winPct": 47
     }
    },
@@ -889,9 +880,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 52
     },
     "sector against the move": {
-     "n": 34,
-     "avgR": 0.21,
-     "winPct": 50
+     "n": 33,
+     "avgR": 0.22,
+     "winPct": 52
     },
     "no sector": {
      "n": 8,
@@ -906,9 +897,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "candle read": {
     "candle-none": {
-     "n": 18,
-     "avgR": -0.02,
-     "winPct": 39
+     "n": 17,
+     "avgR": -0.01,
+     "winPct": 41
     },
     "candle-with": {
      "n": 35,
@@ -928,7 +919,7 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "chart structure": {
     "trend-with": {
-     "n": 48,
+     "n": 47,
      "avgR": -0.03,
      "winPct": 40
     },
@@ -945,9 +936,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
    },
    "latest candle pattern": {
     "none": {
-     "n": 13,
-     "avgR": -0.06,
-     "winPct": 38
+     "n": 12,
+     "avgR": -0.05,
+     "winPct": 42
     },
     "three white soldiers": {
      "n": 11,
@@ -1047,9 +1038,9 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
      "winPct": 67
     },
     "2017-02": {
-     "n": 10,
-     "avgR": 0.49,
-     "winPct": 30
+     "n": 9,
+     "avgR": 0.57,
+     "winPct": 33
     },
     "2017-03": {
      "n": 7,
@@ -1103,7 +1094,7 @@ Out-of-sample year 2017 (251 sessions, formulas found on 2024-2025, never on 201
     }
    }
   },
-  "text": "Overall +0.04R avg over 73 trades.\nNo group made money with enough trades to trust.\nNo group stood out as worse than the rest."
+  "text": "Overall +0.05R avg over 72 trades.\nNo group made money with enough trades to trust.\nNo group stood out as worse than the rest."
  },
  "sample": [
   {
