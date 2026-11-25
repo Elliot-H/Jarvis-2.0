@@ -341,6 +341,7 @@ function summarize(trades, sessions, cfg) {
 // ---------------- HUD panel: P/L graph + today / lifetime numbers ----------------
 // Elis P/L = cash flow of its own fills (client_order_id elis-*: entries, bracket exits, EOD flatten) + any open Elis position.
 let hudCache = { at: 0, v: null }, extraOpen = () => [], hudExtra = () => ({});
+const fillCache = {};
 export const setHudExtra = f => { hudExtra = f; };
 export const hudSend = o => { try { hud(o); } catch {} };   // extra live panels (hunt accuracy)
 export const setExtraOpen = f => { extraOpen = f; };
@@ -367,6 +368,13 @@ export async function summary(force = false) {
         let need = Math.abs(gone), val = 0; for (const a of acts || []) { if (a.symbol !== sym || a.side !== (gone > 0 ? 'sell' : 'buy') || need <= 0) continue; const k = Math.min(need, +a.qty); val += k * +a.price; need -= k; }
         if (need < Math.abs(gone)) byDay[today] = (byDay[today] || 0) + Math.sign(gone) * val; if (need > 1e-9) note(`hud: ${sym}: ${need} Elis shares not found in today's fills`); }
       const keep = q - gone; if (Math.abs(keep) > 1e-9 && p) byDay[today] = (byDay[today] || 0) + keep * +p.current_price; } }
+  // past days: Elis is flat every night, so any Elis shares left open on a past day were closed by an order without Elis's tag
+  // (a replaced stop): price those closes from that day's broker fills (cached; past days never change)
+  const netD = {}; for (const f of fills) if (f.sym && f.day !== today) { const o = (netD[f.day] ||= {}); o[f.sym] = (o[f.sym] || 0) + (f.side === 'buy' ? f.qty : -f.qty); }
+  for (const [day, o] of Object.entries(netD)) for (const [sym, q] of Object.entries(o)) { if (Math.abs(q) < 1e-9) continue;
+    const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`, acts = (fillCache[date] ||= await api(BASE, `/v2/account/activities/FILL?date=${date}&page_size=100`).catch(() => null)) || [];
+    let need = Math.abs(q), val = 0; for (const a of acts) { if (a.symbol !== sym || a.side !== (q > 0 ? 'sell' : 'buy') || need <= 0) continue; const k = Math.min(need, +a.qty); val += k * +a.price; need -= k; }
+    byDay[day] = (byDay[day] || 0) + Math.sign(q) * val; if (need > 1e-9) note(`hud: ${date} ${sym}: ${need} Elis shares not found in that day's fills`); }
   const days = Object.keys(byDay).sort(); let cum = 0;
   const series = days.map(d => (cum += byDay[d], { d, pnl: Math.round(byDay[d] * 100) / 100, cum: Math.round(cum * 100) / 100 }));
   const trades = new Set(fills.filter(f => f.day).map(f => f.day)).size;
