@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as H from './elis-hunt.js';
 import * as ML from './elis-ml.js';
+import * as DAILY from './elis-daily.js';
 
 const DIR = path.join(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || './data', 'elis'), SF = path.join(DIR, `walk-state-v${H.SREV}c.json`);   // fresh state per data version (clean start on the new inputs)
 export const TARGET = 70, SWI = Math.max(0, [0.5, 1, 2].indexOf(+(process.env.ELIS_SWING || 1)));   // Owner: from here, +1% before -1%?
@@ -74,10 +75,13 @@ const roll = st => { const w = st.recent.slice(-12), n = w.reduce((a, x) => a + 
 const syncL = (st, phase) => { const last = st.recent.at(-1); Object.assign(L, { years: H.years(), phase: phase || L.phase, tested: st.charts, lastAcc: last?.acc ?? null, bestAvg: roll(st), bestMin: st.exams.at(-1)?.acc ?? null,
   recent: st.recent.map(x => x.acc), bestHist: (st.hist || []).map(a => ({ avg: a })), proven: !!st.proven, formula: `${st.formula.length} rules, ${st.cands.length} candidates under watch` }); };
 { const r0 = ML.lastReport(); if (r0) L.ml = { all: r0.avg.all, top10: r0.avg.top10, top5: r0.avg.top5, worst10: r0.worst.top10, exam10: r0.exam?.top10 ?? null }; }
+{ const d0 = DAILY.lastReport(); if (d0?.best) L.daily = { target: d0.best.target, k: d0.best.k, acc: d0.best.last12m.acc, acc24: d0.best.last24m.acc }; }
 syncL(state());
 export const live = () => ({ ...L, target: TARGET, at: Date.now(), labels: { big: 'accuracy, last 12 periods (blind calls)', small: 'last 2025 exam', last: 'THIS PERIOD', tested: 'CHARTS CALLED' } });
 export const setCollect = m => { L.collect = String(m || '').slice(0, 90); };
 export async function forever({ paused = () => false, log = () => {}, tell = async () => {} } = {}) {
+  if (!DAILY.lastReport() && H.years().length >= 3) { try { const st0 = state(); syncL(st0, 'daily picks: first run on the 10 collected years'); const dl = await DAILY.run({ log });
+    if (dl?.best) { L.daily = { target: dl.best.target, k: dl.best.k, acc: dl.best.last12m.acc, acc24: dl.best.last24m.acc }; log('walk: ' + DAILY.text(dl)); await tell(dl.best.last12m.acc >= TARGET && dl.best.last24m.acc >= TARGET ? 'Elis: 70% daily picks reached' : 'Elis daily picks result', DAILY.text(dl)); st0.dailyTold = true; save(st0); } } catch (e) { log('daily error: ' + e.message); } }
   for (;;) {
     try {
       if (paused()) { syncL(state(), 'paused for the market open'); await sleep(60e3); continue; }
@@ -91,6 +95,11 @@ export async function forever({ paused = () => false, log = () => {}, tell = asy
         syncL(st, 'training the ML engine on every variable (earlier years -> next year)'); const ml = await ML.run({ log }).catch(e => (log('ml error: ' + e.message), null));
         if (ml) { L.ml = { all: ml.avg.all, top10: ml.avg.top10, top5: ml.avg.top5, worst10: ml.worst.top10, exam10: ml.exam?.top10 ?? null }; log('walk: ' + ML.text(ml));
           if (ml.avg.top10 >= TARGET && ml.worst.top10 >= 65 && (ml.exam?.top10 ?? 0) >= TARGET && !st.mlProven) { st.mlProven = true; save(st); await tell('Elis: 70% reached on its most certain calls', ML.text(ml)); } }
+        // daily picks: learn every day, call the next day blind, keep only the most certain calls (Owner's daily 70% target)
+        syncL(st, 'daily picks: calling every day blind, learning after each day (2016 -> today)'); const dl = await DAILY.run({ log }).catch(e => (log('daily error: ' + e.message), null));
+        if (dl?.best) { L.daily = { target: dl.best.target, k: dl.best.k, acc: dl.best.last12m.acc, acc24: dl.best.last24m.acc }; log('walk: ' + DAILY.text(dl));
+          if (dl.best.last12m.acc >= TARGET && dl.best.last24m.acc >= TARGET && !st.dailyProven) { st.dailyProven = true; save(st); await tell('Elis: 70% daily picks reached', DAILY.text(dl)); }
+          else if (!st.dailyTold) { st.dailyTold = true; save(st); await tell('Elis daily picks result', DAILY.text(dl)); } }
         while (H.years().filter(y => y !== H.LOCK).map(y => y + ':' + H.versionOf(y)).join() === st.walkedOn) { syncL(st, `walked every year in (${ys.length}); waiting for the next year of data (${H.years().length} of 10 in)`); await sleep(5 * 60e3); }
         continue;
       }
