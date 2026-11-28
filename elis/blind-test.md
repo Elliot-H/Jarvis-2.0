@@ -1,166 +1,255 @@
 # Elis blind chart test
 
-Blind chart loop: learned 2024-01-02 to 2026-02-09, tuned with the why on 2025-05-28 to 2026-02-09, final grade on 2026-02-09 to 2026-11-27 (never touched while tuning).
-- Before tuning: 0% right on 0 calls (+0R/trade).
-- Tuning (1 rounds): nothing improved; stop -> 0%. Tune set reached 0%.
-- FINAL (unseen): 51.4% (+/-1.4) right on 5084 calls (calls on 96% of charts), 44.5% winning trades, -0.04R/trade. Coin flip 50%, "always up" 48.5%.
+Blind chart loop: learned 2024-01-02 to 2026-03-10, tuned with the why on 2025-06-17 to 2026-03-10, final grade on 2026-03-10 to 2026-11-27 (never touched while tuning).
+- Before tuning: 50.7% right on 5556 calls (-0.05R/trade).
+- Tuning (3 rounds): don't call when pattern = strong bear candle (why: 41% right over 147) -> 49.7%; don't call when move = rising (why: 46% right over 537) -> 50.4%; nothing improved; stop -> 50.4%. Tune set reached 50.4%.
+- FINAL (unseen): 48.8% (+/-1.6) right on 3560 calls (calls on 66.7% of charts), 43.1% winning trades, -0.06R/trade. Coin flip 50%, "always up" 49.2%.
 - The tune-set result carried over to unseen charts.
 
 ```json
 {
- "charts": 10304,
- "flatPct": 48.9,
- "callPct": 96,
- "accuracy": 51.4,
- "plusMinus": 1.4,
- "calls": 5084,
- "tradeAvgR": -0.04,
- "tradeWinPct": 44.5,
- "momentumAccuracy": 45.8,
- "momentumAvgR": -0.09,
- "upPct": 48.5,
+ "charts": 10968,
+ "flatPct": 48.7,
+ "callPct": 66.7,
+ "accuracy": 48.8,
+ "plusMinus": 1.6,
+ "calls": 3560,
+ "tradeAvgR": -0.06,
+ "tradeWinPct": 43.1,
+ "momentumAccuracy": 47.7,
+ "momentumAvgR": -0.08,
+ "upPct": 49.2,
  "byConfidence": {
   "55-60%": {
-   "calls": 3876,
-   "accuracy": 51.5
+   "calls": 2969,
+   "accuracy": 48.6
   },
   "60-65%": {
-   "calls": 1208,
-   "accuracy": 51
+   "calls": 591,
+   "accuracy": 49.7
   }
  },
  "bestReads": [
   {
-   "read": "move=rising & rvol=rvol 4-8",
-   "calls": 95,
-   "accuracy": 67.4
+   "read": "structure=range & pattern=spinning top",
+   "calls": 64,
+   "accuracy": 65.6
   },
   {
-   "read": "time=late morning & gap=gapped down",
-   "calls": 198,
-   "accuracy": 63.6
+   "read": "structure=range & volume=vol-strong",
+   "calls": 105,
+   "accuracy": 58.1
   },
   {
-   "read": "move=dropping & rvol=rvol 4-8",
+   "read": "structure=trend-against & time=first hour",
    "calls": 66,
-   "accuracy": 62.1
+   "accuracy": 57.6
   },
   {
-   "read": "move=rising hard & vwap=above VWAP",
-   "calls": 103,
-   "accuracy": 58.3
+   "read": "time=afternoon & gap=gapped up",
+   "calls": 84,
+   "accuracy": 54.8
   },
   {
-   "read": "time=late morning & gap=gapped up 3%+",
-   "calls": 42,
-   "accuracy": 57.1
+   "read": "candle=candle-with & market=market falling",
+   "calls": 109,
+   "accuracy": 53.2
   }
  ],
  "before": {
-  "charts": 10304,
-  "flatPct": 48.9,
-  "callPct": 0,
-  "accuracy": 0,
-  "plusMinus": 0,
-  "calls": 0,
-  "tradeAvgR": 0,
-  "tradeWinPct": 0,
-  "momentumAccuracy": 45.8,
-  "momentumAvgR": -0.09,
-  "upPct": 48.5,
-  "byConfidence": {},
-  "bestReads": []
- },
- "afterTuneOnly": {
-  "charts": 10304,
-  "flatPct": 48.9,
-  "callPct": 0,
-  "accuracy": 0,
-  "plusMinus": 0,
-  "calls": 0,
-  "tradeAvgR": 0,
-  "tradeWinPct": 0,
-  "momentumAccuracy": 45.8,
-  "momentumAvgR": -0.09,
-  "upPct": 48.5,
-  "byConfidence": {},
-  "bestReads": []
- },
- "afterRelearn": {
-  "charts": 10304,
-  "flatPct": 48.9,
-  "callPct": 96,
-  "accuracy": 51.4,
-  "plusMinus": 1.4,
-  "calls": 5084,
-  "tradeAvgR": -0.04,
-  "tradeWinPct": 44.5,
-  "momentumAccuracy": 45.8,
-  "momentumAvgR": -0.09,
-  "upPct": 48.5,
+  "charts": 10968,
+  "flatPct": 48.7,
+  "callPct": 99.1,
+  "accuracy": 50.7,
+  "plusMinus": 1.3,
+  "calls": 5556,
+  "tradeAvgR": -0.05,
+  "tradeWinPct": 44.6,
+  "momentumAccuracy": 47.7,
+  "momentumAvgR": -0.08,
+  "upPct": 49.2,
   "byConfidence": {
-   "55-60%": {
-    "calls": 3876,
-    "accuracy": 51.5
+   "65%+": {
+    "calls": 4918,
+    "accuracy": 51.3
    },
    "60-65%": {
-    "calls": 1208,
-    "accuracy": 51
+    "calls": 638,
+    "accuracy": 46.2
    }
   },
   "bestReads": [
    {
-    "read": "move=rising & rvol=rvol 4-8",
-    "calls": 95,
-    "accuracy": 67.4
+    "read": "market=market flat & news=no news",
+    "calls": 891,
+    "accuracy": 52.2
    },
    {
-    "read": "time=late morning & gap=gapped down",
-    "calls": 198,
-    "accuracy": 63.6
+    "read": "structure=range & news=no news",
+    "calls": 2002,
+    "accuracy": 52
    },
    {
-    "read": "move=dropping & rvol=rvol 4-8",
-    "calls": 66,
-    "accuracy": 62.1
+    "read": "structure=range & buzz=buzz-unknown",
+    "calls": 1367,
+    "accuracy": 51.4
    },
    {
-    "read": "move=rising hard & vwap=above VWAP",
-    "calls": 103,
-    "accuracy": 58.3
+    "read": "news=no news & newsType=none",
+    "calls": 413,
+    "accuracy": 50.1
    },
    {
-    "read": "time=late morning & gap=gapped up 3%+",
-    "calls": 42,
-    "accuracy": 57.1
+    "read": "market=market flat & buzz=buzz-unknown",
+    "calls": 658,
+    "accuracy": 47.6
    }
   ]
  },
- "tuneAcc": 0,
+ "afterTuneOnly": {
+  "charts": 10968,
+  "flatPct": 48.7,
+  "callPct": 83.8,
+  "accuracy": 50.7,
+  "plusMinus": 1.5,
+  "calls": 4523,
+  "tradeAvgR": -0.05,
+  "tradeWinPct": 44.4,
+  "momentumAccuracy": 47.7,
+  "momentumAvgR": -0.08,
+  "upPct": 49.2,
+  "byConfidence": {
+   "65%+": {
+    "calls": 4015,
+    "accuracy": 51.3
+   },
+   "60-65%": {
+    "calls": 508,
+    "accuracy": 46.1
+   }
+  },
+  "bestReads": [
+   {
+    "read": "market=market flat & news=no news",
+    "calls": 703,
+    "accuracy": 52.9
+   },
+   {
+    "read": "structure=range & news=no news",
+    "calls": 1705,
+    "accuracy": 51.9
+   },
+   {
+    "read": "structure=range & buzz=buzz-unknown",
+    "calls": 1100,
+    "accuracy": 51.2
+   },
+   {
+    "read": "news=no news & newsType=none",
+    "calls": 317,
+    "accuracy": 50.2
+   },
+   {
+    "read": "market=market flat & buzz=buzz-unknown",
+    "calls": 507,
+    "accuracy": 46.9
+   }
+  ]
+ },
+ "afterRelearn": {
+  "charts": 10968,
+  "flatPct": 48.7,
+  "callPct": 66.7,
+  "accuracy": 48.8,
+  "plusMinus": 1.6,
+  "calls": 3560,
+  "tradeAvgR": -0.06,
+  "tradeWinPct": 43.1,
+  "momentumAccuracy": 47.7,
+  "momentumAvgR": -0.08,
+  "upPct": 49.2,
+  "byConfidence": {
+   "55-60%": {
+    "calls": 2969,
+    "accuracy": 48.6
+   },
+   "60-65%": {
+    "calls": 591,
+    "accuracy": 49.7
+   }
+  },
+  "bestReads": [
+   {
+    "read": "structure=range & pattern=spinning top",
+    "calls": 64,
+    "accuracy": 65.6
+   },
+   {
+    "read": "structure=range & volume=vol-strong",
+    "calls": 105,
+    "accuracy": 58.1
+   },
+   {
+    "read": "structure=trend-against & time=first hour",
+    "calls": 66,
+    "accuracy": 57.6
+   },
+   {
+    "read": "time=afternoon & gap=gapped up",
+    "calls": 84,
+    "accuracy": 54.8
+   },
+   {
+    "read": "candle=candle-with & market=market falling",
+    "calls": 109,
+    "accuracy": 53.2
+   }
+  ]
+ },
+ "tuneAcc": 50.4,
  "steps": [
   {
    "change": "start",
-   "acc": 0,
-   "calls": 0
+   "acc": 49.3,
+   "calls": 3400
+  },
+  {
+   "change": "don't call when pattern = strong bear candle (why: 41% right over 147)",
+   "acc": 49.7,
+   "calls": 3253
+  },
+  {
+   "change": "don't call when move = rising (why: 46% right over 537)",
+   "acc": 50.4,
+   "calls": 2716
   },
   {
    "change": "nothing improved; stop",
-   "acc": 0,
-   "calls": 0
+   "acc": 50.4,
+   "calls": 2716
   }
  ],
  "settings": {
   "mode": "best",
   "minP": 0.55,
   "minN": 80,
-  "abstain": [],
+  "abstain": [
+   {
+    "k": "pattern",
+    "v": "strong bear candle"
+   },
+   {
+    "k": "move",
+    "v": "rising"
+   }
+  ],
   "drop": []
  },
- "learnedOn": "2024-01-02 to 2026-02-09",
- "tunedOn": "2025-05-28 to 2026-02-09",
- "testedOn": "2026-02-09 to 2026-11-27",
- "days": 703,
- "at": "2026-11-28T15:45:13.406Z",
+ "learnedOn": "2024-01-02 to 2026-03-10",
+ "tunedOn": "2025-06-17 to 2026-03-10",
+ "testedOn": "2026-03-10 to 2026-11-27",
+ "days": 730,
+ "at": "2026-11-28T15:49:50.135Z",
  "rev": 3
 }
 ```
